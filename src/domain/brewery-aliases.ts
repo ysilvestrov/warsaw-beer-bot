@@ -155,8 +155,8 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['magick road', 'magic road'],                          // 38912 Cherry & dark grapes -> bid 6919376, 4.2% = 4.2% (#814)
   ['maddriver', 'mad driver'],                            // 38899 Vermont IPA 7,5° -> bid 2498571, 0.5% = 0.5% (#814)
   // Curated brewery alias batch for cider makers (#826, #832).
-  ['vinkon', 'potega tradycji'],                          // 38958 Bursztynowy -> bid 2724671, 4.5% = 4.5% (#826)
-  ['cydr royal', 'royal apple'],                          // 192 Cydr Jabłko -> bid 5965384, 4.5% = 4.5% (#832)
+  ['vinkon', 'potega tradycji'],                          // 38958 Bursztynowy -> Potęga Tradycji Cydr Bursztynowy (bid 2724671, 4.5% = 4.5%) (#826)
+  ['cydr royal', 'royal apple'],                          // 192 Cydr Jabłko -> Royal Apple Cydr Jabłkowy (bid 5965384, 5.0% vs 4.5%) (#832)
 ];
 
 // normForm -> directly-paired forms. Built once at module load.

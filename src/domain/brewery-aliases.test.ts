@@ -453,5 +453,14 @@ describe('Curated brewery alias batch for cider producers Vinkon and Cydr Royal 
     expect(normalizeBrewery('CYDR ROYAL')).toBe('cydr royal');
     expect(normalizeBrewery('Royal Apple')).toBe('royal apple');
   });
+
+  test('cider alias keys do not cross-match confusable brands (#826, #832)', () => {
+    // CYDR ROYAL (Royal Apple) must not link to Cidre Royal (Royal Fruit Garden)
+    expect(aliasNeighbors('cydr royal')).not.toContain('royal fruit garden');
+    expect(aliasNeighbors('cydr royal')).not.toContain('cidre royal');
+    expect(aliasNeighbors('royal apple')).not.toContain('cidre royal');
+    expect(aliasNeighbors('royal apple')).not.toContain('royal fruit garden');
+    expect(aliasNeighbors('vinkon')).not.toContain('cydrownia');
+  });
 });
 

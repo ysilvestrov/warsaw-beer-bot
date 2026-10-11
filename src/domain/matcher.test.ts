@@ -1245,6 +1245,15 @@ describe('Curated brewery alias matching for cider producers Vinkon and Cydr Roy
     expect(breweryAliasesMatch(breweryAliases('Vinkon'), breweryAliases('Cydrownia'))).toBe(false);
   });
 
+  test('rejects confusable cider producers (#826, #832)', () => {
+    // CYDR ROYAL must not match Royal Fruit Garden (Cidre Royal producer)
+    expect(breweryAliasesMatch(breweryAliases('CYDR ROYAL'), breweryAliases('Royal Fruit Garden'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('CYDR ROYAL'), breweryAliases('Cidre Royal'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Cidre Royal'), breweryAliases('Royal Apple'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Vinkon'), breweryAliases('Royal Apple'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Vinkon'), breweryAliases('Royal Fruit Garden'))).toBe(false);
+  });
+
   test('matches catalog beers under curated aliases', () => {
     const cat: CatalogBeer[] = [
       c({ id: 201, brewery: 'Potęga Tradycji', name: 'Cydr Bursztynowy', abv: 4.5 }),

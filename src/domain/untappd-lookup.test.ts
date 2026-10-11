@@ -2417,9 +2417,26 @@ describe('#665 Czech grade lookup context', () => {
   });
 
   describe('Issue #826 and #832 cider producers Vinkon and Cydr Royal', () => {
-    test('matches Vinkon / Bursztynowy to Potęga Tradycji Cydr Bursztynowy via curated alias (#826)', async () => {
+    test('matches Vinkon / Cydr Bursztynowy to Potęga Tradycji Cydr Bursztynowy over perry siblings (#826)', async () => {
       const search = fakeSearch(() => [
-        { bid: 2724671, beer_name: 'Cydr Bursztynowy', brewery_name: 'Potęga Tradycji', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+        { bid: 2724671, beer_name: 'Cydr Bursztynowy', brewery_name: 'Potęga Tradycji', style: 'Cider - Sweet', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+        { bid: 2695461, beer_name: 'Perry Bursztynowy', brewery_name: 'Potęga Tradycji', style: 'Cider - Perry / Poiré', abv: 4.5, global_rating: 3.2, rating_count: 30 },
+        { bid: 5590305, beer_name: 'Perry Bursztynowy z Kwiatem Czarnego Bzu', brewery_name: 'Potęga Tradycji', style: 'Cider - Perry / Poiré', abv: 4.5, global_rating: 3.1, rating_count: 20 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Vinkon',
+        name: 'Cydr Bursztynowy',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(2724671);
+    });
+
+    test('matches Vinkon / Bursztynowy singleton hit to Potęga Tradycji Cydr Bursztynowy (#826)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 2724671, beer_name: 'Cydr Bursztynowy', brewery_name: 'Potęga Tradycji', style: 'Cider - Sweet', abv: 4.5, global_rating: 3.4, rating_count: 50 },
       ]);
       const out = await lookupBeer({
         brewery: 'Vinkon',
@@ -2434,7 +2451,7 @@ describe('#665 Czech grade lookup context', () => {
 
     test('rejects Vinkon / Bursztynowy candidate from an unrelated brewery (#826)', async () => {
       const search = fakeSearch(() => [
-        { bid: 9999991, beer_name: 'Cydr Bursztynowy', brewery_name: 'Cydrownia', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+        { bid: 9999991, beer_name: 'Cydr Bursztynowy', brewery_name: 'Cydrownia', style: 'Cider - Sweet', abv: 4.5, global_rating: 3.4, rating_count: 50 },
       ]);
       const out = await lookupBeer({
         brewery: 'Vinkon',
@@ -2445,14 +2462,16 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.kind).toBe('not_found');
     });
 
-    test('matches CYDR ROYAL / Cydr Jabłko to Royal Apple Cydr Jabłkowy via curated alias (#832)', async () => {
+    test('matches CYDR ROYAL / Cydr Jabłko to Royal Apple Cydr Jabłkowy over siblings (#832)', async () => {
       const search = fakeSearch(() => [
-        { bid: 5965384, beer_name: 'Cydr Jabłkowy', brewery_name: 'Royal Apple', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+        { bid: 5965384, beer_name: 'Cydr Jabłkowy', brewery_name: 'Royal Apple', style: 'Cider - Sweet', abv: 4.5, global_rating: 3.42, rating_count: 53 },
+        { bid: 5965385, beer_name: 'Cydr z Czarnej Porzeczki', brewery_name: 'Royal Apple', style: 'Cider - Other Fruit', abv: 4.5, global_rating: 3.2, rating_count: 20 },
+        { bid: 5965386, beer_name: 'Cydr z Wiśni', brewery_name: 'Royal Apple', style: 'Cider - Other Fruit', abv: 4.5, global_rating: 3.3, rating_count: 25 },
       ]);
       const out = await lookupBeer({
         brewery: 'CYDR ROYAL',
         name: 'Cydr Jabłko',
-        abv: 4.5,
+        abv: 5.0,
         search,
       });
       expect(out.kind).toBe('matched');
@@ -2460,14 +2479,27 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.result.bid).toBe(5965384);
     });
 
-    test('rejects CYDR ROYAL candidate from an unrelated cider producer (#832)', async () => {
+    test('rejects CYDR ROYAL candidate from confusable producer Royal Fruit Garden (#832)', async () => {
       const search = fakeSearch(() => [
-        { bid: 9999992, beer_name: 'Cydr Jabłkowy', brewery_name: 'Slow Flow Group (Smykan)', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+        { bid: 1000001, beer_name: 'Cidre Royal Jabłkowy', brewery_name: 'Royal Fruit Garden', style: 'Cider - Traditional / Apfelwein', abv: 5.0, global_rating: 3.5, rating_count: 500 },
       ]);
       const out = await lookupBeer({
         brewery: 'CYDR ROYAL',
         name: 'Cydr Jabłko',
-        abv: 4.5,
+        abv: 5.0,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('rejects CYDR ROYAL candidate from an unrelated cider producer (#832)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 9999992, beer_name: 'Cydr Jabłkowy', brewery_name: 'Slow Flow Group (Smykan)', style: 'Cider - Sweet', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'CYDR ROYAL',
+        name: 'Cydr Jabłko',
+        abv: 5.0,
         search,
       });
       expect(out.kind).toBe('not_found');
