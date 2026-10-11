@@ -5,6 +5,7 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { setJobState } from '../storage/job_state';
 import { saveStatusSnapshot } from '../storage/status_snapshots';
+import { recordHandlerFailure } from '../storage/handler_failures';
 import { collectStatusInputs } from './status-inputs';
 import { CANARY_STATE_KEY } from './enrich-orphans';
 import { TRIAGE_LAST_RESULT_KEY, TRIAGE_LAST_RUN_KEY } from './orphan-triage';
@@ -233,4 +234,23 @@ test('pause marker: unparseable, wrongly typed or future-dated is unreadable; ab
   expect([absent, garbage, literalNull, badSince, badStatus, future]).toEqual([
     [null, false], [null, true], [null, true], [null, true], [null, true], [null, true],
   ]);
+});
+
+test('handlerFailures: the last 24 hours from now, grouped; a row a millisecond older is out', () => {
+  const db = emptyDb();
+  // NOW is 2026-10-06T07:00:00.000Z, so the window starts at 2026-10-05T07:00:00.000Z.
+  recordHandlerFailure(db, { at: '2026-10-05T06:59:59.999Z', source: '/old', error: 'e' });
+  recordHandlerFailure(db, { at: '2026-10-05T07:00:00.000Z', source: '/beers', error: 'long' });
+  recordHandlerFailure(db, { at: '2026-10-06T06:00:00.000Z', source: '/beers', error: 'long' });
+  expect(collectStatusInputs(db, NOW, DATE, missing).handlerFailures).toEqual({
+    ok: true, value: [{ source: '/beers', error: 'long', count: 2 }],
+  });
+});
+
+test('handlerFailures: an unreadable table is a value, not an exception', () => {
+  const db = emptyDb();
+  db.exec('DROP TABLE handler_failures');
+  expect(collectStatusInputs(db, NOW, DATE, missing).handlerFailures).toEqual({
+    ok: false, reason: 'таблицю збоїв не прочитано',
+  });
 });

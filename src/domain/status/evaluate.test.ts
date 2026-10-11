@@ -1,4 +1,4 @@
-import { evaluateFest, evaluateInfra, evaluateTaps, evaluateUntappd, worst } from './evaluate';
+import { evaluateChannels, evaluateFest, evaluateInfra, evaluateTaps, evaluateUntappd, worst } from './evaluate';
 import { GREEN_HOST_PATCH, GREEN_METRICS, greenInputs, NOW, pastDays } from './test-inputs';
 import { GIB_BYTES } from './rules';
 import type { FestInputs } from './types';
@@ -203,6 +203,71 @@ describe('Інфраструктура', () => {
   it('an unreadable host summary is one "нема даних" line, and the upstream package rules stay quiet', () => {
     expect(evaluateInfra(greenInputs({ hostPatch: { ok: false, reason: 'збирач патчів мовчить' } }))).toEqual({
       subsystem: 'infra', colour: 'yellow', reasons: ['нема даних: збирач патчів мовчить'],
+    });
+  });
+});
+
+describe('evaluateChannels — handler failures (#836)', () => {
+  it('no failures leaves the subsystem green', () => {
+    expect(evaluateChannels(greenInputs())).toEqual({ subsystem: 'channels', colour: 'green', reasons: [] });
+  });
+
+  it('one group is a yellow reason with its count and error', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [
+      { source: '/beers', error: '400: Bad Request: message is too long', count: 6 },
+    ] } });
+    expect(evaluateChannels(i)).toEqual({
+      subsystem: 'channels', colour: 'yellow',
+      reasons: ['збої команд за добу: 6 — /beers ×6 (400: Bad Request: message is too long)'],
+    });
+  });
+
+  it('a single failure is already yellow', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [{ source: '/route', error: 'fetch failed', count: 1 }] } });
+    expect(evaluateChannels(i).reasons).toEqual(['збої команд за добу: 1 — /route ×1 (fetch failed)']);
+  });
+
+  it('three groups are all shown, without a remainder', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [
+      { source: '/beers', error: 'a', count: 3 },
+      { source: '/route', error: 'b', count: 2 },
+      { source: 'callback', error: 'c', count: 1 },
+    ] } });
+    expect(evaluateChannels(i).reasons).toEqual(['збої команд за добу: 6 — /beers ×3 (a), /route ×2 (b), callback ×1 (c)']);
+  });
+
+  it('beyond three groups the rest is summed as "+N інших"', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [
+      { source: '/beers', error: 'a', count: 5 },
+      { source: '/route', error: 'b', count: 4 },
+      { source: 'callback', error: 'c', count: 3 },
+      { source: '/pubs', error: 'd', count: 2 },
+      { source: 'text', error: 'e', count: 1 },
+    ] } });
+    expect(evaluateChannels(i).reasons).toEqual([
+      'збої команд за добу: 15 — /beers ×5 (a), /route ×4 (b), callback ×3 (c) +3 інших',
+    ]);
+  });
+
+  it('an error text of 60 characters is shown whole, 61 is cut to 59 plus an ellipsis', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [
+      { source: 'a', error: 'x'.repeat(60), count: 1 },
+      { source: 'b', error: 'y'.repeat(61), count: 1 },
+    ] } });
+    expect(evaluateChannels(i).reasons).toEqual([
+      `збої команд за добу: 2 — a ×1 (${'x'.repeat(60)}), b ×1 (${'y'.repeat(59)}…)`,
+    ]);
+  });
+
+  it('an empty error text shows no brackets', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [{ source: '/pubs', error: '', count: 2 }] } });
+    expect(evaluateChannels(i).reasons).toEqual(['збої команд за добу: 2 — /pubs ×2']);
+  });
+
+  it('an unreadable table is "нема даних", never green', () => {
+    const i = greenInputs({ handlerFailures: { ok: false, reason: 'таблицю не прочитано' } });
+    expect(evaluateChannels(i)).toEqual({
+      subsystem: 'channels', colour: 'yellow', reasons: ['нема даних: збої команд — таблицю не прочитано'],
     });
   });
 });

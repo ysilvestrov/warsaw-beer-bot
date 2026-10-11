@@ -47,6 +47,7 @@ export function greenInputs(overrides: Partial<StatusInputs> = {}): StatusInputs
     triage: { ranToday: true, line: 'Тріаж: 7 рядків', saturated: null },
     unlock: { ranToday: true, withheld: [] },
     bugReports: null,
+    handlerFailures: { ok: true, value: [] },
     disk: { ok: true, value: { bytesAvailable: 32 * GIB_BYTES, inodesFree: 2_000_000, pendingRuns: 0 } },
     hostPatch: { ok: true, value: GREEN_HOST_PATCH },
     upstream: GREEN_UPSTREAM,

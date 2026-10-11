@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { buildBugReportLine, dailyStatus, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
+import { buildBugReportLine, buildDailyReport, dailyStatus, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
 import { getJobState, setJobState } from '../storage/job_state';
 import { insertReport, markDone } from '../storage/bug_reports';
 import { recordMatchUsage } from '../storage/api_usage';
 import { saveStatusSnapshot } from '../storage/status_snapshots';
+import { recordHandlerFailure } from '../storage/handler_failures';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
@@ -368,4 +369,13 @@ test('a failed fallback send from yesterday does not release today\'s claim', as
   await yesterday;                                   // yesterday's send fails after today's claim
   await dailyStatus(deps);                           // must still see today as sent
   expect(sent.map((t) => t.startsWith('🔴 Статус бота — 2026-10-06 09:00 · звіт не зібрано: '))).toEqual([true]);
+});
+
+test('building the report prunes handler failures older than 90 days', () => {
+  const db = emptyDb();
+  // The report date is 2026-10-06; 90 days back is 2026-07-08.
+  recordHandlerFailure(db, { at: '2026-07-07T23:59:59.999Z', source: '/old', error: 'e' });
+  recordHandlerFailure(db, { at: '2026-07-08T00:00:00.000Z', source: '/kept', error: 'e' });
+  buildDailyReport(db, new Date('2026-10-06T07:00:00.000Z'), '2026-10-06', missingMonitor);
+  expect(db.prepare('SELECT source FROM handler_failures ORDER BY id').all()).toEqual([{ source: '/kept' }]);
 });

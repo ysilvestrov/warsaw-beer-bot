@@ -4,6 +4,7 @@ import type { BugReportSummary } from '../domain/bug-report-types';
 import type { StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
 import { saveStatusSnapshot, pruneStatusSnapshots } from '../storage/status_snapshots';
+import { pruneHandlerFailures } from '../storage/handler_failures';
 import { warsawDateAndHour } from '../domain/warsaw-time';
 import { evaluateAll } from '../domain/status/evaluate';
 import { computeTrends } from '../domain/status/trends';
@@ -102,6 +103,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
   const evaluation = evaluateAll(inputs);
   saveStatusSnapshot(db, { date: dateKey, metrics: inputs.metrics, colours: evaluation.subsystems, createdAt: now.toISOString() });
   pruneStatusSnapshots(db, shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays));
+  pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
   // The pause is a channel-health fact (🔴 Канали), so the users section shows activity only.
   const bugReportLine = opts.repo && inputs.bugReports
     ? buildBugReportLine(inputs.bugReports.summary, null, opts.repo)

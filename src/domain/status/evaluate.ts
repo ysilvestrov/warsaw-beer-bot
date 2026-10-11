@@ -144,6 +144,23 @@ export function evaluateOrphans(i: StatusInputs): Evaluation {
   return evaluation('orphans', f);
 }
 
+// #836. A text cut for the report line; the stored text is already capped at 200 code points.
+const FAILURE_GROUPS_SHOWN = 3;
+const FAILURE_ERROR_SHOWN = 60;
+function handlerFailureFindings(input: StatusInputs['handlerFailures']): Finding[] {
+  if (!input.ok) return [yellow(`нема даних: збої команд — ${input.reason}`)];
+  const groups = input.value;
+  if (groups.length === 0) return [];
+  const sum = (gs: typeof groups) => gs.reduce((n, g) => n + g.count, 0);
+  const shown = groups.slice(0, FAILURE_GROUPS_SHOWN).map((g) => {
+    const chars = [...g.error];
+    const error = chars.length > FAILURE_ERROR_SHOWN ? `${chars.slice(0, FAILURE_ERROR_SHOWN - 1).join('')}…` : g.error;
+    return `${g.source} ×${g.count}${error === '' ? '' : ` (${error})`}`;
+  });
+  const rest = sum(groups.slice(FAILURE_GROUPS_SHOWN));
+  return [yellow(`збої команд за добу: ${sum(groups)} — ${shown.join(', ')}${rest > 0 ? ` +${rest} інших` : ''}`)];
+}
+
 // Stage 1 sees only the bug-report worker; /match and MCP error counters arrive in stage 2.
 export function evaluateChannels(i: StatusInputs): Evaluation {
   const f: Finding[] = [];
@@ -156,6 +173,7 @@ export function evaluateChannels(i: StatusInputs): Evaluation {
     const review = [...summary.needsReview, ...summary.failed];
     if (review.length > 0) f.push(yellow(`скарги потребують перевірки: ${review.map((id) => `R-${id}`).join(', ')}`));
   }
+  f.push(...handlerFailureFindings(i.handlerFailures));
   return evaluation('channels', f);
 }
 

@@ -1,5 +1,6 @@
 import type { StatusMetrics } from '../../storage/stats';
 import type { BugReportSummary } from '../bug-report-types';
+import type { HandlerFailureGroup } from '../../storage/handler_failures';
 
 // Daily status traffic light (spec 2026-10-06-daily-status-traffic-light-design.md).
 export type Colour = 'green' | 'yellow' | 'red';
@@ -59,6 +60,7 @@ export interface StatusInputs {
   profileOpenUntil: string | null;
   triage: { ranToday: boolean; line: string | null; saturated: string | null; unreadable?: boolean }; // unreadable = today's result exists but cannot be parsed
   unlock: { ranToday: boolean; withheld: { beerId: number; issueNumber: number }[] | null };  // null = today's result exists but is unreadable
+  handlerFailures: Avail<HandlerFailureGroup[]>; // #836: last 24 h, most frequent first
   bugReports: { summary: BugReportSummary; paused: { since: string; status: number } | null; pausedUnreadable?: boolean } | null; // null = no repo configured
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
   hostPatch: Avail<HostPatchFacts>; // #469 stage 2: the root collector's summary

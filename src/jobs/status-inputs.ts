@@ -3,6 +3,7 @@ import type { Avail, FestInputs, StatusInputs } from '../domain/status/types';
 import { collectStatus } from '../storage/stats';
 import { getJobState } from '../storage/job_state';
 import { summarizeSince } from '../storage/bug_reports';
+import { handlerFailuresSince } from '../storage/handler_failures';
 import { listStatusSnapshots } from '../storage/status_snapshots';
 import { currentOrNextFests } from '../storage/fests';
 import { parseIsoInstant, shiftDate } from '../domain/status/helpers';
@@ -117,6 +118,15 @@ function readHostPatchInput(now: Date, opts: StatusInputOptions): StatusInputs['
 
 // The only place the morning report reads the DB, job_state and files. Every source that can be
 // missing comes back as a value the evaluators can colour, never as an exception.
+// #836: a table that cannot be read colours «Канали» yellow instead of taking the report down.
+function readHandlerFailures(db: DB, now: Date): StatusInputs['handlerFailures'] {
+  try {
+    return { ok: true, value: handlerFailuresSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()) };
+  } catch {
+    return { ok: false, reason: 'таблицю збоїв не прочитано' };
+  }
+}
+
 export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: StatusInputOptions): StatusInputs {
   const metrics = collectStatus(db, now);
   const diag = readTestDiagnostics(now, opts.testDiagnosticsPath, opts.testDiagnosticsUid);
@@ -135,6 +145,7 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
     profileOpenUntil: getJobState(db, 'untappd_profile_http_open_until'),
     triage: readTriage(db, dateKey),
     unlock: readUnlock(db, dateKey),
+    handlerFailures: readHandlerFailures(db, now),
     bugReports: opts.repo
       ? { summary: summarizeSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()), ...readPaused(db, now) }
       : null,
