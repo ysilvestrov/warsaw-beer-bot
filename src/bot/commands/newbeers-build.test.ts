@@ -7,7 +7,7 @@ import { upsertMatch } from '../../storage/match_links';
 import { createTranslator } from '../../i18n';
 import { setFilters } from '../../storage/user_filters';
 import { ensureProfile } from '../../storage/user_profiles';
-import { buildNewbeersMessage, filterPubsByQuery } from './newbeers-build';
+import { buildNewbeersMessage, candidateFromTap, filterPubsByQuery } from './newbeers-build';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -329,4 +329,59 @@ describe('filterPubsByQuery', () => {
   test('unknown query returns empty array', () => {
     expect(filterPubsByQuery(allPubs, 'xxxxxx')).toEqual([]);
   });
+});
+
+describe('candidateFromTap (#835)', () => {
+  const tap = {
+    id: 1, snapshot_id: 1, tap_number: 9, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
+    abv: 4.5, ibu: null, u_rating: 3.9, beer_id: 55, untappd_id: 7001,
+    style: 'Ahhhh the old country. Where the grass is green and the pints are cream.',
+    catalog_style: 'Stout - Irish Dry',
+  };
+
+  test('maps every field; a description gives way to the catalogue style', () => {
+    expect(candidateFromTap(tap, 'White Crow')).toEqual({
+      beer_id: 55,
+      untappd_id: 7001,
+      display: 'Garage Beer Co. The Quiet Man',
+      brewery_norm: 'garage beer',
+      name_norm: 'the quiet man',
+      style: 'Stout - Irish Dry',
+      abv: 4.5,
+      rating: 3.9,
+      pub_name: 'White Crow',
+    });
+  });
+
+  test('a plain style is kept as the pub wrote it', () => {
+    expect(candidateFromTap({ ...tap, style: 'Dry Stout (nitro)' }, 'White Crow').style).toBe('Dry Stout (nitro)');
+  });
+
+  test('a description without a catalogue style gives no style', () => {
+    expect(candidateFromTap({ ...tap, catalog_style: null }, 'White Crow').style).toBeNull();
+  });
+
+  test('a tap without a brewery shows the bare beer name', () => {
+    expect(candidateFromTap({ ...tap, brewery_ref: null }, 'White Crow')).toMatchObject({
+      display: 'The Quiet Man', brewery_norm: '',
+    });
+  });
+});
+
+test('#835 /newbeers prints the catalogue style for a tap whose style field holds a description', () => {
+  const db = fresh();
+  const pubId = upsertPub(db, { slug: 'wc', name: 'White Crow', address: null, lat: null, lon: null, city: 'warszawa' });
+  const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
+  const beerId = seedBeer(db, {
+    untappd_id: 7001, name: 'The Quiet Man', brewery: 'Garage Beer Co.', style: 'Stout - Irish Dry',
+    abv: 4.5, rating_global: 3.9, normalized_name: 'the quiet man', normalized_brewery: 'garage beer',
+  });
+  upsertMatch(db, 'Garage Beer Co.', 'The Quiet Man', beerId, 1.0);
+  insertTaps(db, snap, [{ tap_number: 9, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
+    abv: 4.5, ibu: null, style: 'Ahhhh the old country. Where the grass is green and the pints are cream.', u_rating: 3.9 }]);
+  ensureProfile(db, 1);
+  const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t: createTranslator('uk'), city: 'warszawa' });
+  expect(out).toMatchObject({ kind: 'ok', html: expect.stringContaining('</b></a> • Stout - Irish Dry  ') });
+  expect(out).toMatchObject({ kind: 'ok', html: expect.not.stringContaining('Ahhhh') });
+  db.close();
 });

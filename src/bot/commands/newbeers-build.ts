@@ -1,6 +1,7 @@
 import type { DB } from '../../storage/db';
 import type { Locale, Translator } from '../../i18n/types';
-import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/snapshots';
+import { latestSnapshotsPerPub, tapsForSnapshotWithBeer, type TapWithBeer } from '../../storage/snapshots';
+import { displayStyle } from '../../domain/display-style';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { getFilters } from '../../storage/user_filters';
 import { filterInteresting, type FilterOpts } from '../../domain/filters';
@@ -30,6 +31,25 @@ export function filterPubsByQuery(pubs: PubRow[], query: string): PubRow[] {
 
   if (nameMatches.length === 0) return combined;
   return combined.length === 1 ? combined : nameMatches;
+}
+
+/**
+ * One tap as a /newbeers and /route candidate. #835: the printed style goes through displayStyle —
+ * a description typed into the style field is replaced by the catalogue style. Filtering happens
+ * BEFORE this, on the raw tap, and is not affected.
+ */
+export function candidateFromTap(tap: TapWithBeer, pubName: string): CandidateTap {
+  return {
+    beer_id: tap.beer_id,
+    untappd_id: tap.untappd_id,
+    display: tap.brewery_ref ? `${tap.brewery_ref} ${tap.beer_ref}`.trim() : tap.beer_ref,
+    brewery_norm: normalizeBrewery(tap.brewery_ref ?? ''),
+    name_norm: normalizeName(tap.beer_ref),
+    style: displayStyle(tap.style, tap.catalog_style),
+    abv: tap.abv,
+    rating: tap.u_rating,
+    pub_name: pubName,
+  };
 }
 
 export interface NewbeersDeps {
@@ -88,18 +108,7 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
     });
     for (const tap of good) {
       if (isOntapEmptyTapRef(tap.beer_ref)) continue;
-      const display = tap.brewery_ref ? `${tap.brewery_ref} ${tap.beer_ref}`.trim() : tap.beer_ref;
-      candidates.push({
-        beer_id: tap.beer_id,
-        untappd_id: tap.untappd_id,
-        display,
-        brewery_norm: normalizeBrewery(tap.brewery_ref ?? ''),
-        name_norm: normalizeName(tap.beer_ref),
-        style: tap.style,
-        abv: tap.abv,
-        rating: tap.u_rating,
-        pub_name: pub.name,
-      });
+      candidates.push(candidateFromTap(tap, pub.name));
     }
   }
 

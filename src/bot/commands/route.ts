@@ -5,7 +5,7 @@ import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/sn
 import { triedBeerIds } from '../../storage/untappd_had';
 import { getFilters } from '../../storage/user_filters';
 import { filterInteresting, type FilterOpts, type TapView } from '../../domain/filters';
-import { normalizeBrewery, normalizeName } from '../../domain/normalize';
+import { candidateFromTap } from './newbeers-build';
 import {
   buildRoute,
   haversineMeters,
@@ -85,20 +85,7 @@ routeCommand.command('route', async (ctx) => {
       lon: pub.lon,
       interesting: new Set(good.map((t) => t.beer_id!) as number[]),
     });
-    interestingByPub.set(
-      pub.id,
-      good.map((t) => ({
-        beer_id: t.beer_id,
-        untappd_id: t.untappd_id,
-        display: t.brewery_ref ? `${t.brewery_ref} ${t.beer_ref}`.trim() : t.beer_ref,
-        brewery_norm: normalizeBrewery(t.brewery_ref ?? ''),
-        name_norm: normalizeName(t.beer_ref),
-        style: t.style,
-        abv: t.abv,
-        rating: t.u_rating,
-        pub_name: pub.name,
-      })),
-    );
+    interestingByPub.set(pub.id, good.map((t) => candidateFromTap(t, pub.name)));
   }
 
   if (!routePubs.length) {
