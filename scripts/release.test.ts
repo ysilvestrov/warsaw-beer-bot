@@ -134,12 +134,15 @@ describe('runtime base digest', () => {
   const D1 = `sha256:${'a'.repeat(64)}`;
   const D2 = `sha256:${'b'.repeat(64)}`;
 
+  // The test's own fact, not today's digest: a Dependabot base bump must not turn it red.
+  // The real Dockerfile has exactly one slim FROM, pinned by a literal sha256 digest, and the
+  // helper returns exactly that literal.
   it('is read from the literal in the runtime FROM of the real Dockerfile', () => {
-    const literal = readFileSync(resolve(root, 'deploy/image/Dockerfile'), 'utf8')
-      .split('\n').filter((l) => l.startsWith('FROM mirror.gcr.io/library/node:24-bookworm-slim@'))
-      .map((l) => l.split('@')[1]);
-    expect(literal).toEqual(['sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20']);
-    expect(run(readFileSync(resolve(root, 'deploy/image/Dockerfile'), 'utf8'))).toEqual([0, `${literal[0]}\n`, '']);
+    const dockerfile = readFileSync(resolve(root, 'deploy/image/Dockerfile'), 'utf8');
+    const literal = dockerfile.split('\n').filter((l) => /^FROM \S*-slim[@:\s]/.test(l))
+      .map((l) => l.split(/\s+/)[1].split('@')[1]);
+    expect(literal).toEqual([expect.stringMatching(/^sha256:[0-9a-f]{64}$/)]);
+    expect(run(dockerfile)).toEqual([0, `${literal[0]}\n`, '']);
   });
 
   it('is the one pinned slim FROM, whatever comes after it on the line', () => {
