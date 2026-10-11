@@ -190,6 +190,24 @@ describe('runRefreshPipeline', () => {
     expect(failures).toEqual([boom]);
   });
 
+  test('a post-run failure notice that cannot be sent is not a second failure and not «refresh failed»', async () => {
+    const texts: string[] = [];
+    const failures: unknown[] = [];
+    const boom = new Error('send failed');
+    const notify = async (text: string) => {
+      texts.push(text);
+      return text === 'refresh.postrun_failed' ? Promise.reject(new Error('400: message to edit not found')) : undefined;
+    };
+    await expect(runRefreshPipeline({
+      run: async () => {},
+      notify, t: tStub, log: silentLog,
+      postRun: async () => { throw boom; },
+      onFailure: (e) => { failures.push(e); },
+    })).resolves.toBeUndefined();
+    expect(texts).toEqual(['refresh.done', 'refresh.postrun_failed']);
+    expect(failures).toEqual([boom]);
+  });
+
   test('a successful run never calls onFailure', async () => {
     const { notify } = makeNotify();
     const failures: unknown[] = [];
