@@ -349,7 +349,8 @@ export const V46_CANONICALIZE_WFP22_SQL = `
      AND feed_path = '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity';
 `;
 
-const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
+// Exported for scripts/migrations/contract-lint.ts, which reads the SQL of the migrations a PR adds.
+export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 1,
     sql: `

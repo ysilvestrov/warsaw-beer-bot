@@ -20,6 +20,8 @@
     "scripts/release.test.ts",
     "scripts/ops.test.ts",
     "scripts/autodeploy/**/*",
+    // Migration contract lint (spec 2026-10-11 §6.5).
+    "scripts/migrations/**/*",
     "scripts/ai-review/**/*",
     "scripts/ai-pr-review.ts",
     "scripts/ai-pr-review.test.ts",
