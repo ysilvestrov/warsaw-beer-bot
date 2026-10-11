@@ -88,5 +88,37 @@ class Map(unittest.TestCase):
                 self.assertIsNone(ins.installed_path(path))
 
 
+
+class Digestable(unittest.TestCase):
+    """installed.digestable: what `wbb-release digest` (root) may hash for the operator (plan C-core "Рішення" п.3)."""
+
+    def test_installed_sudoers_files_and_the_litestream_config(self):
+        for path in ('/etc/sudoers.d/wbb-release', '/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/A_b-9',
+                     '/etc/litestream.yml'):
+            with self.subTest(path):
+                self.assertIs(ins.digestable(path), True)
+
+    def test_anything_else_is_refused(self):
+        for path in ('/etc/shadow', '/etc/sudoers', '/etc/sudoers.d', '/etc/sudoers.d/', '/etc/sudoers.d/..',
+                     '/etc/sudoers.d/.', '/etc/sudoers.d/../shadow', '/etc/sudoers.d/.hidden', '/etc/sudoers.d/a.b',
+                     '/etc/sudoers.d/a~', '/etc/sudoers.d/a b', '/etc/sudoers.d/a\n', '/etc/sudoers.d/sub/x',
+                     '/etc//sudoers.d/x', 'etc/sudoers.d/x', '/etc/sudoers.d/wbb-relеase', '/etc/litestream.yml/',
+                     '/etc/litestream.yml.bak', '/etc/./litestream.yml', '/usr/local/libexec/wbb-release',
+                     '/usr/local/lib/wbb-release/tick.py', '', None, b'/etc/litestream.yml'):
+            with self.subTest(path):
+                self.assertIs(ins.digestable(path), False)
+
+    def test_every_digestable_destination_is_one_the_repo_installs_there(self):
+        """The helper cannot see the repo: the rule it applies must only ever admit images of installed_path."""
+        self.assertIn('/etc/litestream.yml', ins.COPIES.values())
+        self.assertEqual(ins.installed_path('deploy/sudoers.d/A_b-9'), '/etc/sudoers.d/A_b-9')
+
+    def test_every_installed_copy_root_must_digest_is_digestable(self):
+        """What the operator may be unable to read (sudoers 0440; the litestream config, if closed) has the root path."""
+        dests = [ins.installed_path(f) for f in repo_files('deploy')]
+        self.assertEqual(sorted(d for d in dests if d is not None and ins.digestable(d)),
+                         ['/etc/litestream.yml', '/etc/sudoers.d/warsaw-beer-bot'])
+
+
 if __name__ == '__main__':
     unittest.main()

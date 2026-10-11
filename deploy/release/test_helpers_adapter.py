@@ -3,6 +3,7 @@
 Plan: docs/superpowers/plans/2026-10/2026-10-10-wbb-artifact-deployment-2c-periphery-b-core.md, Task 2.
 Nothing here runs sudo or gh, or reaches GitHub: the API is test_github_trust's scripted one.
 """
+import errno
 import json
 import os
 import shutil
@@ -527,6 +528,112 @@ class RealClone(unittest.TestCase):
         shutil.rmtree(self.repo)
         with self.assertRaisesRegex(HelperError, '^git ls-tree: exit 128: fatal'):
             self.h.installed_stale(('deploy/db-snapshot.sh',))
+
+
+
+class RootDigest(unittest.TestCase):
+    """installed_stale on a copy the operator cannot read: root's `digest` instead (plan C-core "Рішення" п.3).
+
+    A real clone; the sudoers copy sits at its production path, where a scripted os.open answers EACCES, and only
+    `sudo` goes to a FakeRun — git runs for real."""
+    SUDOERS = '/etc/sudoers.d/wbb-release'
+    BODY = b'ysi ALL=(root) NOPASSWD: /usr/local/libexec/wbb-release verify --sha *\n'
+    # sha256 of BODY, as root would print it
+    RIGHT = '14c604660f542eaa5208e4fc6590e8b233c13251c9345df3674a146dda3f6782'
+
+    def setUp(self):
+        self.data = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.data)
+        self.repo = os.path.join(self.data, 'repo')
+        self.readable = os.path.join(self.data, 'installed-sudoers')
+        os.makedirs(os.path.join(self.repo, 'deploy', 'sudoers.d'))
+        subprocess.run(['git', 'init', '-q', self.repo], check=True)
+        for path, data in (('deploy/sudoers.d/wbb-release', self.BODY), ('deploy/db-snapshot.sh', b'#!/bin/sh\n')):
+            with open(os.path.join(self.repo, path), 'wb') as f:
+                f.write(data)
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'one')
+        git(self.repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        self.sudo = FakeRun()
+        self.dest = {'deploy/sudoers.d/wbb-release': self.SUDOERS, 'deploy/db-snapshot.sh': '/usr/local/bin/wbb-db-snapshot'}
+        self.denied = {self.SUDOERS, '/usr/local/bin/wbb-db-snapshot'}
+        self.h = hpa.RealHelpers(self.data, run=self.route, locate=self.dest.get, lib_dir=os.path.join(self.data, 'lib'))
+
+    def route(self, argv, *, timeout, **kw):
+        return (self.sudo if argv[0] == 'sudo' else bounded.run)(argv, timeout=timeout, **kw)
+
+    def answer(self, *answers):
+        argv = ('sudo', '-n', '/usr/local/libexec/wbb-release', 'digest', '--path', self.SUDOERS)
+        self.sudo.answers[argv] = list(answers)
+
+    def stale(self, patterns=('deploy/sudoers.d/**',)):
+        real_open = os.open
+
+        def fake_open(path, flags, *args):
+            if path in self.denied:
+                raise PermissionError(errno.EACCES, 'Permission denied', path)
+            return real_open(path, flags, *args)
+        with mock.patch.object(hpa.os, 'open', fake_open):
+            return self.h.installed_stale(patterns)
+
+    def test_root_s_digest_of_the_right_copy_is_current(self):
+        self.answer(done(0, f'DIGEST {self.SUDOERS} {self.RIGHT} uid 0 mode 0440\n'.encode()))
+        self.assertIsNone(self.stale())
+        self.assertEqual(self.sudo.calls, [(['sudo', '-n', '/usr/local/libexec/wbb-release', 'digest', '--path',
+                                             self.SUDOERS], 30)])
+
+    def test_another_digest_is_stale(self):
+        self.answer(done(0, f'DIGEST {self.SUDOERS} {"0" * 64} uid 0 mode 0440\n'.encode()))
+        self.assertEqual(self.stale(), 'STALE: 1 installed file(s) differ from origin/main:\n  deploy/sudoers.d/wbb-release')
+
+    def test_a_right_digest_of_another_owner_or_open_to_writes_is_stale(self):
+        for line in ('uid 1000 mode 0440', 'uid 0 mode 0460', 'uid 0 mode 0442'):
+            with self.subTest(line):
+                self.answer(done(0, f'DIGEST {self.SUDOERS} {self.RIGHT} {line}\n'.encode()))
+                self.assertEqual(self.stale(), 'STALE: 1 installed file(s) differ from origin/main:\n'
+                                               f'  deploy/sudoers.d/wbb-release ({self.SUDOERS} is not 0-owned and '
+                                               'closed to group/other writes)')
+
+    def test_absent_is_not_installed(self):
+        self.answer(done(0, f'ABSENT {self.SUDOERS}\n'.encode()))
+        self.assertEqual(self.stale(), 'STALE: 1 installed file(s) differ from origin/main:\n'
+                                       f'  deploy/sudoers.d/wbb-release (not installed at {self.SUDOERS})')
+
+    def test_a_helper_that_did_not_answer_is_cannot_assess(self):
+        for code, out, err in ((70, b'', b'Traceback\n'), (75, b'', b'busy\n'), (1, b'', b'sudo: a password is required\n'),
+                               (2, b'', f'REFUSED: {self.SUDOERS}: a symlink, not an installed copy\n'.encode()),
+                               (64, b'', b'usage\n'), (-9, b'', b'')):
+            with self.subTest(code):
+                self.answer(done(code, out, err))
+                with self.assertRaisesRegex(HelperError, f'^wbb-release digest {self.SUDOERS}: exit {code}: '):
+                    self.stale()
+
+    def test_an_answer_that_is_not_about_this_path_is_cannot_assess(self):
+        for out in (f'DIGEST /etc/sudoers.d/other {self.RIGHT} uid 0 mode 0440\n', 'ABSENT /etc/litestream.yml\n',
+                    f'DIGEST {self.SUDOERS} {self.RIGHT} uid 0 mode 440\n', f'DIGEST {self.SUDOERS} {self.RIGHT[:63]} uid 0 mode 0440\n',
+                    f'DIGEST {self.SUDOERS} {self.RIGHT} uid 0 mode 0440\nDIGEST {self.SUDOERS} {self.RIGHT} uid 0 mode 0440\n',
+                    '', 'OK\n'):
+            with self.subTest(out):
+                self.answer(done(0, out.encode()))
+                with self.assertRaisesRegex(HelperError, f'^wbb-release digest {self.SUDOERS}: unexpected answer'):
+                    self.stale()
+
+    def test_a_readable_copy_never_asks_root(self):
+        self.dest['deploy/sudoers.d/wbb-release'] = self.readable
+        with open(self.readable, 'wb') as f:
+            f.write(self.BODY)
+        os.chmod(self.readable, 0o440)
+        h = hpa.RealHelpers(self.data, run=self.route, locate=self.dest.get, lib_dir=os.path.join(self.data, 'lib'),
+                            installed_owner=os.geteuid())
+        self.h = h
+        self.assertIsNone(self.stale())
+        self.assertEqual(self.sudo.calls, [])
+
+    def test_an_unreadable_copy_root_may_not_digest_is_cannot_assess(self):
+        """Only sudoers and the litestream config go to root; any other EACCES stays what it was."""
+        with self.assertRaisesRegex(HelperError, '^/usr/local/bin/wbb-db-snapshot: PermissionError: Permission denied$'):
+            self.stale(('deploy/db-snapshot.sh',))
+        self.assertEqual(self.sudo.calls, [])
 
 
 if __name__ == '__main__':

@@ -7,8 +7,11 @@ here, so a path is never spelled twice.
 installed_path(repo_path) is the map behind Helpers.installed_stale: for a file of the repo matching one of
 gates.INSTALLED_COPIES it names the installed copy that must be byte-identical to it in main, or None when the
 file has no installed copy (a test module, a template a human fills in with secrets).
+
+digestable(path) is what the root helper's `digest` may hash for the operator (plan C-core "Рішення" п.3).
 """
 import posixpath
+import re
 
 # The controller's code (root:root, 0755 dirs / 0644 files) and its two entry points (stage В writes both).
 LIB_DIR = '/usr/local/lib/wbb-release'
@@ -27,6 +30,7 @@ DB_PATH = '/var/lib/warsaw-beer-bot/bot.db'
 BOOT_ID_FILE = '/proc/sys/kernel/random/boot_id'
 UNIT_DIR = '/etc/systemd/system'
 SUDOERS_DIR = '/etc/sudoers.d'
+LITESTREAM_CONFIG = '/etc/litestream.yml'
 # The operator's own directories, as merge-deploy names them: ${XDG_DATA_HOME:-$HOME/.local/share}/<APP_DIR>
 # (repo/ — the private clone, artifacts/ — downloaded ZIPs) and ${XDG_STATE_HOME:-$HOME/.local/state}/<APP_DIR>
 # (lock, PAUSED, tick-state.json, deploy-state.json).
@@ -40,7 +44,7 @@ COPIES = {
     'deploy/installed-current.sh': '/usr/local/bin/wbb-installed-current',
     'deploy/db-snapshot.sh': SNAPSHOT_BIN,
     'deploy/trial-migrate.cjs': '/usr/local/bin/wbb-trial-migrate',
-    'deploy/litestream.yml': '/etc/litestream.yml',
+    'deploy/litestream.yml': LITESTREAM_CONFIG,
     'scripts/ops/host_patch_collect.py': '/usr/local/libexec/wbb-host-patch-collect',
     'scripts/ops/reboot_request.py': '/usr/local/libexec/wbb-reboot-request',
     # The control plane's entry points and the tick's failure notice (plan C-core "Рішення" п.5, п.7).
@@ -76,3 +80,26 @@ def installed_path(repo_path):
     if head == 'deploy' and name.endswith(UNIT_SUFFIXES):
         return posixpath.join(UNIT_DIR, name)
     return None
+
+
+# A sudoers.d name sudo reads: no dot (sudo skips such files, and it rules out `.`/`..`), no `~`, nothing else.
+SUDOERS_NAME = re.compile(r'[A-Za-z0-9_-]+')
+
+
+def digestable(path):
+    """True for an installed copy the operator cannot read and root may hash for them (`wbb-release digest`).
+
+    The rule must admit only what installed_path yields for some repo file, but root runs it without the repo.
+    installed_path maps every deploy/sudoers.d/<name> to SUDOERS_DIR/<name> and nothing else into that directory,
+    so "a file the repo installs in SUDOERS_DIR" is exactly "a name directly in SUDOERS_DIR" — the name kept to
+    what sudo itself reads, which also keeps out `..`, a second level and any spelling of another directory.
+    The litestream config is the plan's one other path, named exactly: deploy/README installs it 0644, so the
+    operator normally reads it themself, but a host that keeps it closed is assessed rather than "cannot assess".
+    The comparison is on the string as given: no normalisation, so `/etc//sudoers.d/x` or `/etc/./…` is refused.
+    """
+    if not isinstance(path, str):
+        return False
+    if path == LITESTREAM_CONFIG:
+        return True
+    head, name = posixpath.split(path)
+    return head == SUDOERS_DIR and SUDOERS_NAME.fullmatch(name) is not None

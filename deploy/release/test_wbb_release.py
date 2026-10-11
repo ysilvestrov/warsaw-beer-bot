@@ -1,5 +1,6 @@
 import contextlib
 import hashlib
+import inspect
 import io
 import os
 import sys
@@ -246,6 +247,100 @@ class Cli(unittest.TestCase):
         # releases and staging under one directory, so publish's single rename can work.
         self.assertEqual((os.path.dirname(cli.PRODUCTION_ROOTS.releases), os.path.dirname(cli.PRODUCTION_ROOTS.scratch)),
                          ('/opt/warsaw-beer-bot', '/opt/warsaw-beer-bot'))
+
+
+
+ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'  # sha256(b'abc')
+EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'  # sha256(b'')
+
+
+class Digest(unittest.TestCase):
+    """`digest --path`: root hashes an installed copy the operator cannot read (plan C-core "Рішення" п.3).
+
+    The production path is what the operator passes and what the line names; the file is read under a temp root."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        os.makedirs(os.path.join(self.root, 'etc', 'sudoers.d'))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def put(self, path, data=b'abc', mode=0o440):
+        full = os.path.join(self.root, path.lstrip('/'))
+        with open(full, 'wb') as f:
+            f.write(data)
+        os.chmod(full, mode)
+        return full
+
+    def digest(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(['digest', *argv], installed_root=self.root)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_an_installed_sudoers_file(self):
+        self.put('/etc/sudoers.d/wbb-release')
+        self.assertEqual(self.digest('--path', '/etc/sudoers.d/wbb-release'),
+                         (0, f'DIGEST /etc/sudoers.d/wbb-release {ABC_SHA256} uid {os.geteuid()} mode 0440\n', ''))
+
+    def test_the_litestream_config_and_its_mode(self):
+        self.put('/etc/litestream.yml', b'', 0o640)
+        self.assertEqual(self.digest('--path', '/etc/litestream.yml'), (0, f'DIGEST /etc/litestream.yml {EMPTY_SHA256} '
+                                                                          f'uid {os.geteuid()} mode 0640\n', ''))
+
+    def test_group_and_other_writes_are_reported_as_they_are(self):
+        self.put('/etc/sudoers.d/warsaw-beer-bot', mode=0o662)
+        self.assertEqual(self.digest('--path', '/etc/sudoers.d/warsaw-beer-bot')[1],
+                         f'DIGEST /etc/sudoers.d/warsaw-beer-bot {ABC_SHA256} uid {os.geteuid()} mode 0662\n')
+
+    def test_a_missing_copy_is_absent(self):
+        self.assertEqual(self.digest('--path', '/etc/sudoers.d/wbb-release'), (0, 'ABSENT /etc/sudoers.d/wbb-release\n', ''))
+        os.rmdir(os.path.join(self.root, 'etc', 'sudoers.d'))
+        self.assertEqual(self.digest('--path', '/etc/sudoers.d/wbb-release'), (0, 'ABSENT /etc/sudoers.d/wbb-release\n', ''))
+
+    def test_a_symlink_is_refused_even_to_a_right_copy(self):
+        real = self.put('/etc/sudoers.d/real')
+        os.symlink(real, os.path.join(self.root, 'etc', 'sudoers.d', 'wbb-release'))
+        os.symlink('/nonexistent', os.path.join(self.root, 'etc', 'litestream.yml'))
+        self.assertEqual(self.digest('--path', '/etc/sudoers.d/wbb-release'),
+                         (2, '', 'REFUSED: /etc/sudoers.d/wbb-release: a symlink, not an installed copy\n'))
+        self.assertEqual(self.digest('--path', '/etc/litestream.yml'),
+                         (2, '', 'REFUSED: /etc/litestream.yml: a symlink, not an installed copy\n'))
+
+    def test_a_symlink_swapped_in_after_the_check_is_refused(self):
+        """O_NOFOLLOW on the open: what lstat saw a moment before is no permission to follow a link now."""
+        real = self.put('/etc/sudoers.d/real')
+        os.symlink(real, os.path.join(self.root, 'etc', 'sudoers.d', 'wbb-release'))
+        regular = os.lstat(real)
+        with mock.patch.object(cli.os, 'lstat', lambda path: regular):
+            got = self.digest('--path', '/etc/sudoers.d/wbb-release')
+        self.assertEqual(got, (2, '', 'REFUSED: /etc/sudoers.d/wbb-release: a symlink, not an installed copy\n'))
+
+    def test_what_is_not_a_regular_file_is_refused(self):
+        os.mkdir(os.path.join(self.root, 'etc', 'sudoers.d', 'wbb-release'))
+        os.mkfifo(os.path.join(self.root, 'etc', 'litestream.yml'))
+        for path in ('/etc/sudoers.d/wbb-release', '/etc/litestream.yml'):
+            with self.subTest(path):
+                self.assertEqual(self.digest('--path', path), (2, '', f'REFUSED: {path}: not a regular file\n'))
+
+    def test_a_path_outside_the_map_is_refused_without_reading_it(self):
+        os.makedirs(os.path.join(self.root, 'usr', 'local', 'libexec'))
+        for path in ('/etc/shadow', '/etc/sudoers.d/../shadow', '/etc/sudoers.d/a.b', '/etc/sudoers.d/.x',
+                     '/usr/local/libexec/wbb-release', 'etc/litestream.yml'):
+            with self.subTest(path):
+                self.put(path, mode=0o644)  # /etc/shadow is written twice (through ../)
+                self.assertEqual(self.digest('--path', path),
+                                 (2, '', f'REFUSED: not an installed copy root digests: {path!r}\n'))
+
+    def test_usage(self):
+        self.assertEqual([self.digest(*argv)[0] for argv in ([], ['--path'], ['--sha', 'a' * 40],
+                                                             ['--path', '/etc/litestream.yml', '--sha', 'a' * 40])],
+                         [64, 64, 64, 64])
+
+    def test_the_production_root_is_the_filesystem_root(self):
+        self.assertEqual(inspect.signature(cli.main).parameters['installed_root'].default, '/')
 
 
 if __name__ == '__main__':

@@ -14,15 +14,18 @@ Task 2. The protocol is helpers.Helpers; the commands mirror merge-deploy's (dep
   snapshot_pre        wbb-db-snapshot snapshot <db> <dir>/<UTC>-<sha7>-pre.db as the bot user, then its .sha256
   discard_pre         wbb-db-snapshot discard <pre> as the bot user
   manifest            releases/<sha>/tree-manifest.json, read by the operator (root-owned 0644)
-  installed_stale     every installed copy (installed.installed_path) against `git show origin/main:<path>`
+  installed_stale     every installed copy (installed.installed_path) against `git show origin/main:<path>`;
+                      one the operator may not read (installed.digestable, EACCES) through
+                      sudo -n /usr/local/libexec/wbb-release digest --path <installed copy>
 
 wbb_release exit codes ("Рішення" п.2): 0, 1 and 2 come back as a Run — the caller decides — but exit 1 only with
 the verdict line of this verb for this SHA: sudo exits 1 for its own failures, and that is no verdict. Anything
 else (64, 70, 75, a signal, sudo's 1 without our line) is HelperError. The GitHub token never appears in argv,
 in output or in an exception: it goes from `gh auth token` straight into GitHubApi.
 """
-import json
 import errno
+import hashlib
+import json
 import os
 import re
 import stat
@@ -59,6 +62,8 @@ VERDICT = {
     'trial': re.compile(r'TRIAL (OK|FAILED|TRANSIENT) ([0-9a-f]{40}): .*'),
 }
 HEX64 = re.compile(r'[0-9a-f]{64}')
+DIGEST = re.compile(r'DIGEST (\S+) ([0-9a-f]{64}) uid ([0-9]+) mode ([0-7]{4})')
+ABSENT = re.compile(r'ABSENT (\S+)')
 
 
 def _sha(sha):
@@ -91,6 +96,21 @@ def parse_run(verb, sha, result):
     tree = m.group(3) if kind is not None and m.lastindex >= 3 and HEX64.fullmatch(m.group(3)) else None
     text = (_out(result) + result.stderr.decode('utf-8', 'replace')).strip()
     return Run(code, kind, text, tree)
+
+
+def parse_digest(dest, result):
+    """(sha256, uid, mode) of root's `digest` of dest, or None when it is absent; anything else is HelperError —
+    the copy could not be assessed, never "current" (plan C-core "Рішення" п.3)."""
+    if result.returncode != 0:
+        raise HelperError(f'wbb-release digest {dest}: exit {result.returncode}: {reason(result)}')
+    lines = _out(result).splitlines()
+    one = lines[0] if len(lines) == 1 else ''
+    m, gone = DIGEST.fullmatch(one), ABSENT.fullmatch(one)
+    if m is not None and m.group(1) == dest:
+        return m.group(2), int(m.group(3)), int(m.group(4), 8)
+    if gone is not None and gone.group(1) == dest:
+        return None
+    raise HelperError(f'wbb-release digest {dest}: unexpected answer: {reason(result)}')
 
 
 class RealHelpers:
@@ -197,9 +217,13 @@ class RealHelpers:
         return path
 
     # --- wbb_release ----------------------------------------------------------------------------------------------
+    def _helper(self, verb, *args, sudo=True, timeout):
+        argv = (['sudo', '-n'] if sudo else []) + [ins.ROOT_HELPER, verb, *args]
+        return call(self._run, argv, timeout, HelperError)
+
     def _release(self, verb, sha, *extra, sudo=True):
-        argv = (['sudo', '-n'] if sudo else []) + [ins.ROOT_HELPER, verb, '--sha', _sha(sha), *extra]
-        return parse_run(verb, sha, call(self._run, argv, RELEASE_TIMEOUT_S[verb], HelperError))
+        return parse_run(verb, sha, self._helper(verb, '--sha', _sha(sha), *extra, sudo=sudo,
+                                                 timeout=RELEASE_TIMEOUT_S[verb]))
 
     def publish(self, sha, zip_path):
         if not os.path.isabs(zip_path):
@@ -290,6 +314,14 @@ class RealHelpers:
                     out.append(f'{full} (installed, but nothing in {REF} installs it)')
         return sorted(out)
 
+    def _judge(self, path, dest, uid, mode, same):
+        """The stale entry of one installed copy, read by the operator or digested by root: one condition for both."""
+        # #828 AI review: the right bytes in a file the operator could rewrite later are not an installed
+        # copy — what sudo runs must be root's and writable by nobody else.
+        if uid != self._installed_owner or mode & 0o022:
+            return [f'{path} ({dest} is not {self._installed_owner}-owned and closed to group/other writes)']
+        return [] if same else [path]
+
     def installed_stale(self, patterns):
         listing = _whole(self._git('ls-tree', '-r', '-z', '--name-only', REF), 'git ls-tree')
         paths = [p.decode('utf-8', 'surrogateescape') for p in listing.split(b'\0') if p]
@@ -308,6 +340,14 @@ class RealHelpers:
                 if e.errno == errno.ELOOP:
                     stale.append(f'{path} ({dest} is a symlink)')
                     continue
+                if e.errno == errno.EACCES and ins.digestable(dest):
+                    # plan C-core "Рішення" п.3: sudoers stays 0440; root hashes it, the comparison stays here.
+                    got = parse_digest(dest, self._helper('digest', '--path', dest, timeout=SMALL_TIMEOUT_S))
+                    if got is None:
+                        stale.append(f'{path} (not installed at {dest})')
+                        continue
+                    stale += self._judge(path, dest, got[1], got[2], got[0] == hashlib.sha256(want).hexdigest())
+                    continue
                 raise HelperError(f'{dest}: {type(e).__name__}: {e.strerror}') from None
             try:
                 with os.fdopen(fd, 'rb') as f:
@@ -315,12 +355,7 @@ class RealHelpers:
                     got = f.read(len(want) + 1)
             except OSError as e:
                 raise HelperError(f'{dest}: {type(e).__name__}: {e.strerror}') from None
-            # #828 AI review: the right bytes in a file the operator could rewrite later are not an installed
-            # copy — what sudo runs must be root's and writable by nobody else.
-            if st.st_uid != self._installed_owner or st.st_mode & 0o022:
-                stale.append(f'{path} ({dest} is not {self._installed_owner}-owned and closed to group/other writes)')
-            elif got != want:
-                stale.append(path)
+            stale += self._judge(path, dest, st.st_uid, st.st_mode, got == want)
         stale += self._orphans(paths)
         if not stale:
             return None

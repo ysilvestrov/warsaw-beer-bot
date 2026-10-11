@@ -5,7 +5,7 @@ Spec: docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.m
 Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2a.md, Task 4.
 
 Meant to be installed root-owned and run as root through a fixed sudo rule (the
-installation is a later stage). It takes no paths but the operator's ZIP: the
+installation is a later stage). It takes no paths but the operator's ZIP and `digest`'s: the
 release, receipt and scratch roots and the token file are constants here, and
 trust comes from metadata fetched now, never from anything the operator passes.
 
@@ -15,13 +15,17 @@ Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>   (root)
        wbb_release.py audit   --sha <full sha>                            (operator, never root)
        wbb_release.py probe   --sha <full sha>                            (root; runs the sandbox)
        wbb_release.py trial   --sha <full sha> --snapshot <name>-pre.db   (root; runs the sandbox)
-The snapshot is a NAME in SNAPSHOT_ROOT, never a path.
+       wbb_release.py digest  --path <installed copy>                         (root; hashes, changes nothing)
+The snapshot is a NAME in SNAPSHOT_ROOT, never a path. The digest path is one installed.digestable admits
+(an installed sudoers file, the litestream config): what the operator's installed_stale cannot read itself.
 
 Output: one verdict line on stdout — `VERIFIED <sha>: tree <hex> ...`, `ACCEPTED|ALREADY-ACCEPTED <sha>: ...`,
 `SWITCHED|CURRENT <sha> tree <hex>` (CURRENT: `current` already pointed there, nothing changed; tree: the
 receipt's treeSha256 the tree was verified against, which the controller compares with its record),
 `AUDIT <KIND> <sha> tree <hex>` (details from the next line on), `PROBE|TRIAL <KIND> <sha>: <detail>`
-followed, when the Node identity is known, by `NODE <realpath> <sha256> <version> <modules>`.
+followed, when the Node identity is known, by `NODE <realpath> <sha256> <version> <modules>`;
+`DIGEST <path> <sha256> uid <n> mode <4 octal digits>` or `ABSENT <path>` (plan C-core "Рішення" п.3; a symlink
+or anything but a regular file is refused, exit 2).
 Exit (2b review B1; the controller records a failed SHA only on 1 together with its verdict line):
    0  done / ok / clean
    1  ONLY the candidate is bad: `PROBE FAILED`, `TRIAL FAILED` or `AUDIT ADVISORY` is on stdout
@@ -36,6 +40,8 @@ Only `switch` touches the `current` pointer (after re-verifying the tree against
 nothing here starts or stops a unit or touches a database.
 """
 import argparse
+import errno
+import hashlib
 import os
 import stat
 import subprocess
@@ -50,6 +56,7 @@ try:
     import bounded  # noqa: E402
     import github_trust as gt  # noqa: E402
     import host_audit  # noqa: E402
+    import installed as ins  # noqa: E402
     import publish as pub  # noqa: E402
     import sandbox as sb  # noqa: E402
     import trial as tr  # noqa: E402
@@ -108,7 +115,45 @@ def _parser():
     t = sub.add_parser('trial')
     t.add_argument('--sha', required=True)
     t.add_argument('--snapshot', required=True, help='a <name>-pre.db in ' + SNAPSHOT_ROOT)
+    sub.add_parser('digest').add_argument('--path', required=True, help='an installed sudoers file or ' +
+                                          ins.LITESTREAM_CONFIG)
     return ap
+
+
+def digest(path, installed_root='/'):
+    """The `digest` line of one installed copy (plan C-core "Рішення" п.3), read under installed_root.
+
+    lstat refuses a symlink by name; the open is O_NOFOLLOW (a link swapped in after the lstat is refused too)
+    and the hash, the owner and the mode all come from that one descriptor.
+    """
+    if not ins.digestable(path):
+        raise Refused(f'not an installed copy root digests: {path!r}')
+    real = os.path.join(installed_root, path.lstrip('/'))
+    symlink = Refused(f'{path}: a symlink, not an installed copy')
+    try:
+        st = os.lstat(real)
+    except FileNotFoundError:
+        return f'ABSENT {path}'
+    if stat.S_ISLNK(st.st_mode):
+        raise symlink
+    if not stat.S_ISREG(st.st_mode):
+        raise Refused(f'{path}: not a regular file')
+    try:
+        fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return f'ABSENT {path}'
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise symlink from None
+        raise
+    with os.fdopen(fd, 'rb') as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused(f'{path}: not a regular file')
+        h = hashlib.sha256()
+        for chunk in iter(lambda: f.read(1 << 16), b''):
+            h.update(chunk)
+    return f'DIGEST {path} {h.hexdigest()} uid {st.st_uid} mode {stat.S_IMODE(st.st_mode):04o}'
 
 
 def _print_step(cmd, sha, step):
@@ -120,7 +165,11 @@ def _print_step(cmd, sha, step):
     return STEP_EXIT[step.kind]
 
 
-def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc):
+def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc,
+         installed_root):
+    if a.cmd == 'digest':
+        print(digest(a.path, installed_root))
+        return 0
     if a.cmd == 'verify':
         receipt = pub.verify_release(a.sha, roots)
         print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
@@ -154,13 +203,14 @@ def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, n
 
 def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi, trial_root=TRIAL_ROOT,
          runner=bounded.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release,
-         snapshot_root=SNAPSHOT_ROOT, glibc=tr.host_glibc):
+         snapshot_root=SNAPSHOT_ROOT, glibc=tr.host_glibc, installed_root='/'):
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:
         return EX_USAGE if e.code else 0
     try:
-        return _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc)
+        return _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc,
+                    installed_root)
     except (Refused, gt.Untrusted) as e:
         # Not a verdict on the candidate: nothing here may be recorded as its failure (2b review B1).
         print(f'REFUSED: {e}', file=sys.stderr)
