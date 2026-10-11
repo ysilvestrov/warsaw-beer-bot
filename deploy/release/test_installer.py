@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import installed as ins  # noqa: E402
@@ -276,6 +277,18 @@ class Orphans(Base):
             self.assertFalse(os.path.lexists(self.p(dest)), dest)
 
 
+    def test_c_the_directory_of_a_removed_orphan_is_synced(self):
+        # #834 AI review: an unlink not on disk can bring the module back after a power loss.
+        self.main()
+        with open(self.p('usr/local/lib/wbb-release/gone.py'), 'wb') as f:
+            f.write(b'x')
+        synced = []
+        real = inst.Installer.fsync_dir
+        with mock.patch.object(inst.Installer, 'fsync_dir', staticmethod(lambda d: (synced.append(d), real(d)))):
+            code, out, _ = self.main()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(synced, [self.p('usr/local/lib/wbb-release')])
+
 class Visudo(Base):
     def test_d_rejected_sudoers_keeps_the_old_file_refuses_and_installs_no_unit(self):
         os.makedirs(self.p('etc/sudoers.d'))
@@ -488,6 +501,27 @@ class WhatIsAlreadyThere(Base):
         self.assertEqual(self.host.argvs(), [])
 
 
+    def test_a_symlinked_directory_on_the_way_is_refused_before_any_write(self):
+        # #834 AI review: os.path.isdir followed the link, and the write landed in its target.
+        outside = os.path.join(self.tmp.name, 'elsewhere')
+        os.makedirs(outside)
+        os.makedirs(self.p('etc'))
+        os.symlink(outside, self.p('etc/sudoers.d'))
+        code, _, err = self.main()
+        self.assertEqual((code, err), (1, 'REFUSED: a symlink or a non-directory on the way to an installed file: '
+                                          '/etc/sudoers.d; not touching it\n'))
+        self.assertEqual((sorted(self.tree()), os.listdir(outside), self.host.argvs()),
+                         (['/etc', '/etc/sudoers.d'], [], []))
+
+    def test_a_symlink_higher_up_the_path_is_refused_too(self):
+        outside = os.path.join(self.tmp.name, 'elsewhere')
+        os.makedirs(outside)
+        os.symlink(outside, self.p('usr'))
+        code, _, err = self.main()
+        self.assertEqual((code, err), (1, 'REFUSED: a symlink or a non-directory on the way to an installed file: '
+                                          '/usr; not touching it\n'))
+        self.assertEqual(os.listdir(outside), [])
+
 class RootLeavesNothingInTheCheckout(Base):
     """e2e review S3: run as root in the operator's checkout, the installer must not leave root-owned files there."""
     GIT_PREFIX = ('/usr/bin/git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
@@ -590,6 +624,17 @@ class Check(Base):
         self.assertIn('token: /etc/wbb-deploy/github.env present', out)
         self.assertNotIn('secret-value', out)
 
+
+    def test_ie_install_counts_an_unusable_token_as_a_difference_like_check(self):
+        # #834 AI review: install printed it and still exited 0.
+        self.main()
+        token = self.p('etc/wbb-deploy/github.env')
+        with open(token, 'w') as f:
+            f.write('WBB_GITHUB_TOKEN=a\nWBB_GITHUB_TOKEN=b\n')
+        os.chmod(token, 0o600)
+        code, out, _ = self.main()
+        self.assertEqual(code, 1)
+        self.assertIn('1 difference(s) remain', out)
 
 class Usage(Base):
     def test_unknown_argument_is_64(self):

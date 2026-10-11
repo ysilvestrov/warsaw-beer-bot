@@ -348,6 +348,14 @@ class Installer:
         self.chown(full, 0, 0)
         os.chmod(full, mode)
 
+    @staticmethod
+    def fsync_dir(path):
+        dfd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+
     def write(self, dest, data, mode, check=None):
         """Atomically put data at dest as root:root `mode`; unchanged copies are left alone. check(tmp) runs on
         the finished temporary file before the rename and may raise Refusal (the old copy then stays)."""
@@ -380,11 +388,7 @@ class Installer:
             except FileNotFoundError:
                 pass
             raise
-        dfd = os.open(head, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(dfd)
-        finally:
-            os.close(dfd)
+        self.fsync_dir(head)
         why = self.file_problem(dest, mode, data)  # read back what the rename put there
         if why:
             raise HelperError(f'{dest}: after the rename: {why}')
@@ -435,12 +439,30 @@ class Installer:
         return [dest for _, _, dest, _ in files
                 if os.path.isdir(self.p(dest)) and not os.path.islink(self.p(dest))]
 
+    def linked_parents(self, files):
+        """#834 AI review: an existing directory on a destination's path that is a symlink (or not a directory)
+        would carry the root write somewhere else — /etc/sudoers.d -> elsewhere. Every component below the root
+        prefix is looked at with lstat; on Ubuntu 24.04 none of /etc, /usr, /usr/local and below is a link."""
+        bad = set()
+        for _, _, dest, _ in files:
+            path = posixpath.dirname(dest)
+            while path not in ('/', ''):
+                full = self.p(path)
+                if os.path.lexists(full) and not stat.S_ISDIR(os.lstat(full).st_mode):
+                    bad.add(path)
+                path = posixpath.dirname(path)
+        return sorted(bad)
+
     def install(self):
         head, files = self.checkout()
         self.say(f'installing from {self.repo} HEAD {head}')
         in_the_way = self.directories_in_the_way(files)
         if in_the_way:
             raise Refusal(f'a directory where a file is installed: {", ".join(in_the_way)}; not touching it')
+        linked = self.linked_parents(files)
+        if linked:
+            raise Refusal(f'a symlink or a non-directory on the way to an installed file: {", ".join(linked)}; '
+                          'not touching it')
         # Refused before any write when an existing wbb-trial is unfit (п.4).
         self.ensure_trial_user()
         for d, mode in PRIVATE_DIRS:
@@ -452,22 +474,33 @@ class Installer:
                 if k != kind:
                     continue
                 parent = posixpath.dirname(dest)
-                if not os.path.isdir(self.p(parent)):
+                if not os.path.lexists(self.p(parent)):
                     self.mkdir(parent, DIR_MODE)
                 self.write(dest, data, MODE[kind], check=self.visudo if kind == 'sudoers' else None)
             if kind == 'lib':
                 # New modules are in place before the old ones go (dependencies first).
+                emptied = set()
                 for full, linked in self.orphans(files):
                     os.unlink(full)
+                    emptied.add(os.path.dirname(full))
                     self.say(f'removed {self.unp(full)}' + (' (a symlink)' if linked else ''))
                     self.changed += 1
+                # #834 AI review: an unlink not yet on disk can come back after a power loss, and with it a
+                # module the library no longer has.
+                for d in sorted(emptied):
+                    self.fsync_dir(d)
         code, out, err = self.cmd([SYSTEMCTL, 'daemon-reload'])
         if code != 0:
             raise HelperError(f'systemctl daemon-reload: exit {code}: {(out + err).strip()}')
         diffs = self.differences(files)
+        # #834 AI review: the same verdict as --check — a token that is there but unusable is a difference.
+        ok, line = self.token_status()
+        if not ok:
+            diffs.append(line)
         for d in diffs:
             self.say(f'DIFF {d}')
-        self.say(self.token_status()[1])
+        if ok:
+            self.say(line)
         self.say(self.timer_state())
         self.say(f'installed: {self.changed} change(s)' if not diffs else f'{len(diffs)} difference(s) remain')
         return EX_DIFF if diffs else EX_OK
