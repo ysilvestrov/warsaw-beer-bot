@@ -97,22 +97,6 @@ jobs:
       - name: Smoke
         run: scripts/image-smoke.sh wbb-image:smoke "$GITHUB_SHA"
 
-      # Spec §4.2: the production tree as it ships, audited from the image exactly as the host's
-      # deploy-time audit runs it. npm's exit code cannot tell an advisory from a failure to audit;
-      # the verdict CLI decides (0 clean, 10 advisory, anything else could not run) and any
-      # non-zero is red. The pipeline's status is the CLI's.
-      - name: Audit production dependencies
-        run: |
-          set +e
-          docker run --rm --tmpfs /tmp --user 999:999 wbb-image:smoke \
-            sh -c 'cd /app && npm audit --omit=dev --json | node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts'
-          code=$?
-          case $code in
-            0) exit 0 ;;
-            10) echo "::error::high or critical advisory in production dependencies"; exit 1 ;;
-            *) echo "::error::could not audit production dependencies (exit $code)"; exit 1 ;;
-          esac
-
       # wbb.content (spec §4.1) is known only once the payload exists: the image carries it in
       # /app/.content-digest, and a second, config-only layer turns it into the label.
       - name: Label content
@@ -170,6 +154,28 @@ jobs:
           line="IMAGE-DIGEST sha=$GITHUB_SHA digest=$DIGEST content=$CONTENT"
           echo "$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
+
+      # Spec §4.2: the production tree as it ships, audited from the image exactly as the host's
+      # deploy-time audit runs it. npm's exit code cannot tell an advisory from a failure to audit;
+      # the verdict CLI decides (0 clean, 10 advisory, anything else could not run) and any
+      # non-zero is red. The pipeline's status is the CLI's.
+      # Last, so on a main push publication (push, attest, record) does not depend on when an
+      # advisory appeared; a red audit there still fails the job, `ci` is red and merge-deploy
+      # does not deploy the SHA. On a PR it only annotates (::error:: stays, the job does not
+      # fail): an advisory published upstream is not the PR's doing and must not block every
+      # merge, including the one that bumps the dependency.
+      - name: Audit production dependencies
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set +e
+          docker run --rm --tmpfs /tmp --user 999:999 wbb-image:smoke \
+            sh -c 'cd /app && npm audit --omit=dev --json | node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts'
+          code=$?
+          case $code in
+            0) exit 0 ;;
+            10) echo "::error::high or critical advisory in production dependencies"; exit 1 ;;
+            *) echo "::error::could not audit production dependencies (exit $code)"; exit 1 ;;
+          esac
 
   # Single stable name for branch protection and auto-merge to depend on.
   # `if: always()` so this job runs even when `build` failed — otherwise a

@@ -79,19 +79,30 @@ describe('ci.yml image job', () => {
     expect(image.filter((l) => /^ {4}if:/.test(l))).toEqual([]);
   });
 
-  it('builds, smokes, audits and labels on every event; logs in, pushes, attests and records on a main push only', () => {
+  // The audit is last: on a main push publication (push, attest, record) does not depend on
+  // when an advisory appeared, and the red audit still keeps `ci` red, so the SHA is not deployed.
+  it('builds, smokes and labels on every event; logs in, pushes, attests and records on a main push only; audits last, on every event', () => {
     expect(steps(image).map((s) => [s.head, s.if])).toEqual([
       ['- uses: actions/checkout@v7', null],
       ['- name: Runtime base digest', null],
       ['- name: Build image', null],
       ['- name: Smoke', null],
-      ['- name: Audit production dependencies', null],
       ['- name: Label content', null],
       ['- name: Log in to GHCR', MAIN_PUSH],
       ['- name: Push', MAIN_PUSH],
       ['- uses: actions/attest-build-provenance@v2', MAIN_PUSH],
       ['- name: Record digest', MAIN_PUSH],
+      ['- name: Audit production dependencies', null],
     ]);
+  });
+
+  // On a PR the audit annotates and does not fail the job: an advisory published upstream is
+  // not the PR's doing and must not block every merge (including the one that bumps the
+  // dependency). On a main push it fails the job, so `ci` is red and merge-deploy skips the SHA.
+  it('audit fails the job on a main push only', () => {
+    const audit = steps(image).find((s) => s.head === '- name: Audit production dependencies')!;
+    expect(audit.lines.filter((l) => /^ {8}continue-on-error:/.test(l)).map((l) => l.trim()))
+      .toEqual(["continue-on-error: ${{ github.event_name == 'pull_request' }}"]);
   });
 
   it('uses no secrets beyond the job token', () => {

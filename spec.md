@@ -2893,10 +2893,13 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   старт до `api listening` і `/health` з правильним `releaseSha` (`start-check` запускає бота з
   `--unhandled-rejections=warn`: без мережі `bot.launch()` відхиляється й інакше вбиває процес),
   trial на свіжій БД, проби payload-у (SQLite, міграція, assets, ops), вердикти аудиту на фікстурах,
-  відмова запису в `/app`. Аудит production-залежностей — з образу, тим самим `audit-verdict-cli`,
-  що й на хості (high/critical — червоно, на PR теж). На push у `main` образ іде в
+  відмова запису в `/app`. На push у `main` образ іде в
   `ghcr.io/ysilvestrov/warsaw-beer-bot:<sha>` з атестацією `attest-build-provenance`; рядок
-  `IMAGE-DIGEST sha=… digest=… content=…` — у summary run-у. Check `ci` вимагає `image=success`
+  `IMAGE-DIGEST sha=… digest=… content=…` — у summary run-у. Аудит production-залежностей —
+  останнім кроком, з образу, тим самим `audit-verdict-cli`, що й на хості: на push у `main` він
+  іде після публікації й high/critical (чи аудит, що не відбувся) валить job — `ci` червоний,
+  merge-deploy цей SHA не деплоїть; на PR — лише анотація `::error::`, job не падає (advisory,
+  опублікований апстрімом, не блокує мердж). Check `ci` вимагає `image=success`
   на будь-якій події. Артефакт Actions `wbb-release-*` більше не публікується.
 - **Runtime artifact (історія; спека
   `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`, замінена спекою

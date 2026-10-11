@@ -484,9 +484,12 @@ per text.
 Design: `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`.
 The `image` job in `.github/workflows/ci.yml` builds `deploy/image/Dockerfile` on every PR and
 push, smokes it (`scripts/image-smoke.sh`: start to `/health` with the right `releaseSha`, trial,
-payload probes, audit verdicts, read-only `/app`) and audits the production dependencies from the
-image. On a push to `main` it pushes `ghcr.io/ysilvestrov/warsaw-beer-bot:<sha>` and attests it;
-the run summary has `IMAGE-DIGEST sha=… digest=… content=…`. Nothing on the host pulls it yet:
+payload probes, audit verdicts, read-only `/app`). On a push to `main` it pushes
+`ghcr.io/ysilvestrov/warsaw-beer-bot:<sha>` and attests it; the run summary has
+`IMAGE-DIGEST sha=… digest=… content=…`. Last, it audits the production dependencies from the
+image: on a `main` push a high/critical advisory (or an audit that could not run) fails the job
+after publication, so `ci` is red and merge-deploy does not deploy that SHA; on a PR it only
+annotates (`::error::`) and the job does not fail. Nothing on the host pulls it yet:
 `deploy.sh` and the merge-deploy tick still build on the host as described above.
 
 Check an image from the host (as the operator, `gh` logged in):
