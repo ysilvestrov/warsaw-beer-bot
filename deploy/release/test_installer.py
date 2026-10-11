@@ -292,8 +292,10 @@ class Visudo(Base):
         self.assertFalse(os.path.lexists(self.p('etc/systemd/system/wbb-tick.service')))
         self.assertNotIn((inst.SYSTEMCTL, 'daemon-reload'), self.host.argvs())
         # Dependencies first: the library and the wrappers are already in place, and that is fine.
-        self.assertTrue(os.path.isfile(self.p('usr/local/libexec/wbb-release')))
-        self.assertTrue(os.path.isfile(self.p('usr/local/lib/wbb-release/tick.py')))
+        for dest, src in (('usr/local/libexec/wbb-release', 'deploy/wbb-release.sh'),
+                          ('usr/local/lib/wbb-release/tick.py', 'deploy/release/tick.py')):
+            with open(self.p(dest), 'rb') as f:
+                self.assertEqual(f.read(), REPO_FILES[src], dest)
 
     def test_d_visudo_checks_the_finished_dotted_temporary_file(self):
         self.main()

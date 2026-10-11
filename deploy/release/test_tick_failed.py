@@ -5,6 +5,7 @@ The script runs for real under bash with fake `sudo`, `wbb-read-env` and `curl` 
 XDG_STATE_HOME. The fake sudo accepts only the bot-user command merge-deploy's rule allows and runs the fake
 wbb-read-env in place of the installed one; the fake curl records its argv and its stdin (the -K config).
 """
+import hashlib
 import os
 import shutil
 import subprocess
@@ -16,6 +17,9 @@ SCRIPT = os.path.join(os.path.dirname(HERE), 'wbb-tick-failed.sh')
 TOKEN = '123456:SECRET-token_value'
 CHAT = '4242'
 NOTICE = 'wbb-autodeploy/tick-failed-notice'
+# The text of a tick that did not start (exit 71), as the script words it.
+T71 = ('🔥 wbb-tick failed and reported nothing itself: exit 71: did not start (the library is missing or failed to '
+       'import). See: journalctl -u wbb-tick.service')
 
 FAKE_SUDO = r'''#!/bin/sh
 echo "$*" >> "$FAKE_LOG/sudo.argv"
@@ -129,7 +133,7 @@ class TickFailed(unittest.TestCase):
         second = self.run_failed('exit-code', '71')
         self.assertEqual((first[0], second[0]), (0, 0))
         self.assertEqual(len(self.sent()), 1)
-        self.assertEqual(second[2].startswith('wbb-tick-failed: already reported today: 🔥 wbb-tick failed'), True)
+        self.assertEqual(second[1:], ('', f'wbb-tick-failed: already reported today: {T71}\n'))
 
     def test_another_text_the_same_day_is_sent(self):
         self.run_failed('exit-code', '71')
@@ -162,33 +166,33 @@ class TickFailed(unittest.TestCase):
     def test_the_notice_falls_back_to_home_without_xdg_state_home(self):
         env_home = os.path.join(self.dir, 'home')
         self.run_failed('exit-code', '71', XDG_STATE_HOME='')
-        self.assertEqual(os.path.isfile(os.path.join(env_home, '.local/state', NOTICE)), True)
+        with open(os.path.join(env_home, '.local/state', NOTICE), encoding='utf-8') as f:
+            self.assertEqual(f.read(), f'2026-10-11 {hashlib.sha256(T71.encode()).hexdigest()}\n')
 
     def test_a_failed_read_env_is_a_failure_that_names_itself_and_leaks_nothing(self):
         code, out, err = self.run_failed('exit-code', '71', FAKE_READ_ENV_FAIL='1')
-        self.assertEqual((code, out), (1, ''))
-        self.assertEqual(err.splitlines()[-1].startswith(
-            "wbb-tick-failed: cannot read the bot's .env through wbb-read-env; not reported: 🔥"), True)
+        self.assertEqual((code, out, err), (1, '', 'read-env.sh: cannot read /etc/warsaw-beer-bot/.env\n'
+                                                   "wbb-tick-failed: cannot read the bot's .env through wbb-read-env; "
+                                                   f'not reported: {T71}\n'))
         self.assertEqual((self.logged('curl.argv'), os.path.exists(os.path.join(self.state, NOTICE))), ('', False))
 
     def test_no_token_or_no_chat_is_a_failure(self):
         for missing in ('FAKE_TOKEN', 'FAKE_CHAT'):
             with self.subTest(missing):
                 code, out, err = self.run_failed('exit-code', '71', **{missing: ''})
-                self.assertEqual((code, out), (1, ''))
-                self.assertEqual(err.startswith('wbb-tick-failed: no TELEGRAM_BOT_TOKEN or ADMIN_TELEGRAM_ID'), True)
+                self.assertEqual((code, out, err), (1, '', 'wbb-tick-failed: no TELEGRAM_BOT_TOKEN or ADMIN_TELEGRAM_ID; '
+                                                           f'not reported: {T71}\n'))
         self.assertEqual(self.logged('curl.argv'), '')
 
     def test_a_token_that_is_not_a_bot_token_never_reaches_curl(self):
         code, _, err = self.run_failed('exit-code', '71', FAKE_TOKEN='1:x"\nurl = "https://evil')
-        self.assertEqual(code, 1)
-        self.assertEqual(err.startswith('wbb-tick-failed: TELEGRAM_BOT_TOKEN is not a bot token'), True)
+        self.assertEqual((code, err), (1, f'wbb-tick-failed: TELEGRAM_BOT_TOKEN is not a bot token; not reported: {T71}\n'))
         self.assertEqual(self.logged('curl.stdin'), '')
 
     def test_telegram_refusing_is_a_failure_tried_again_next_time(self):
         code, out, err = self.run_failed('exit-code', '71', FAKE_CURL_EXIT='22')
-        self.assertEqual((code, out), (1, ''))
-        self.assertEqual(err.startswith('wbb-tick-failed: Telegram did not accept the notice (curl exit 22): '), True)
+        self.assertEqual((code, out, err), (1, '', f'wbb-tick-failed: Telegram did not accept the notice (curl exit 22): '
+                                                   f'{T71}\n'))
         self.assertEqual(os.path.exists(os.path.join(self.state, NOTICE)), False)
         self.run_failed('exit-code', '71')
         self.assertEqual(len(self.sent()), 2)
