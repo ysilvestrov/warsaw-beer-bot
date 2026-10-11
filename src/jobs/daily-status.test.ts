@@ -379,3 +379,12 @@ test('building the report prunes handler failures older than 90 days', () => {
   buildDailyReport(db, new Date('2026-10-06T07:00:00.000Z'), '2026-10-06', missingMonitor);
   expect(db.prepare('SELECT source FROM handler_failures ORDER BY id').all()).toEqual([{ source: '/kept' }]);
 });
+
+test('an unreadable failures table is «нема даних» in the report, not a report that failed to build', () => {
+  const db = emptyDb();
+  db.exec('DROP TABLE handler_failures');
+  const report = buildDailyReport(db, new Date('2026-10-06T07:00:00.000Z'), '2026-10-06', missingMonitor);
+  expect(report.split('\n').filter((line) => line.includes('збої команд'))).toEqual([
+    '  • нема даних: збої команд — таблицю збоїв не прочитано',
+  ]);
+});

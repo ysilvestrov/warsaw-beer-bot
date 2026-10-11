@@ -116,8 +116,6 @@ function readHostPatchInput(now: Date, opts: StatusInputOptions): StatusInputs['
   return { ok: false, reason: r.kind === 'stale' ? 'збирач патчів мовчить' : 'підсумок патчів хоста недоступний' };
 }
 
-// The only place the morning report reads the DB, job_state and files. Every source that can be
-// missing comes back as a value the evaluators can colour, never as an exception.
 // #836: a table that cannot be read colours «Канали» yellow instead of taking the report down.
 function readHandlerFailures(db: DB, now: Date): StatusInputs['handlerFailures'] {
   try {
@@ -127,6 +125,8 @@ function readHandlerFailures(db: DB, now: Date): StatusInputs['handlerFailures']
   }
 }
 
+// The only place the morning report reads the DB, job_state and files. Every source that can be
+// missing comes back as a value the evaluators can colour, never as an exception.
 export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: StatusInputOptions): StatusInputs {
   const metrics = collectStatus(db, now);
   const diag = readTestDiagnostics(now, opts.testDiagnosticsPath, opts.testDiagnosticsUid);

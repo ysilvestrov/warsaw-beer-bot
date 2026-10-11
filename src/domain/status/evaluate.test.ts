@@ -259,6 +259,11 @@ describe('evaluateChannels — handler failures (#836)', () => {
     ]);
   });
 
+  it('a multi-line error text is one line in the reason', () => {
+    const i = greenInputs({ handlerFailures: { ok: true, value: [{ source: '/route', error: 'fetch failed\n    at foo\n', count: 1 }] } });
+    expect(evaluateChannels(i).reasons).toEqual(['збої команд за добу: 1 — /route ×1 (fetch failed at foo)']);
+  });
+
   it('an empty error text shows no brackets', () => {
     const i = greenInputs({ handlerFailures: { ok: true, value: [{ source: '/pubs', error: '', count: 2 }] } });
     expect(evaluateChannels(i).reasons).toEqual(['збої команд за добу: 2 — /pubs ×2']);

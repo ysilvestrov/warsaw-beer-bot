@@ -103,7 +103,12 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
   const evaluation = evaluateAll(inputs);
   saveStatusSnapshot(db, { date: dateKey, metrics: inputs.metrics, colours: evaluation.subsystems, createdAt: now.toISOString() });
   pruneStatusSnapshots(db, shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays));
-  pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
+  // A table that cannot be read is already in the report as «нема даних: збої команд» (see
+  // readHandlerFailures); a prune that fails on the same table must not replace that with
+  // «звіт не зібрано».
+  try {
+    pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
+  } catch { /* reported above */ }
   // The pause is a channel-health fact (🔴 Канали), so the users section shows activity only.
   const bugReportLine = opts.repo && inputs.bugReports
     ? buildBugReportLine(inputs.bugReports.summary, null, opts.repo)

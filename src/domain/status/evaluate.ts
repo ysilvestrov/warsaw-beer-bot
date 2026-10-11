@@ -153,8 +153,9 @@ function handlerFailureFindings(input: StatusInputs['handlerFailures']): Finding
   if (groups.length === 0) return [];
   const sum = (gs: typeof groups) => gs.reduce((n, g) => n + g.count, 0);
   const shown = groups.slice(0, FAILURE_GROUPS_SHOWN).map((g) => {
-    const chars = [...g.error];
-    const error = chars.length > FAILURE_ERROR_SHOWN ? `${chars.slice(0, FAILURE_ERROR_SHOWN - 1).join('')}…` : g.error;
+    // An error message may span lines; a reason is one bullet line of the report.
+    const chars = [...g.error.replace(/\s+/g, ' ').trim()];
+    const error = chars.length > FAILURE_ERROR_SHOWN ? `${chars.slice(0, FAILURE_ERROR_SHOWN - 1).join('')}…` : chars.join('');
     return `${g.source} ×${g.count}${error === '' ? '' : ` (${error})`}`;
   });
   const rest = sum(groups.slice(FAILURE_GROUPS_SHOWN));
