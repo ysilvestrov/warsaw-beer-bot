@@ -420,9 +420,18 @@ class Installer:
         self.say(f'{len(diffs)} difference(s)')
         return EX_DIFF if diffs else EX_OK
 
+    def directories_in_the_way(self, files):
+        """e2e review S4: a directory where a file goes cannot be renamed over; refuse before the first write
+        rather than fail half-way (a library installed, the sudoers file not)."""
+        return [dest for _, _, dest, _ in files
+                if os.path.isdir(self.p(dest)) and not os.path.islink(self.p(dest))]
+
     def install(self):
         head, files = self.checkout()
         self.say(f'installing from {self.repo} HEAD {head}')
+        in_the_way = self.directories_in_the_way(files)
+        if in_the_way:
+            raise Refusal(f'a directory where a file is installed: {", ".join(in_the_way)}; not touching it')
         # Refused before any write when an existing wbb-trial is unfit (п.4).
         self.ensure_trial_user()
         for d, mode in PRIVATE_DIRS:

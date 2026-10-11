@@ -417,6 +417,75 @@ class FromGitObjects(Base):
         self.assertEqual((code, err), (0, ''), out)
 
 
+class WhatIsAlreadyThere(Base):
+    """e2e review S4: links and leftovers at the destinations are replaced or removed, never followed."""
+
+    def outside(self, name):
+        """A file outside the root that a followed link would reach."""
+        path = os.path.join(self.tmp.name, name)
+        with open(path, 'wb') as f:
+            f.write(b'outside\n')
+        os.chmod(path, 0o600)
+        return path
+
+    def assert_untouched(self, path):
+        st = os.lstat(path)
+        with open(path, 'rb') as f:
+            self.assertEqual((f.read(), stat.S_IMODE(st.st_mode)), (b'outside\n', 0o600))
+
+    def test_a_symlink_at_the_destination_is_replaced_by_the_file_and_its_target_untouched(self):
+        target = self.outside('x')
+        os.makedirs(self.p('etc/sudoers.d'))
+        os.symlink(target, self.p('etc/sudoers.d/wbb-release'))
+        code, out, err = self.main()
+        self.assertEqual((code, err), (0, ''), out)
+        st = os.lstat(self.p('etc/sudoers.d/wbb-release'))
+        with open(self.p('etc/sudoers.d/wbb-release'), 'rb') as f:
+            self.assertEqual((stat.S_ISREG(st.st_mode), stat.S_IMODE(st.st_mode), f.read()),
+                             (True, 0o440, REPO_FILES['deploy/sudoers.d/wbb-release']))
+        self.assert_untouched(target)
+
+    def test_a_leftover_temporary_file_or_link_of_an_aborted_run_is_neither_kept_nor_followed(self):
+        target = self.outside('x')
+        os.makedirs(self.p('etc/sudoers.d'))
+        os.makedirs(self.p('usr/local/libexec'))
+        with open(self.p('etc/sudoers.d/.wbb-release.installing'), 'wb') as f:
+            f.write(b'half a file')
+        os.symlink(target, self.p('usr/local/libexec/.wbb-release.installing'))
+        code, out, err = self.main()
+        self.assertEqual((code, err), (0, ''), out)
+        self.assertEqual(sorted(os.listdir(self.p('etc/sudoers.d'))), ['wbb-release'])
+        self.assertEqual(sorted(os.listdir(self.p('usr/local/libexec'))), ['wbb-release', 'wbb-tick-failed'])
+        with open(self.p('usr/local/libexec/wbb-release'), 'rb') as f:
+            self.assertEqual(f.read(), REPO_FILES['deploy/wbb-release.sh'])
+        self.assert_untouched(target)
+
+    def test_a_symlinked_directory_inside_the_library_is_removed_not_followed(self):
+        outside = os.path.join(self.tmp.name, 'elsewhere')
+        os.makedirs(outside)
+        kept = os.path.join(outside, 'gone.py')
+        with open(kept, 'wb') as f:
+            f.write(b'outside\n')
+        os.chmod(kept, 0o600)
+        self.main()
+        os.symlink(outside, self.p('usr/local/lib/wbb-release/linked'))
+        code, out, err = self.main()
+        self.assertEqual((code, err), (0, ''), out)
+        self.assertIn('removed /usr/local/lib/wbb-release/linked (a symlink)', out)
+        self.assertEqual(os.path.lexists(self.p('usr/local/lib/wbb-release/linked')), False)
+        self.assertEqual(os.listdir(outside), ['gone.py'])
+        self.assert_untouched(kept)
+
+    def test_a_directory_at_a_destination_is_refused_before_any_write(self):
+        os.makedirs(self.p('etc/sudoers.d/wbb-release/inner'))
+        code, _, err = self.main()
+        self.assertEqual((code, err), (1, 'REFUSED: a directory where a file is installed: /etc/sudoers.d/wbb-release; '
+                                          'not touching it\n'))
+        self.assertEqual(sorted(self.tree()), ['/etc', '/etc/sudoers.d', '/etc/sudoers.d/wbb-release',
+                                               '/etc/sudoers.d/wbb-release/inner'])
+        self.assertEqual(self.host.argvs(), [])
+
+
 class RootLeavesNothingInTheCheckout(Base):
     """e2e review S3: run as root in the operator's checkout, the installer must not leave root-owned files there."""
     GIT_PREFIX = ('/usr/bin/git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
