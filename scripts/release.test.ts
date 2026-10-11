@@ -206,6 +206,24 @@ describe('runtime base digest', () => {
   });
 });
 
+// image-base-digest.sh reads only node:24-bookworm(-slim): a Dependabot PR to node 25/26 (both
+// tags exist on the mirror) would break it. The docker ecosystem takes digest and minor bumps of
+// 24 only; a Node major is a deliberate change (engines.node, host, CI legs together).
+describe('dependabot docker updates', () => {
+  it('ignore Node majors for the image bases', () => {
+    const lines = readFileSync(resolve(root, '.github/dependabot.yml'), 'utf8').split('\n');
+    const start = lines.indexOf('  - package-ecosystem: docker');
+    const rest = lines.slice(start + 1);
+    const section = rest.slice(0, rest.findIndex((l) => l.startsWith('  - package-ecosystem:'))).map((l) => l.trim());
+    const at = section.indexOf('ignore:');
+    expect([start > 0, section.slice(at, at + 3)]).toEqual([true, [
+      'ignore:',
+      '- dependency-name: node',
+      'update-types: ["version-update:semver-major"]',
+    ]]);
+  });
+});
+
 describe('ci.yml: the runtime artifact is gone', () => {
   it('has no package job and uploads no artifact', () => {
     expect([workflow.indexOf('  package:'), workflow.filter((l) => l.includes('upload-artifact'))]).toEqual([-1, []]);

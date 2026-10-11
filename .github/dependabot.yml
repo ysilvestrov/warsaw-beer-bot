@@ -48,6 +48,13 @@ updates:
     cooldown:
       default-days: 7
 
+    # Both bases are node:24-bookworm(-slim); 25 and 26 exist on the mirror too.
+    # A Node major is not a base bump: it moves engines.node, the host and the CI
+    # legs together, and scripts/image-base-digest.sh reads only node:24.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
