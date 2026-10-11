@@ -54,7 +54,7 @@ test('groups by source and error, most frequent first, ties by source then error
   recordHandlerFailure(db, { at, source: '/route', error: 'a' });
   recordHandlerFailure(db, { at, source: '/beers', error: 'long' });
   recordHandlerFailure(db, { at, source: '/beers', error: 'other' });
-  expect(handlerFailuresSince(db, '2026-10-11T00:00:00.000Z')).toEqual([
+  expect(handlerFailuresSince(db, '2026-10-11T00:00:00.000Z', '2026-10-12T00:00:00.000Z')).toEqual([
     { source: '/beers', error: 'long', count: 2 },
     { source: '/beers', error: 'other', count: 1 },
     { source: '/route', error: 'a', count: 1 },
@@ -66,11 +66,11 @@ test('the window includes a row exactly at the boundary and excludes one a milli
   const db = emptyDb();
   recordHandlerFailure(db, { at: '2026-10-10T09:59:59.999Z', source: 'older', error: 'e' });
   recordHandlerFailure(db, { at: '2026-10-10T10:00:00.000Z', source: 'boundary', error: 'e' });
-  expect(handlerFailuresSince(db, '2026-10-10T10:00:00.000Z')).toEqual([{ source: 'boundary', error: 'e', count: 1 }]);
+  expect(handlerFailuresSince(db, '2026-10-10T10:00:00.000Z', '2026-10-11T10:00:00.000Z')).toEqual([{ source: 'boundary', error: 'e', count: 1 }]);
 });
 
 test('no rows gives an empty list', () => {
-  expect(handlerFailuresSince(emptyDb(), '2026-10-10T10:00:00.000Z')).toEqual([]);
+  expect(handlerFailuresSince(emptyDb(), '2026-10-10T10:00:00.000Z', '2026-10-11T10:00:00.000Z')).toEqual([]);
 });
 
 test('prune deletes rows strictly older than the cutoff', () => {
@@ -79,4 +79,13 @@ test('prune deletes rows strictly older than the cutoff', () => {
   recordHandlerFailure(db, { at: '2026-07-13T10:00:00.000Z', source: 'kept', error: 'e' });
   pruneHandlerFailures(db, '2026-07-13T10:00:00.000Z');
   expect(rows(db)).toEqual([{ at: '2026-07-13T10:00:00.000Z', source: 'kept', error: 'e' }]);
+});
+
+test('the window ends at its upper bound: a row exactly there is in, a millisecond later is out', () => {
+  const db = emptyDb();
+  recordHandlerFailure(db, { at: '2026-10-11T10:00:00.000Z', source: 'at-the-end', error: 'e' });
+  recordHandlerFailure(db, { at: '2026-10-11T10:00:00.001Z', source: 'from-the-future', error: 'e' });
+  expect(handlerFailuresSince(db, '2026-10-10T10:00:00.000Z', '2026-10-11T10:00:00.000Z')).toEqual([
+    { source: 'at-the-end', error: 'e', count: 1 },
+  ]);
 });

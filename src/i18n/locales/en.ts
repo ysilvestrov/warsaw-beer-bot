@@ -86,6 +86,7 @@ export const en: Messages = {
   'refresh.starting': '⏳ Refreshing…',
   'refresh.done': '✅ Done.',
   'refresh.failed': '❌ Refresh failed. Please try again later.',
+  'refresh.postrun_failed': '✅ Refreshed, but the list of new beers could not be sent.',
 
   // filters
   'filters.current':

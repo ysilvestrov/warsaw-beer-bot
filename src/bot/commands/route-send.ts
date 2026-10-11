@@ -37,3 +37,24 @@ export async function runRouteWork(
     await notifyFailed().catch((err) => deps.log.warn({ err }, 'route failure notice not sent'));
   }
 }
+
+/**
+ * Tells the person the route failed. While the status message is still progress it is edited in
+ * place. Once it carries the first part of a result — or when that edit is itself refused (the
+ * message is gone) — the notice goes out as a NEW message: it must not be lost together with the
+ * message it would have edited, and it must not overwrite a part the person already has.
+ */
+export async function notifyRouteFailed(
+  io: { edit: () => Promise<unknown>; send: () => Promise<unknown> },
+  firstPartDelivered: boolean,
+): Promise<void> {
+  if (!firstPartDelivered) {
+    try {
+      await io.edit();
+      return;
+    } catch {
+      // fall through: the status message cannot be edited, say it in a new one
+    }
+  }
+  await io.send();
+}

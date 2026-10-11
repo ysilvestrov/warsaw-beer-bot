@@ -30,7 +30,7 @@ import { formatRouteResult, type RoutePubFormat } from './route-format';
 import { googleMapsWalkingUrl } from '../../domain/maps';
 import { trackProgress } from '../active-progress';
 import { splitMessage } from './message-split';
-import { runRouteWork, sendRouteResult } from './route-send';
+import { notifyRouteFailed, runRouteWork, sendRouteResult } from './route-send';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
 
@@ -117,6 +117,7 @@ routeCommand.command('route', async (ctx) => {
   // Detach the work: even with /table API + DB cache, a cold call still
   // exceeds Telegraf's 90s handlerTimeout on a fresh deploy. Captured locals
   // above keep the background promise independent of ctx's lifetime.
+  let firstPartDelivered = false;
   void runRouteWork(
     { db, log },
     async () => {
@@ -242,12 +243,21 @@ routeCommand.command('route', async (ctx) => {
       await sendRouteResult<Keyboard>(splitMessage(head, lines), {
         edit: async (text, kb) => {
           await telegram.editMessageText(chatId, messageId, undefined, text, extra(kb));
+          firstPartDelivered = true;
           tracker.release(); // from here on this message is the result, not progress
         },
         send: (text, kb) => telegram.sendMessage(chatId, text, extra(kb)),
         keyboard,
       });
     },
-    () => notify(t('route.failed'), { force: true }),
+    // Not through `notify`: that one swallows a refused edit, and then the person would get
+    // neither the route nor the notice.
+    () => notifyRouteFailed(
+      {
+        edit: () => telegram.editMessageText(chatId, messageId, undefined, t('route.failed')),
+        send: () => telegram.sendMessage(chatId, t('route.failed')),
+      },
+      firstPartDelivered,
+    ),
   ).finally(() => tracker.release());
 });

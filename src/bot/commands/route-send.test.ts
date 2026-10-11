@@ -1,6 +1,6 @@
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { runRouteWork, sendRouteResult } from './route-send';
+import { notifyRouteFailed, runRouteWork, sendRouteResult } from './route-send';
 
 const KB = { inline_keyboard: [[{ text: 'Maps', url: 'https://maps.example/x' }]] };
 
@@ -117,4 +117,39 @@ describe('runRouteWork', () => {
     expect(s.rows()).toEqual([{ source: '/route', error: '400: Bad Request: message is too long' }]);
     expect(s.notified()).toBe(1);
   });
+});
+
+function noticeIo(editRejects: boolean, sendRejects = false) {
+  const calls: string[] = [];
+  return {
+    calls,
+    io: {
+      edit: async () => { calls.push('edit'); return editRejects ? Promise.reject(new Error('400: message to edit not found')) : undefined; },
+      send: async () => { calls.push('send'); return sendRejects ? Promise.reject(new Error('403: bot was blocked by the user')) : undefined; },
+    },
+  };
+}
+
+test('failure notice: while the status message is still progress, it is edited and nothing is sent', async () => {
+  const s = noticeIo(false);
+  await notifyRouteFailed(s.io, false);
+  expect(s.calls).toEqual(['edit']);
+});
+
+test('failure notice: a refused edit falls back to a new message', async () => {
+  const s = noticeIo(true);
+  await notifyRouteFailed(s.io, false);
+  expect(s.calls).toEqual(['edit', 'send']);
+});
+
+test('failure notice: once the first part is delivered it is never overwritten — a new message only', async () => {
+  const s = noticeIo(false);
+  await notifyRouteFailed(s.io, true);
+  expect(s.calls).toEqual(['send']);
+});
+
+test('failure notice: when the new message is refused too, the rejection reaches the caller', async () => {
+  const s = noticeIo(true, true);
+  await expect(notifyRouteFailed(s.io, false)).rejects.toThrow('403: bot was blocked by the user');
+  expect(s.calls).toEqual(['edit', 'send']);
 });

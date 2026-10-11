@@ -75,6 +75,8 @@ export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<
       } catch (e) {
         log.error({ err: e }, 'refresh post-run failed');
         onFailure?.(e);
+        // The status already says «done» — true for the refresh, but what was to follow it never came.
+        await notify(t('refresh.postrun_failed'), { force: true });
       }
     }
   } catch (e) {

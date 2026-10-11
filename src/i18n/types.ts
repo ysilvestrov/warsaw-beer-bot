@@ -90,6 +90,7 @@ export interface Messages {
   'refresh.starting': string;
   'refresh.done': string;
   'refresh.failed': string;
+  'refresh.postrun_failed': string;
 
   // filters
   'filters.current': string;             // {styles}, {abv}, {rating} — multi-line summary

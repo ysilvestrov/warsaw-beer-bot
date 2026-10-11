@@ -16,11 +16,13 @@ export function recordHandlerFailure(db: DB, f: { at: string; source: string; er
 }
 
 // `at` is always Date.toISOString(), so string order is time order.
-export function handlerFailuresSince(db: DB, sinceIso: string): HandlerFailureGroup[] {
+// Both ends are inclusive. The upper end keeps a row stamped while the host clock ran ahead from
+// being counted as «the last 24 hours» day after day until real time catches up with it.
+export function handlerFailuresSince(db: DB, sinceIso: string, untilIso: string): HandlerFailureGroup[] {
   return db.prepare(
     `SELECT source, error, COUNT(*) AS count FROM handler_failures
-     WHERE at >= ? GROUP BY source, error ORDER BY count DESC, source, error`,
-  ).all(sinceIso) as HandlerFailureGroup[];
+     WHERE at >= ? AND at <= ? GROUP BY source, error ORDER BY count DESC, source, error`,
+  ).all(sinceIso, untilIso) as HandlerFailureGroup[];
 }
 
 export function pruneHandlerFailures(db: DB, beforeIso: string): void {

@@ -86,6 +86,7 @@ export const uk: Messages = {
   'refresh.starting': '⏳ Оновлюю…',
   'refresh.done': '✅ Готово.',
   'refresh.failed': '❌ Не вдалося оновити. Спробуйте пізніше.',
+  'refresh.postrun_failed': '✅ Оновлено, але надіслати список нових пив не вдалося.',
 
   // filters
   'filters.current':

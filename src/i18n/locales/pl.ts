@@ -86,6 +86,7 @@ export const pl: Messages = {
   'refresh.starting': '⏳ Aktualizuję…',
   'refresh.done': '✅ Gotowe.',
   'refresh.failed': '❌ Nie udało się odświeżyć. Spróbuj później.',
+  'refresh.postrun_failed': '✅ Odświeżono, ale nie udało się wysłać listy nowych piw.',
 
   // filters
   'filters.current':

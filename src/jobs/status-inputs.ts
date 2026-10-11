@@ -119,7 +119,7 @@ function readHostPatchInput(now: Date, opts: StatusInputOptions): StatusInputs['
 // #836: a table that cannot be read colours «Канали» yellow instead of taking the report down.
 function readHandlerFailures(db: DB, now: Date): StatusInputs['handlerFailures'] {
   try {
-    return { ok: true, value: handlerFailuresSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()) };
+    return { ok: true, value: handlerFailuresSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(), now.toISOString()) };
   } catch {
     return { ok: false, reason: 'таблицю збоїв не прочитано' };
   }

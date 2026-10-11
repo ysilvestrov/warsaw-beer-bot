@@ -120,7 +120,7 @@ describe('runRefreshPipeline', () => {
     expect(calls).toEqual([{ text: 'refresh.done', force: true }]);
   });
 
-  test('postRun throws: error is logged, pipeline still resolves, no refresh.failed', async () => {
+  test('postRun throws: error is logged, pipeline still resolves, and the person is told the follow-up did not come', async () => {
     const { notify, calls } = makeNotify();
     const errors: unknown[] = [];
     const log = {
@@ -140,7 +140,12 @@ describe('runRefreshPipeline', () => {
       runRefreshPipeline({ run, notify, t: tStub, log, postRun }),
     ).resolves.toBeUndefined();
 
-    expect(calls).toEqual([{ text: 'refresh.done', force: true }]);
+    // refresh.done stays true for the refresh itself; refresh.failed would be false, so the
+    // follow-up has its own text.
+    expect(calls).toEqual([
+      { text: 'refresh.done', force: true },
+      { text: 'refresh.postrun_failed', force: true },
+    ]);
     expect(errors).toHaveLength(1);
   });
 
