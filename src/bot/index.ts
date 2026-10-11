@@ -4,6 +4,7 @@ import type { DB } from '../storage/db';
 import type { Env } from '../config/env';
 import type { Locale, Translator } from '../i18n/types';
 import { i18nMiddleware } from './middleware/i18n';
+import { onHandlerFailure } from './handler-failure';
 
 export interface AppDeps {
   db: DB;
@@ -24,6 +25,6 @@ export function createBot(deps: AppDeps): Telegraf<BotContext> {
     return next();
   });
   bot.use(i18nMiddleware);
-  bot.catch((err, ctx) => deps.log.error({ err, update: ctx.update }, 'bot error'));
+  bot.catch((err, ctx) => onHandlerFailure(deps, err, ctx));
   return bot;
 }

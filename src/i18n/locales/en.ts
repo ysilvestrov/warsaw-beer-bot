@@ -3,6 +3,7 @@ import type { Messages } from '../types';
 export const en: Messages = {
   // app
   'app.no_data_in_snapshot': 'No interesting untried beers right now.',
+  'app.handler_failed': 'The command failed. Please try again later.',
 
   // common
   'common.interrupted_by_restart': '⚠️ Interrupted by a restart — please re-run the command.',

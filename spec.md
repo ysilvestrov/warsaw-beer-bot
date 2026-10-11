@@ -751,6 +751,16 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 | `telegram_id` | INTEGER | PK; скарги цієї людини вимкнено |
 | `banned_at` | TEXT NOT NULL | ISO UTC час заборони |
 
+### 3.20.1 `handler_failures` — збої обробників (v47, #836)
+| Поле | Тип | Правило |
+|---|---|---|
+| `id` | INTEGER | PK AUTOINCREMENT |
+| `at` | TEXT NOT NULL | ISO UTC мить збою |
+| `source` | TEXT NOT NULL | що впало: `/команда`, `callback`, `text` або тип оновлення |
+| `error` | TEXT NOT NULL | перші 200 символів помилки |
+
+Індекс по `at`; рядки старші за 90 днів прибирає щоденний статус.
+
 ### 3.21 `schema_version` — версія міграцій
 Єдине поле `version INTEGER PRIMARY KEY`; по рядку на застосовану міграцію.
 
@@ -820,6 +830,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 44 | Значення ока `mcp_venue` у `venue_checkins.first_eye` і `fest_coverage.eye`. SQLite не змінює `CHECK`, тож обидві таблиці перебудовуються з копіюванням усіх рядків та індексів; без переписування даних. Можна прогнати повторно |
 | 45 | `status_snapshots` (date PK, version, metrics_json, colours_json, created_at) — щоденний знімок метрик і кольорів світлофора; без бекфілу, ідемпотентна |
 | 46 | Оновлення канонічного `feed_path` фест-локації WFP22 (venue `11142155`) у `fest_venues` (#809); ідемпотентна |
+| 47 | `handler_failures` (id, at, source, error) + індекс по `at` — журнал збоїв обробників (#836); без бекфілу, ідемпотентна |
 
 ---
 
@@ -2653,6 +2664,16 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 ### 5.4 Обробка помилок і стійкість
 - Глобальний `bot.catch` логує `{ err, update }` під тегом `bot error`;
   жоден handler не повинен «ронити» процес.
+
+**Збій обробника (#836).** Усе, що обробник не зловив сам, потрапляє в `bot.catch`
+(`onHandlerFailure`, `src/bot/handler-failure.ts`): запис у журнал `bot error`, рядок у
+`handler_failures` і відповідь людині `app.handler_failed` її локаллю («Не вдалося виконати
+команду. Спробуйте пізніше.»). У рядку — мить, назва того, що впало (`/beers` без аргументів,
+`callback`, `text` або тип оновлення), і перші 200 символів помилки; ідентифікатор людини й текст
+її повідомлення не зберігаються. Таймаут обробника Telegraf (90 с) записується, але людині не
+відповідають: обробник далі працює у фоні й може ще відповісти сам. Збій запису або відповіді
+лише логується — `bot.catch` не кидає.
+
 - **Fire-and-forget** для будь-якого handler'а, що чекає на довгу зовнішню
   роботу (refresh, route): миттєва відповідь + захоплені `ctx.telegram`/`chatId`/
   `messageId` + throttled `editMessageText`. Обхід `handlerTimeout = 90 с`.

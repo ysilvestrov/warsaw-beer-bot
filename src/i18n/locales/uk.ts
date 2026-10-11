@@ -3,6 +3,7 @@ import type { Messages } from '../types';
 export const uk: Messages = {
   // app
   'app.no_data_in_snapshot': 'Наразі немає цікавих непитих пив.',
+  'app.handler_failed': 'Не вдалося виконати команду. Спробуйте пізніше.',
 
   // common
   'common.interrupted_by_restart': '⚠️ Перервано рестартом — повтори команду.',
