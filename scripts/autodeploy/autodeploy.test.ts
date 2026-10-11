@@ -1,8 +1,12 @@
 import { makeTempDirectory } from '../test-temp';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
+// Each test drives several real bash ticks through git (~1.3–2.6 s alone on a 4-core box). The default 5 s left
+// under 2x headroom, and on PR #834's CI the first test timed out while the Python release suite ran beside it.
+vi.setConfig({ testTimeout: 20_000 });
 
 /**
  * Merge-deploy (spec docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md).
