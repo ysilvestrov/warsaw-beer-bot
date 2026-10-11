@@ -3953,4 +3953,70 @@ describe('#664 numbered-series retry', () => {
       });
     });
   });
+
+  describe('#393 sibling pool candidate depth', () => {
+    test('exact candidate at index >= 5 matches instead of letting earlier suffix candidate win', async () => {
+      // CITADEL Томатка case (#393):
+      // The true product "Томатка" (5.0%) is at rank 6 (index 5).
+      // Variants at ranks 1-5 have flavour suffixes ("Томатка: Аджика", etc.) with 4.4% ABV.
+      const candidates: SearchResult[] = [
+        { bid: 101, beer_name: 'Томатка: Лайм, Копчений Чилі, Селера, Кінза, Часник', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 5.2, global_rating: 4.0 },
+        { bid: 102, beer_name: 'Томатка: Аджика', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 4.4, global_rating: 3.9 },
+        { bid: 103, beer_name: 'Томатка: Шалена Маринара Скорпіон', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 4.4, global_rating: 3.9 },
+        { bid: 104, beer_name: 'Томатка Аджика 2.0', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 4.4, global_rating: 3.8 },
+        { bid: 105, beer_name: 'Томатка: Маринара', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 4.4, global_rating: 3.9 },
+        { bid: 6697878, beer_name: 'Томатка', brewery_name: 'CITADEL Brewpub', style: 'Sour - Tomato / Vegetable Gose', abv: 5.0, global_rating: 3.89 },
+        { bid: 107, beer_name: 'Томатка: Том Ям Каролінський Жнець', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 5.0, global_rating: 4.1 },
+        { bid: 108, beer_name: 'Томатка: Барбекю', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 5.0, global_rating: 3.9 },
+      ];
+
+      // With truncated 5 candidates, rank 6 exact match is missing from the pool:
+      const truncatedSearch = fakeSearch(() => candidates.slice(0, 5));
+      const truncatedOut = await lookupBeer({
+        brewery: 'CITADEL',
+        name: 'Томатка',
+        abv: 5.0,
+        search: truncatedSearch,
+      });
+      expect(truncatedOut.kind).toBe('not_found');
+
+      // With full candidates (hitsPerPage = 15), rank 6 exact match wins in Stage 2a:
+      const fullSearch = fakeSearch(() => candidates);
+      const fullOut = await lookupBeer({
+        brewery: 'CITADEL',
+        name: 'Томатка',
+        abv: 5.0,
+        search: fullSearch,
+      });
+      expect(fullOut.kind).toBe('matched');
+      assert(fullOut.kind === 'matched');
+      expect(fullOut.result.bid).toBe(6697878); // exact match: Томатка
+    });
+
+    test('generic style name with multiple single-hop variants safely returns not_found', async () => {
+      // Nieczajna Session IPA case (#393/#803):
+      // Tap has generic "Session IPA 12°" @ 5.0%.
+      // Sibling pool has multiple single-hop variants all sharing 5.0% ABV.
+      const candidates: SearchResult[] = [
+        { bid: 201, beer_name: 'Session Black IPA Konkursowe', brewery_name: 'Browar Nieczajna', style: 'IPA', abv: 5.3, global_rating: 3.84 },
+        { bid: 202, beer_name: 'DDH Session Black IPA', brewery_name: 'Browar Nieczajna', style: 'IPA', abv: 4.9, global_rating: 3.74 },
+        { bid: 203, beer_name: 'Talus Single Hop Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.8 },
+        { bid: 204, beer_name: 'Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.9, global_rating: 3.63 },
+        { bid: 205, beer_name: 'New England Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.68 },
+        { bid: 206, beer_name: 'Cascade Single Hop Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.73 },
+        { bid: 207, beer_name: 'Session West Coast IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.66 },
+        { bid: 6828812, beer_name: 'Session IPA - Single Hop: NZ Rhapzody', brewery_name: 'Browar Nieczajna', style: 'IPA - Other', abv: 5.0, global_rating: 3.5 },
+        { bid: 6999832, beer_name: 'Session IPA - Nelson Sauvin & Riwaka', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.5 },
+      ];
+
+      const search = fakeSearch(() => candidates);
+      const out = await lookupBeer({
+        brewery: 'Browar Nieczajna Brewery',
+        name: 'Session IPA 12°',
+        abv: 5.0,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+  });
 });

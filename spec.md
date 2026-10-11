@@ -2017,8 +2017,9 @@ ABV/°/alc/abv/ibu, лапки та кінцеву пунктуацію. Ком�
 POST https://{appId}-dsn.algolia.net/1/indexes/beer/query
 Headers: X-Algolia-Application-Id: {appId}
          X-Algolia-API-Key: {searchKey}
-Body:    {"query": "<query>", "hitsPerPage": 5}
+Body:    {"query": "<query>", "hitsPerPage": 15}
 ```
+`hitsPerPage: 15` (#393: розширено з 5 для запобігання відсіканню точних варіантів у родинах сортів / sibling pools, де новий або менш популярний сорт опиняється нижче популярних варіацій).
 `appId` і `searchKey` — публічні клієнтські ключі (задокументовані дефолти в коді: `9WBO4RQ3HO` /
 `1d347324…`), перевизначаються через опційні env-змінні `UNTAPPD_ALGOLIA_APP_ID` /
 `UNTAPPD_ALGOLIA_SEARCH_KEY`.
