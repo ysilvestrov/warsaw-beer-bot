@@ -60,6 +60,15 @@ class _Drain:
             # A read that failed part-way leaves the capture incomplete: say so (#817 AI review).
             self.dropped = True
 
+    def close(self):
+        """Close our end once the reader is done; one still reading (a descendant holds the pipe) keeps it.
+
+        Left to the garbage collector, the descriptors closed at a moment nobody chose, and a test counting
+        /proc/self/fd elsewhere in the same process failed on whoever ran last (PR #834 CI).
+        """
+        if not self.thread.is_alive():
+            self.pipe.close()
+
     def value(self):
         end = b''.join(self.end)
         if len(end) > self.tail:
@@ -105,10 +114,12 @@ def run(argv, *, timeout, cap=DEFAULT_CAP, tail=DEFAULT_TAIL, cwd=None, env=None
     except BaseException:
         for d in drains:
             d.thread.join(join_grace)
+            d.close()
         raise
     for d in drains:
         # A descendant may still hold the pipe open; do not wait for it beyond the grace.
         d.thread.join(join_grace)
+        d.close()
     stdout, stderr = drains[0].value(), drains[1].value()
     truncated = drains[0].dropped or drains[1].dropped or any(d.thread.is_alive() for d in drains)
     if text:

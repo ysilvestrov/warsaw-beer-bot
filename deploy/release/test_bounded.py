@@ -147,6 +147,29 @@ class Bounded(unittest.TestCase):
             bounded.run(py('import time; time.sleep(30)'), timeout=20, join_grace=1)
         self.assertEqual(len(killed), 1)
 
+    def _recording_popen(self):
+        made = []
+
+        class Recording(subprocess.Popen):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, **kw)
+                made.append(self)
+        return made, mock.patch.object(bounded.subprocess, 'Popen', Recording)
+
+    def test_both_pipes_are_closed_when_it_returns(self):
+        # PR #834 CI: left to the garbage collector, they closed at a moment nobody chose, and a test counting
+        # /proc/self/fd in the same process (test_dbsnap) failed on whoever ran last.
+        made, patch = self._recording_popen()
+        with patch:
+            bounded.run(py('print("x")'), timeout=30)
+        self.assertEqual((made[0].stdout.closed, made[0].stderr.closed), (True, True))
+
+    def test_both_pipes_are_closed_after_a_timeout(self):
+        made, patch = self._recording_popen()
+        with patch, self.assertRaises(subprocess.TimeoutExpired):
+            bounded.run(py('import time; time.sleep(30)'), timeout=0.5, term_grace=1, join_grace=1)
+        self.assertEqual((made[0].stdout.closed, made[0].stderr.closed), (True, True))
+
     def test_limits_are_validated_before_anything_runs(self):
         # #817 AI review: tail=0 used to kill the reader thread with IndexError.
         for cap, tail in ((0, 0), (-1, 10), (10, -5)):
