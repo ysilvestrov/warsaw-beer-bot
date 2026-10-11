@@ -1,7 +1,7 @@
 # #835 — `/beers` ділить довгий список на кілька повідомлень; опис пива не показується як стиль
 
 **Дата:** 2026-10-11
-**Статус:** схвалено в розмові, чекає на перегляд файла
+**Статус:** схвалено; план — `docs/superpowers/plans/2026-10/2026-10-11-835-beers-message-split.md`
 **Issue:** #835 (`bug`, `Severity-2`, `effort/M`)
 **Суміжне, поза цією зміною:** #836 (збій обробника не бачить ніхто)
 
@@ -75,12 +75,13 @@
 
 | Що | Де | Залежності |
 |---|---|---|
-| `splitMessage(head: string[], lines: string[], limit = TELEGRAM_MESSAGE_LIMIT): string[]` — чиста; повертає ≥ 1 повідомлення, кожне ≤ `limit` | новий `src/bot/commands/message-split.ts` | жодних |
+| `splitMessage(head: string[], lines: string[], limit = TELEGRAM_MESSAGE_LIMIT): string[]` — чиста; кожне повідомлення ≤ `limit`; без жодного рядка на вході — порожній список (порожнє повідомлення Telegram теж відхиляє) | новий `src/bot/commands/message-split.ts` | жодних |
+| `sendEach(messages, send)` — шле по черзі; перша відмова зупиняє решту й летить далі | там само | відправник передається аргументом |
 | `isDescription(style: string): boolean`, `displayStyle(tapStyle: string \| null, catalogStyle: string \| null): string \| null` — чисті | новий `src/domain/display-style.ts` | жодних |
 | `catalog_style` (`b.style`) у `TapWithBeer` і в `SELECT` | `src/storage/snapshots.ts` | — |
 | `BeersResult` гілка `ok`: `html: string` → `messages: string[]`; рядок крана бере `displayStyle` | `src/bot/commands/beers-build.ts` | обидві функції |
-| надсилання в циклі | `src/bot/commands/beers.ts` | — |
-| кандидат бере `displayStyle(tap.style, tap.catalog_style)` | `src/bot/commands/newbeers-build.ts`, `src/bot/commands/route.ts` | `displayStyle` |
+| надсилання через `sendEach` | `src/bot/commands/beers.ts` | `sendEach` |
+| `candidateFromTap(tap, pubName)` — одне відображення крана в кандидата замість двох однакових літералів; стиль бере через `displayStyle(tap.style, tap.catalog_style)` | експорт із `src/bot/commands/newbeers-build.ts`, вживається там і в `src/bot/commands/route.ts` | `displayStyle` |
 
 `fmtStyle` не міняється: вона форматує вже обраний стиль. `fitMessage` з `/fest` не чіпається й не
 перевикористовується — вона обрізає, а тут потрібен поділ; спільного в них тільки ліміт.
