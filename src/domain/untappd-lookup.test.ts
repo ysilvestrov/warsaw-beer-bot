@@ -2416,6 +2416,64 @@ describe('#665 Czech grade lookup context', () => {
     });
   });
 
+  describe('Issue #826 and #832 cider producers Vinkon and Cydr Royal', () => {
+    test('matches Vinkon / Bursztynowy to Potęga Tradycji Cydr Bursztynowy via curated alias (#826)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 2724671, beer_name: 'Cydr Bursztynowy', brewery_name: 'Potęga Tradycji', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Vinkon',
+        name: 'Bursztynowy',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(2724671);
+    });
+
+    test('rejects Vinkon / Bursztynowy candidate from an unrelated brewery (#826)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 9999991, beer_name: 'Cydr Bursztynowy', brewery_name: 'Cydrownia', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Vinkon',
+        name: 'Bursztynowy',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('matches CYDR ROYAL / Cydr Jabłko to Royal Apple Cydr Jabłkowy via curated alias (#832)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 5965384, beer_name: 'Cydr Jabłkowy', brewery_name: 'Royal Apple', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'CYDR ROYAL',
+        name: 'Cydr Jabłko',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(5965384);
+    });
+
+    test('rejects CYDR ROYAL candidate from an unrelated cider producer (#832)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 9999992, beer_name: 'Cydr Jabłkowy', brewery_name: 'Slow Flow Group (Smykan)', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.4, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'CYDR ROYAL',
+        name: 'Cydr Jabłko',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+  });
+
   describe('Issue #751 comma-split collaboration identity', () => {
     test('matches Kojetin Brewery / Som pohár čau 14° to the complete split SomPivo identity', async () => {
       const search = fakeSearch(() => [

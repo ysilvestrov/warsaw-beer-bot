@@ -1233,6 +1233,30 @@ describe('Curated brewery alias matching for cider makers and spelling variants 
   });
 });
 
+describe('Curated brewery alias matching for cider producers Vinkon and Cydr Royal (#826, #832)', () => {
+  test('cider producers pass breweryAliasesMatch', () => {
+    expect(breweryAliasesMatch(breweryAliases('Vinkon'), breweryAliases('Potęga Tradycji'))).toBe(true);
+    expect(breweryAliasesMatch(breweryAliases('CYDR ROYAL'), breweryAliases('Royal Apple'))).toBe(true);
+  });
+
+  test('rejects unrelated breweries without curated aliases', () => {
+    expect(breweryAliasesMatch(breweryAliases('Vinkon'), breweryAliases('Royal Apple'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('CYDR ROYAL'), breweryAliases('Potęga Tradycji'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Vinkon'), breweryAliases('Cydrownia'))).toBe(false);
+  });
+
+  test('matches catalog beers under curated aliases', () => {
+    const cat: CatalogBeer[] = [
+      c({ id: 201, brewery: 'Potęga Tradycji', name: 'Cydr Bursztynowy', abv: 4.5 }),
+      c({ id: 202, brewery: 'Royal Apple', name: 'Cydr Jabłkowy', abv: 4.5 }),
+    ];
+    expect(matchBeer({ brewery: 'Vinkon', name: 'Cydr Bursztynowy', abv: 4.5 }, cat))
+      .toMatchObject({ id: 201, source: 'exact' });
+    expect(matchBeer({ brewery: 'CYDR ROYAL', name: 'Cydr Jabłkowy', abv: 4.5 }, cat))
+      .toMatchObject({ id: 202, source: 'exact' });
+  });
+});
+
 describe('#636 fuzzy stage: the best hit must not carry different digits', () => {
   const przetwornia = (id: number, name: string) => c({ id, brewery: 'Przetwórnia Chmielu', name });
   const cat = [przetwornia(233, 'Przetwór #3'), przetwornia(900, 'Modernizm')];

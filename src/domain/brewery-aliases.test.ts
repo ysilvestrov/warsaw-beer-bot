@@ -429,3 +429,29 @@ describe('Curated brewery alias batch for cider makers and spelling variants (#4
   });
 });
 
+describe('Curated brewery alias batch for cider producers Vinkon and Cydr Royal (#826, #832)', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['vinkon', 'potega tradycji'],
+    ['cydr royal', 'royal apple'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+
+  test('normalizes raw labels to alias keys (#826, #832)', () => {
+    expect(normalizeBrewery('Vinkon')).toBe('vinkon');
+    expect(normalizeBrewery('Potęga Tradycji')).toBe('potega tradycji');
+    expect(normalizeBrewery('CYDR ROYAL')).toBe('cydr royal');
+    expect(normalizeBrewery('Royal Apple')).toBe('royal apple');
+  });
+});
+
