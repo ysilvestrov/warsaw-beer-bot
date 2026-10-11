@@ -5,6 +5,7 @@ import { createTranslator } from '../../i18n';
 import { countCheckins } from '../../storage/checkins';
 import { importCommand } from './import';
 import { Context, Telegram } from 'telegraf';
+import pino from 'pino';
 
 function setupImport(n: number) {
   const db = openDb(':memory:'); migrate(db); ensureProfile(db, 1); setUntappdUsername(db, 1, 'a');
@@ -14,7 +15,7 @@ function setupImport(n: number) {
   const ctx = new Context({ update_id: 1, message: { message_id: 1, date: 1,
     chat: { id: 1, type: 'private', first_name: 'Test' }, from: { id: 1, is_bot: false, first_name: 'Test' },
     document: { file_id: 'export', file_unique_id: 'export', file_name: 'history.json' } } }, new Telegram('test'), {} as never);
-  Object.assign(ctx, { deps: { db }, t: createTranslator('uk') });
+  Object.assign(ctx, { deps: { db, log: pino({ level: 'silent' }) }, t: createTranslator('uk') });
   vi.spyOn(ctx, 'reply').mockResolvedValue({ message_id: 2 } as never);
   vi.spyOn(ctx.telegram, 'getFileLink').mockResolvedValue(new URL('https://test.invalid/export'));
   const messages: string[] = [];
@@ -64,5 +65,23 @@ test('a busy retry rechecks the original binding rather than adopting the new ac
   expect(db.prepare('SELECT * FROM checkins').all()).toEqual([]);
   expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
   expect(messages).toEqual(['⏹ Імпорт для a зупинено: акаунт змінився. Збережено 0 рядків; запустіть імпорт знову для поточного акаунта.']);
+  db.close();
+});
+
+test('a failing import tells the person once, records /import, and does not re-throw', async () => {
+  const { db, ctx, messages, response } = setupImport(1);
+  vi.stubGlobal('fetch', async () => response());
+  vi.spyOn(db, 'transaction').mockImplementationOnce(() => { throw new Error('disk on fire'); });
+  await expect(importCommand.middleware()(ctx as never, async () => {})).resolves.toBeUndefined();
+  expect(messages).toEqual(['❌ Помилка після 0 рядків: disk on fire']);
+  expect(db.prepare('SELECT source FROM handler_failures').all()).toEqual([{ source: '/import' }]);
+  db.close();
+});
+
+test('an account change is not a failure: nothing is recorded', async () => {
+  const { db, ctx, response } = setupImport(1);
+  vi.stubGlobal('fetch', async () => { setUntappdUsername(db, 1, 'b'); return response(); });
+  await importCommand.middleware()(ctx as never, async () => {});
+  expect(db.prepare('SELECT source FROM handler_failures').all()).toEqual([]);
   db.close();
 });

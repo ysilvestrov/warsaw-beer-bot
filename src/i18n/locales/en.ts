@@ -76,7 +76,7 @@ export const en: Messages = {
   'route.matrix_progress': '🗺 Distance matrix: {cached}/{total} saved, {missing} new',
   'route.fill_missing': '🗺 Fetching unsaved pairs: {done}/{total}',
   'route.searching_tour': '🧠 Searching for the shortest tour…',
-  'route.failed': '❌ Could not build a route — check the logs.',
+  'route.failed': '❌ Could not build a route. Please try again later.',
   'route.open_in_maps': '🗺 Open route in Google Maps',
   'route.header':
     'Found a route for <b>{count}</b> (or more) untried beers, distance ≈ <b>{km}</b>, pubs on the route: <b>{pubs}</b>.',
@@ -85,7 +85,7 @@ export const en: Messages = {
   'refresh.cooldown': '⏱ Too often — try again in a few minutes.',
   'refresh.starting': '⏳ Refreshing…',
   'refresh.done': '✅ Done.',
-  'refresh.failed': '❌ Failed — check the logs.',
+  'refresh.failed': '❌ Refresh failed. Please try again later.',
 
   // filters
   'filters.current':

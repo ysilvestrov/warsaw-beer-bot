@@ -76,7 +76,7 @@ export const uk: Messages = {
   'route.matrix_progress': '🗺 Матриця відстаней: {cached}/{total} зі збережених, {missing} нових',
   'route.fill_missing': '🗺 Догружаю незбережені пари: {done}/{total}',
   'route.searching_tour': '🧠 Шукаю найкоротший обхід…',
-  'route.failed': '❌ Не вдалось побудувати маршрут — подивись логи.',
+  'route.failed': '❌ Не вдалося побудувати маршрут. Спробуйте пізніше.',
   'route.open_in_maps': '🗺 Маршрут у Google Maps',
   'route.header':
     'Знайдено маршрут для <b>{count}</b> (чи більше) нових пив, відстань ≈ <b>{km}</b>, пабів у маршруті: <b>{pubs}</b>.',
@@ -85,7 +85,7 @@ export const uk: Messages = {
   'refresh.cooldown': '⏱ Занадто часто — спробуй за кілька хвилин.',
   'refresh.starting': '⏳ Оновлюю…',
   'refresh.done': '✅ Готово.',
-  'refresh.failed': '❌ Не вдалось — подивись логи.',
+  'refresh.failed': '❌ Не вдалося оновити. Спробуйте пізніше.',
 
   // filters
   'filters.current':

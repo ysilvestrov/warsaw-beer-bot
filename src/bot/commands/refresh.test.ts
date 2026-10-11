@@ -159,6 +159,38 @@ describe('runRefreshPipeline', () => {
     expect(postRunCalled).toBe(false);
     expect(calls).toEqual([{ text: 'refresh.failed', force: true }]);
   });
+
+  test('a failing run reports it through onFailure, once, with the error', async () => {
+    const { notify } = makeNotify();
+    const failures: unknown[] = [];
+    const boom = new Error('ontap down');
+    await runRefreshPipeline({
+      run: async () => { throw boom; },
+      notify, t: tStub, log: silentLog,
+      onFailure: (e) => { failures.push(e); },
+    });
+    expect(failures).toEqual([boom]);
+  });
+
+  test('a failing postRun reports it through onFailure too', async () => {
+    const { notify } = makeNotify();
+    const failures: unknown[] = [];
+    const boom = new Error('send failed');
+    await runRefreshPipeline({
+      run: async () => {},
+      notify, t: tStub, log: silentLog,
+      postRun: async () => { throw boom; },
+      onFailure: (e) => { failures.push(e); },
+    });
+    expect(failures).toEqual([boom]);
+  });
+
+  test('a successful run never calls onFailure', async () => {
+    const { notify } = makeNotify();
+    const failures: unknown[] = [];
+    await runRefreshPipeline({ run: async () => {}, notify, t: tStub, log: silentLog, onFailure: (e) => { failures.push(e); } });
+    expect(failures).toEqual([]);
+  });
 });
 
 function dbWithPubs() {

@@ -10,6 +10,7 @@ import {
 import { ensureProfile } from '../../storage/user_profiles';
 import { withBusyRetry } from '../../storage/busy-retry';
 import { getHistoryOwner, isCurrentHistoryOwner } from '../../storage/history-owner';
+import { noteFailure } from '../handler-failure';
 import { importCheckins, ImportAccountChangedError } from './import-checkins';
 
 const BATCH_SIZE = 500;
@@ -89,7 +90,10 @@ importCommand.on('document', async (ctx) => {
       return;
     }
     await report(ctx.t('import.failed', { total, message: (e as Error).message }));
-    throw e;
+    // Not re-thrown (#836): bot.catch would answer the person a second time and record the
+    // failure under the update type instead of the command.
+    ctx.deps.log.error({ err: e, total }, 'import failed');
+    noteFailure(ctx.deps, '/import', e);
   } finally {
     stream.destroy();
   }

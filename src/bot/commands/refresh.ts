@@ -9,6 +9,7 @@ import { type NewbeersDeps, type NewbeersResult, filterPubsByQuery } from './new
 import { getUserCity } from '../../storage/user_profiles';
 import { trackProgress } from '../active-progress';
 import { CITIES, type City } from '../../domain/cities';
+import { noteFailure } from '../handler-failure';
 
 const FULL_COOLDOWN_MS = 5 * 60 * 1000;
 const SCOPED_COOLDOWN_MS = 30 * 1000;
@@ -60,10 +61,11 @@ export interface RunRefreshPipelineArgs {
   t: Translator;
   log: pino.Logger;
   postRun?: () => Promise<void>;
+  onFailure?: (err: unknown) => void;
 }
 
 export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<void> {
-  const { run, notify, t, log, postRun } = args;
+  const { run, notify, t, log, postRun, onFailure } = args;
   try {
     await run(notify);
     await notify(t('refresh.done'), { force: true });
@@ -72,10 +74,12 @@ export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<
         await postRun();
       } catch (e) {
         log.error({ err: e }, 'refresh post-run failed');
+        onFailure?.(e);
       }
     }
   } catch (e) {
     log.error({ err: e }, 'refresh failed');
+    onFailure?.(e);
     await notify(t('refresh.failed'), { force: true });
   }
 }
@@ -223,6 +227,7 @@ export function createRefreshCommand(
           t,
           log,
           postRun: postRunClosure,
+          onFailure: (e) => noteFailure({ db, log }, '/refresh', e),
         });
       } finally {
         tracker.release();

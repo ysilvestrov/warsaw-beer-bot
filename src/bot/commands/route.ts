@@ -29,6 +29,9 @@ import {
 import { formatRouteResult, type RoutePubFormat } from './route-format';
 import { googleMapsWalkingUrl } from '../../domain/maps';
 import { trackProgress } from '../active-progress';
+import { splitMessage } from './message-split';
+import { sendRouteResult } from './route-send';
+import { noteFailure } from '../handler-failure';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
 
@@ -217,7 +220,7 @@ routeCommand.command('route', async (ctx) => {
           })),
         };
       });
-      const text = formatRouteResult({
+      const { head, lines } = formatRouteResult({
         N,
         distanceMeters: result.distanceMeters,
         pubsInOrder,
@@ -230,16 +233,20 @@ routeCommand.command('route', async (ctx) => {
       });
       const mapsUrl = googleMapsWalkingUrl(coords);
       const keyboard = mapsUrl
-        ? Markup.inlineKeyboard([[Markup.button.url(t('route.open_in_maps'), mapsUrl)]])
+        ? Markup.inlineKeyboard([[Markup.button.url(t('route.open_in_maps'), mapsUrl)]]).reply_markup
         : undefined;
-      await telegram
-        .editMessageText(chatId, messageId, undefined, text, {
-          parse_mode: 'HTML',
-          ...(keyboard ? { reply_markup: keyboard.reply_markup } : {}),
-        })
-        .catch((err) => log.warn({ err }, 'route result edit failed'));
+      type Keyboard = typeof keyboard;
+      const extra = (kb: Keyboard) => ({ parse_mode: 'HTML' as const, ...(kb ? { reply_markup: kb } : {}) });
+      // No .catch here: a rejected result must reach the catch below, which tells the person and
+      // records it. It used to be a warn in the journal and «шукаю маршрут…» forever (#836).
+      await sendRouteResult<Keyboard>(splitMessage(head, lines), {
+        edit: (text, kb) => telegram.editMessageText(chatId, messageId, undefined, text, extra(kb)),
+        send: (text, kb) => telegram.sendMessage(chatId, text, extra(kb)),
+        keyboard,
+      });
     } catch (e) {
       log.error({ err: e }, 'route failed');
+      noteFailure({ db, log }, '/route', e);
       await notify(t('route.failed'), { force: true });
     } finally {
       tracker.release();

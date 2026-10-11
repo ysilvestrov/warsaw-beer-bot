@@ -22,11 +22,10 @@ export interface FormatRouteOpts {
   t: Translator;
 }
 
-export function formatRouteResult(opts: FormatRouteOpts): string {
+export function formatRouteResult(opts: FormatRouteOpts): { head: string[]; lines: string[] } {
   const { N, distanceMeters, pubsInOrder, locale, t } = opts;
   const km = fmtKm(locale, distanceMeters);
   const lines: string[] = [];
-  lines.push(t('route.header', { count: N, km, pubs: pubsInOrder.length }));
   pubsInOrder.forEach((p, i) => {
     lines.push('');
     lines.push(`<b>${i + 1}. ${escapeHtml(p.name)}</b>`);
@@ -36,5 +35,5 @@ export function formatRouteResult(opts: FormatRouteOpts): string {
       );
     }
   });
-  return lines.join('\n');
+  return { head: [t('route.header', { count: N, km, pubs: pubsInOrder.length })], lines };
 }

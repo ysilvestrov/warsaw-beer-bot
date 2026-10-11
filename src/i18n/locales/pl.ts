@@ -76,7 +76,7 @@ export const pl: Messages = {
   'route.matrix_progress': '🗺 Macierz dystansów: {cached}/{total} z zapisanych, {missing} nowych',
   'route.fill_missing': '🗺 Pobieram brakujące pary: {done}/{total}',
   'route.searching_tour': '🧠 Szukam najkrótszej trasy…',
-  'route.failed': '❌ Nie udało się zbudować trasy — sprawdź logi.',
+  'route.failed': '❌ Nie udało się zbudować trasy. Spróbuj później.',
   'route.open_in_maps': '🗺 Trasa w Google Maps',
   'route.header':
     'Znaleziono trasę dla <b>{count}</b> (lub więcej) nowych piw, dystans ≈ <b>{km}</b>, liczba pubów na trasie: <b>{pubs}</b>.',
@@ -85,7 +85,7 @@ export const pl: Messages = {
   'refresh.cooldown': '⏱ Za często — spróbuj za kilka minut.',
   'refresh.starting': '⏳ Aktualizuję…',
   'refresh.done': '✅ Gotowe.',
-  'refresh.failed': '❌ Nie udało się — sprawdź logi.',
+  'refresh.failed': '❌ Nie udało się odświeżyć. Spróbuj później.',
 
   // filters
   'filters.current':
