@@ -62,6 +62,60 @@ class OpsEntrypoints(unittest.TestCase):
         self.assertEqual(len(pr.ops_entrypoints(read_json(os.path.join(HERE, '..', '..', 'package.json')))), 10)
 
 
+class ExtraScripts(Tmp):
+    def test_payload_entrypoints_are_the_ops_allowlist_then_the_audit_verdict_scripts(self):
+        self.assertEqual(pr.payload_entrypoints({'scripts': ALLOWLIST_SCRIPTS})[-3:], [
+            'scripts/cluster-triage-issues.ts',
+            'scripts/autodeploy/audit-verdict.ts', 'scripts/autodeploy/audit-verdict-cli.ts'])
+
+    def test_payload_entrypoints_count(self):
+        self.assertEqual(len(pr.payload_entrypoints({'scripts': ALLOWLIST_SCRIPTS})), 12)
+
+    def test_the_repository_audit_verdict_scripts_close_over_themselves(self):
+        repo = os.path.join(HERE, '..', '..')
+        self.assertEqual(pr.ops_closure(repo, list(pr.EXTRA_SCRIPTS), TSC), [
+            'scripts/autodeploy/audit-verdict-cli.ts', 'scripts/autodeploy/audit-verdict.ts'])
+
+    def test_assembled_payload_carries_both_and_lists_them_in_the_manifest(self):
+        repo, dist, modules = make_inputs(self.base)
+        for rel in pr.EXTRA_SCRIPTS:
+            write(repo, rel, b'export {};\n')
+        manifest = pr.assemble(repo, dist, modules, os.path.join(self.base, 'p'), release(),
+                               ['scripts/op.ts', *pr.EXTRA_SCRIPTS])
+        self.assertEqual([e['path'] for e in manifest['entries'] if e['path'].startswith('scripts/')], [
+            'scripts/autodeploy', 'scripts/autodeploy/audit-verdict-cli.ts',
+            'scripts/autodeploy/audit-verdict.ts', 'scripts/op.ts'])
+
+
+class ContentDigestFile(Tmp):
+    BASE = 'sha256:' + 'd' * 64
+
+    def test_file_holds_the_content_digest_of_the_manifest_and_base(self):
+        _, manifest = packed(self.base)
+        out = os.path.join(self.base, 'out')
+        digest = pr.write_content_digest(out, manifest, self.BASE)
+        with open(os.path.join(out, pr.CONTENT_DIGEST_FILE), encoding='ascii') as f:
+            self.assertEqual(f.read(), f'{tm.content_digest(manifest, self.BASE)}\n')
+        self.assertEqual(digest, tm.content_digest(manifest, self.BASE))
+
+    def test_two_shas_of_one_tree_write_the_same_digest(self):
+        repo, dist, modules = make_inputs(self.base)
+        one = pr.assemble(repo, dist, modules, os.path.join(self.base, 'p1'), release(sha='a' * 40), ['scripts/op.ts'])
+        two = pr.assemble(repo, dist, modules, os.path.join(self.base, 'p2'), release(sha='b' * 40), ['scripts/op.ts'])
+        os.makedirs(os.path.join(self.base, 'o1'))
+        os.makedirs(os.path.join(self.base, 'o2'))
+        self.assertEqual(pr.write_content_digest(os.path.join(self.base, 'o1'), one, self.BASE),
+                         pr.write_content_digest(os.path.join(self.base, 'o2'), two, self.BASE))
+
+    def test_malformed_base_digest_is_refused_before_anything_is_built(self):
+        out = os.path.join(self.base, 'out')
+        with self.assertRaisesRegex(pr.PackagingError, "^--base-digest must be sha256:<64 lowercase hex>, got 'sha256:abc'$"):
+            pr.main(['--repo', self.base, '--dist', self.base, '--modules', self.base, '--out', out,
+                     '--repo-slug', 'o/r', '--sha', SHA, '--workflow', 'w', '--run-id', '1', '--run-attempt', '1',
+                     '--base-digest', 'sha256:abc'])
+        self.assertEqual(os.path.exists(out), False)
+
+
 class OpsClosure(Tmp):
     def repo(self, files):
         repo = os.path.join(self.base, 'r')

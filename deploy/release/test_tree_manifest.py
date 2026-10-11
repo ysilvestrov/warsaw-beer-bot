@@ -230,5 +230,100 @@ class Parse(unittest.TestCase):
                 self.assertEqual(str(cm.exception), '; '.join(problems))
 
 
+BASE = 'sha256:' + 'b' * 64
+OTHER_BASE = 'sha256:' + 'c' * 64
+# sha256 of the literal text in test_exact_canonical_text_and_digest, computed apart from tree_manifest.
+CONTENT_DIGEST = 'b9d7c9b19578f13909121e25901c7c8d783894a5263de95f9d90830bab341833'
+
+
+def content_manifest(release_sha='1' * 64):
+    """A small payload manifest: a dir, an asset, a link and release.json."""
+    return {'formatVersion': 1, 'entries': [
+        {'path': 'dist', 'type': 'dir', 'mode': 0o755},
+        {'path': 'dist/index.js', 'type': 'file', 'mode': 0o644, 'size': 5, 'sha256': HELLO_SHA},
+        {'path': 'node_modules', 'type': 'dir', 'mode': 0o755},
+        {'path': 'node_modules/.bin', 'type': 'dir', 'mode': 0o755},
+        {'path': 'node_modules/.bin/pkg', 'type': 'symlink', 'target': '../pkg/cli.js'},
+        {'path': 'node_modules/pkg', 'type': 'dir', 'mode': 0o755},
+        {'path': 'node_modules/pkg/cli.js', 'type': 'file', 'mode': 0o755, 'size': 5, 'sha256': HELLO_SHA},
+        {'path': 'release.json', 'type': 'file', 'mode': 0o644, 'size': 300, 'sha256': release_sha},
+        {'path': 'src', 'type': 'dir', 'mode': 0o755},
+        {'path': 'src/api', 'type': 'dir', 'mode': 0o755},
+        {'path': 'src/api/fest-print', 'type': 'dir', 'mode': 0o755},
+        {'path': 'src/api/fest-print/index.html', 'type': 'file', 'mode': 0o644, 'size': 5, 'sha256': HELLO_SHA},
+    ]}
+
+
+def with_entry(manifest, path, **changes):
+    return {'formatVersion': 1, 'entries': [
+        dict(e, **changes) if e['path'] == path else e for e in manifest['entries']]}
+
+
+class ContentDigest(unittest.TestCase):
+    """wbb.content (image spec 2026-10-11 §4.1): what the runtime is, not which commit built it."""
+
+    def test_release_json_alone_does_not_change_it(self):
+        self.assertEqual(tm.content_digest(content_manifest('1' * 64), BASE),
+                         tm.content_digest(content_manifest('2' * 64), BASE))
+
+    def test_other_base_image_changes_it(self):
+        self.assertNotEqual(tm.content_digest(content_manifest(), BASE),
+                            tm.content_digest(content_manifest(), OTHER_BASE))
+
+    def test_changed_asset_bytes_change_it(self):
+        m = content_manifest()
+        changed = with_entry(m, 'src/api/fest-print/index.html', sha256='e' * 64)
+        self.assertNotEqual(tm.content_digest(m, BASE), tm.content_digest(changed, BASE))
+
+    def test_removed_entry_changes_it(self):
+        m = content_manifest()
+        removed = {'formatVersion': 1, 'entries': [e for e in m['entries'] if e['path'] != 'dist/index.js']}
+        self.assertNotEqual(tm.content_digest(m, BASE), tm.content_digest(removed, BASE))
+
+    def test_changed_mode_changes_it(self):
+        m = content_manifest()
+        self.assertNotEqual(tm.content_digest(m, BASE),
+                            tm.content_digest(with_entry(m, 'dist/index.js', mode=0o755), BASE))
+
+    def test_changed_link_target_changes_it(self):
+        m = content_manifest()
+        self.assertNotEqual(tm.content_digest(m, BASE),
+                            tm.content_digest(with_entry(m, 'node_modules/.bin/pkg', target='../pkg/x.js'), BASE))
+
+    def test_entry_order_does_not_matter(self):
+        m = content_manifest()
+        reversed_entries = {'formatVersion': 1, 'entries': list(reversed(m['entries']))}
+        self.assertEqual(tm.content_digest(m, BASE), tm.content_digest(reversed_entries, BASE))
+
+    def test_exact_canonical_text_and_digest(self):
+        # Pins the format: changing it changes every image's label, so it must be deliberate.
+        text = ('"dist" dir 0755 -\n'
+                '"dist/index.js" file 0644 ' + HELLO_SHA + '\n'
+                '"node_modules" dir 0755 -\n'
+                '"node_modules/.bin" dir 0755 -\n'
+                '"node_modules/.bin/pkg" symlink - "../pkg/cli.js"\n'
+                '"node_modules/pkg" dir 0755 -\n'
+                '"node_modules/pkg/cli.js" file 0755 ' + HELLO_SHA + '\n'
+                '"src" dir 0755 -\n'
+                '"src/api" dir 0755 -\n'
+                '"src/api/fest-print" dir 0755 -\n'
+                '"src/api/fest-print/index.html" file 0644 ' + HELLO_SHA + '\n'
+                'base sha256:' + 'b' * 64 + '\n')
+        self.assertEqual(tm.content_text(content_manifest(), BASE), text)
+        self.assertEqual(tm.content_digest(content_manifest(), BASE), CONTENT_DIGEST)
+
+    def test_nested_release_json_is_content(self):
+        # Only the payload's own top-level release.json is excluded.
+        m = content_manifest()
+        nested = {'formatVersion': 1, 'entries': m['entries'] + [
+            {'path': 'src/release.json', 'type': 'file', 'mode': 0o644, 'size': 5, 'sha256': HELLO_SHA}]}
+        self.assertNotEqual(tm.content_digest(m, BASE), tm.content_digest(nested, BASE))
+
+    def test_malformed_base_digest_is_refused(self):
+        for bad in ('', 'b' * 64, 'sha256:' + 'b' * 63, 'sha256:' + 'B' * 64, 'sha512:' + 'b' * 64):
+            with self.subTest(bad=bad), self.assertRaisesRegex(tm.ManifestError, '^base digest must be sha256:'):
+                tm.content_digest(content_manifest(), bad)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -8,6 +8,10 @@ Inputs are already built by the workflow: `dist` from tsconfig.release.json and 
 production-only node_modules from `npm ci --omit=dev`. This script only copies,
 describes and packs; it never builds, so the same bytes can be reasoned about on
 the host without trusting this script's environment.
+
+Image deployment (spec docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md
+§3.1, §4.1): the image's build stage runs this too; --base-digest names the runtime base
+image and <out>/content-digest carries wbb.content (tree_manifest.content_digest).
 """
 import argparse
 import gzip
@@ -38,6 +42,11 @@ TOP_LEVEL = frozenset({RELEASE_JSON, tm.MANIFEST_NAME, 'package.json', 'package-
 OPS_ALLOWLIST = ('alias-key', 'rearm-aliased-orphans', 'rearm-matcher-bug-orphans', 'adjudicate',
                  'close-orphan-issue', 'pin-match', 'repair-legacy-card', 'dispose-legacy-orphan',
                  'retire-resolved-orphans', 'cluster-triage')
+# Not npm scripts: the image's deploy-time audit runs them through the payload's own tsx
+# (image spec 2026-10-11 §4.2). They ride the same closure, policy and manifest as the ops.
+EXTRA_SCRIPTS = ('scripts/autodeploy/audit-verdict.ts', 'scripts/autodeploy/audit-verdict-cli.ts')
+# wbb.content of the payload (image spec §4.1), written next to payload/, never inside it.
+CONTENT_DIGEST_FILE = 'content-digest'
 # Read-by-path runtime assets tsc does not carry into dist (src/api/routes/fest-print.ts).
 ASSET_DIRS = ('src/api/fest-print',)
 OPS_SCRIPT = re.compile(r'^tsx (scripts/[A-Za-z0-9-]+\.ts)$')
@@ -66,6 +75,11 @@ def ops_entrypoints(package_json):
             raise PackagingError(f'npm script {name!r} must be exactly "tsx scripts/<file>.ts", got {scripts.get(name)!r}')
         out.append(m.group(1))
     return out
+
+
+def payload_entrypoints(package_json):
+    """Every TS source the payload must carry with its imports: the ops allowlist, then EXTRA_SCRIPTS."""
+    return ops_entrypoints(package_json) + list(EXTRA_SCRIPTS)
 
 
 def ops_closure(repo, entrypoints, tsc):
@@ -175,6 +189,14 @@ def assemble(repo, dist, modules, payload, release, closure, caps=Caps()):
     return manifest
 
 
+def write_content_digest(out_dir, manifest, base_digest):
+    """<out_dir>/content-digest = content_digest(manifest, base) + newline; returns the digest."""
+    digest = tm.content_digest(manifest, base_digest)
+    with open(os.path.join(out_dir, CONTENT_DIGEST_FILE), 'w', encoding='ascii') as f:
+        f.write(f'{digest}\n')
+    return digest
+
+
 def _tarinfo(name, kind, mode=0, size=0, target=''):
     info = tarfile.TarInfo(name)
     info.type = kind
@@ -232,16 +254,20 @@ def main(argv):
     ap.add_argument('--workflow', required=True)
     ap.add_argument('--run-id', required=True)
     ap.add_argument('--run-attempt', required=True)
+    ap.add_argument('--base-digest', required=True,
+                    help='sha256:<hex> of the runtime base image; part of the content digest')
     ap.add_argument('--node', default='node')
     ap.add_argument('--tsc', default='node_modules/.bin/tsc')
     a = ap.parse_args(argv)
+    if not tm.BASE_DIGEST.match(a.base_digest):
+        raise PackagingError(f'--base-digest must be sha256:<64 lowercase hex>, got {a.base_digest!r}')
     if platform.machine() != 'x86_64':
         raise PackagingError(f'packaging target is x86_64, this machine is {platform.machine()}')
     repo = os.path.realpath(a.repo)
     node = subprocess.run([a.node, '-p', 'process.version + " " + process.versions.modules'],
                           capture_output=True, text=True, check=True).stdout.split()
     with open(os.path.join(repo, 'package.json'), encoding='utf-8') as f:
-        entrypoints = ops_entrypoints(json.load(f))
+        entrypoints = payload_entrypoints(json.load(f))
     release = release_info(a.repo_slug, a.sha, a.workflow, a.run_id, a.run_attempt, node[0], node[1],
                            os.confstr('CS_GNU_LIBC_VERSION'), _sha256(os.path.join(repo, 'package-lock.json')))
     closure = ops_closure(repo, entrypoints, os.path.join(repo, a.tsc))
@@ -249,7 +275,8 @@ def main(argv):
     payload = os.path.join(a.out, 'payload')
     manifest = assemble(repo, a.dist, a.modules, payload, release, closure)
     digest = write_archive(payload, manifest, a.out)
-    print(f'{ARCHIVE} sha256 {digest}; tree digest {tm.tree_digest(manifest)}; '
+    content = write_content_digest(a.out, manifest, a.base_digest)
+    print(f'{ARCHIVE} sha256 {digest}; tree digest {tm.tree_digest(manifest)}; content {content}; '
           f'{len(manifest["entries"])} entries; {len(closure)} ops sources')
     return 0
 

@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import posixpath
+import re
 import stat
 import sys
 
@@ -26,6 +27,9 @@ MANIFEST_NAME = 'tree-manifest.json'
 FILE_MODES = (0o644, 0o755)
 DIR_MODE = 0o755
 MAX_LINK_HOPS = 40
+# The payload file that names the commit and CI run; content_digest leaves it out.
+RELEASE_JSON = 'release.json'
+BASE_DIGEST = re.compile(r'^sha256:[0-9a-f]{64}$')
 
 
 class ManifestError(Exception):
@@ -38,6 +42,35 @@ def canonical_bytes(manifest):
 
 def tree_digest(manifest):
     return hashlib.sha256(canonical_bytes(manifest)).hexdigest()
+
+
+def content_text(manifest, base_digest):
+    """The canonical text wbb.content hashes (image spec 2026-10-11 §4.1).
+
+    One line per manifest entry except the top-level release.json (it carries the SHA,
+    run and attempt, so two builds of the same tree would differ), sorted by path bytes:
+    `"<path>" file <mode> <sha256>`, `"<path>" dir <mode> -`, `"<path>" symlink - "<target>"`
+    (paths and targets JSON-quoted, so no name can forge a line), then `base <digest>` of
+    the runtime base image. tree-manifest.json never lists itself, so it is not in here.
+    """
+    if not isinstance(base_digest, str) or not BASE_DIGEST.match(base_digest):
+        raise ManifestError(f'base digest must be sha256:<64 lowercase hex>, got {base_digest!r}')
+    lines = []
+    for e in _sorted(e for e in manifest['entries'] if e['path'] != RELEASE_JSON):
+        quoted = json.dumps(e['path'], ensure_ascii=False)
+        if e['type'] == 'file':
+            lines.append(f'{quoted} file {e["mode"]:04o} {e["sha256"]}')
+        elif e['type'] == 'dir':
+            lines.append(f'{quoted} dir {e["mode"]:04o} -')
+        else:
+            lines.append(f'{quoted} symlink - {json.dumps(e["target"], ensure_ascii=False)}')
+    lines.append(f'base {base_digest}')
+    return '\n'.join(lines) + '\n'
+
+
+def content_digest(manifest, base_digest):
+    """sha256 hex of content_text: equal for two images exactly when their runtime is the same."""
+    return hashlib.sha256(content_text(manifest, base_digest).encode('utf-8')).hexdigest()
 
 
 def path_problem(path):
