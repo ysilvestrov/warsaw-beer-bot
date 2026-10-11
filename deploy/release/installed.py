@@ -11,7 +11,6 @@ file has no installed copy (a test module, a template a human fills in with secr
 digestable(path) is what the root helper's `digest` may hash for the operator (plan C-core "Рішення" п.3).
 """
 import posixpath
-import re
 
 # The controller's code (root:root, 0755 dirs / 0644 files) and its two entry points (stage В writes both).
 LIB_DIR = '/usr/local/lib/wbb-release'
@@ -82,18 +81,17 @@ def installed_path(repo_path):
     return None
 
 
-# A sudoers.d name sudo reads: no dot (sudo skips such files, and it rules out `.`/`..`), no `~`, nothing else.
-SUDOERS_NAME = re.compile(r'[A-Za-z0-9_-]+')
+# The files of deploy/sudoers.d, by name (test_installed checks this is exactly that directory): the only names in
+# SUDOERS_DIR root digests for the operator (e2e review N2 — not "any name sudo would read", which let the operator
+# ask root about a foreign file such as another package's sudoers drop-in).
+SUDOERS_FILES = ('warsaw-beer-bot', 'wbb-release')
 
 
 def digestable(path):
     """True for an installed copy the operator cannot read and root may hash for them (`wbb-release digest`).
 
-    The rule must admit only what installed_path yields for some repo file, but root runs it without the repo.
-    installed_path maps every deploy/sudoers.d/<name> to SUDOERS_DIR/<name> and nothing else into that directory,
-    so "a file the repo installs in SUDOERS_DIR" is exactly "a name directly in SUDOERS_DIR" — the name kept to
-    what sudo itself reads, which also keeps out `..`, a second level and any spelling of another directory.
-    The litestream config is the plan's one other path, named exactly: deploy/README installs it 0644, so the
+    The rule must admit only what installed_path yields for some repo file, but root runs it without the repo:
+    SUDOERS_DIR/<name> for each name of SUDOERS_FILES, spelled exactly. The litestream config is the plan's one other path, named exactly: deploy/README installs it 0644, so the
     operator normally reads it themself, but a host that keeps it closed is assessed rather than "cannot assess".
     The comparison is on the string as given: no normalisation, so `/etc//sudoers.d/x` or `/etc/./…` is refused.
     """
@@ -101,5 +99,4 @@ def digestable(path):
         return False
     if path == LITESTREAM_CONFIG:
         return True
-    head, name = posixpath.split(path)
-    return head == SUDOERS_DIR and SUDOERS_NAME.fullmatch(name) is not None
+    return path in {posixpath.join(SUDOERS_DIR, name) for name in SUDOERS_FILES}

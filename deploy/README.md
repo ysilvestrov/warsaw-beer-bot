@@ -456,8 +456,9 @@ on stderr: dirty checkout, unusable `wbb-trial`, `visudo` rejected the file — 
 
 **Installed copies root must read.** `/etc/sudoers.d/*` is 0440, so the operator cannot compare it;
 the tick asks `sudo -n /usr/local/libexec/wbb-release digest --path <installed path>`, which prints
-`DIGEST <path> <sha256> uid <n> mode <0nnn>` (or `ABSENT <path>`) only for a file directly in
-`/etc/sudoers.d` or `/etc/litestream.yml`, refusing symlinks. A copy the operator can read is never
+`DIGEST <path> <sha256> uid <n> mode <0nnn>` (or `ABSENT <path>`) only for this repo's own sudoers files
+(`installed.SUDOERS_FILES`: `/etc/sudoers.d/warsaw-beer-bot`, `/etc/sudoers.d/wbb-release`) or
+`/etc/litestream.yml`, refusing symlinks. A copy the operator can read is never
 sent to root.
 
 **`publish` takes the ZIP on stdin.** The sudo rule is `publish --sha * --archive -`, and the helper refuses

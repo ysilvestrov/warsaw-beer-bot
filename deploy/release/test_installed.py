@@ -93,13 +93,13 @@ class Digestable(unittest.TestCase):
     """installed.digestable: what `wbb-release digest` (root) may hash for the operator (plan C-core "Рішення" п.3)."""
 
     def test_installed_sudoers_files_and_the_litestream_config(self):
-        for path in ('/etc/sudoers.d/wbb-release', '/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/A_b-9',
-                     '/etc/litestream.yml'):
+        for path in ('/etc/sudoers.d/wbb-release', '/etc/sudoers.d/warsaw-beer-bot', '/etc/litestream.yml'):
             with self.subTest(path):
                 self.assertIs(ins.digestable(path), True)
 
     def test_anything_else_is_refused(self):
-        for path in ('/etc/shadow', '/etc/sudoers', '/etc/sudoers.d', '/etc/sudoers.d/', '/etc/sudoers.d/..',
+        for path in ('/etc/sudoers.d/A_b-9', '/etc/sudoers.d/README', '/etc/sudoers.d/90-cloud-init-users',
+                     '/etc/shadow', '/etc/sudoers', '/etc/sudoers.d', '/etc/sudoers.d/', '/etc/sudoers.d/..',
                      '/etc/sudoers.d/.', '/etc/sudoers.d/../shadow', '/etc/sudoers.d/.hidden', '/etc/sudoers.d/a.b',
                      '/etc/sudoers.d/a~', '/etc/sudoers.d/a b', '/etc/sudoers.d/a\n', '/etc/sudoers.d/sub/x',
                      '/etc//sudoers.d/x', 'etc/sudoers.d/x', '/etc/sudoers.d/wbb-relеase', '/etc/litestream.yml/',
@@ -108,10 +108,15 @@ class Digestable(unittest.TestCase):
             with self.subTest(path):
                 self.assertIs(ins.digestable(path), False)
 
+    def test_sudoers_files_are_exactly_the_files_of_deploy_sudoers_d(self):
+        """e2e review N2: the helper cannot see the repo; its list is this directory, kept in step here."""
+        self.assertEqual(sorted(ins.SUDOERS_FILES), sorted(os.listdir(os.path.join(REPO, 'deploy', 'sudoers.d'))))
+
     def test_every_digestable_destination_is_one_the_repo_installs_there(self):
         """The helper cannot see the repo: the rule it applies must only ever admit images of installed_path."""
         self.assertIn('/etc/litestream.yml', ins.COPIES.values())
-        self.assertEqual(ins.installed_path('deploy/sudoers.d/A_b-9'), '/etc/sudoers.d/A_b-9')
+        self.assertEqual(sorted(ins.installed_path(f'deploy/sudoers.d/{n}') for n in ins.SUDOERS_FILES),
+                         ['/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/wbb-release'])
 
     def test_every_installed_copy_root_must_digest_is_digestable(self):
         """What the operator may be unable to read (sudoers 0440; the litestream config, if closed) has the root path."""
