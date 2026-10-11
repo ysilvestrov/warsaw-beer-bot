@@ -11,9 +11,11 @@
 # CI smoke (read-only, no network): payload-probe.cjs native|assets|ops, trial, start-check.
 #
 # Both bases are pinned by digest from mirror.gcr.io (anonymous Docker Hub gave 429).
-# RUNTIME_BASE_DIGEST is the one source of the runtime base: it names the FROM below and
-# feeds --base-digest, so wbb.content changes exactly when the runtime base does.
-ARG RUNTIME_BASE_DIGEST=sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+# The runtime FROM below carries its digest as a literal, so Dependabot (docker) can bump it: it
+# does not resolve build args in FROM. The build stage gets the same digest as RUNTIME_BASE_DIGEST
+# from scripts/image-base-digest.sh, which reads that literal (CI and any local build pass it), so
+# wbb.content changes exactly when the runtime base does. No default: package_runtime.py refuses
+# an empty or malformed digest.
 
 FROM mirror.gcr.io/library/node:24-bookworm@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0 AS build
 WORKDIR /src
@@ -49,7 +51,7 @@ RUN python3 deploy/release/package_runtime.py --repo . --dist /tmp/dist --module
 #   and the runtime base digest before it exists, and is not in the manifest, so it never feeds
 #   itself; CI reads it to set the wbb.content label.
 # Modes are set in the build stage (a-w, a+rX): a chmod layer here would copy every file again.
-FROM mirror.gcr.io/library/node:24-bookworm-slim@${RUNTIME_BASE_DIGEST}
+FROM mirror.gcr.io/library/node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 ARG SOURCE_SHA
 LABEL org.opencontainers.image.revision="${SOURCE_SHA}" \
       org.opencontainers.image.source="https://github.com/ysilvestrov/warsaw-beer-bot"

@@ -119,6 +119,47 @@ describe('ci.yml image job', () => {
   });
 });
 
+// Dependabot (docker) bumps only a literal digest in FROM; the build arg follows it (image spec §4.1).
+describe('runtime base digest', () => {
+  const run = (dockerfile: string) => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'wbb-base-'));
+    try {
+      writeFileSync(resolve(dir, 'Dockerfile'), dockerfile);
+      const r = spawnSync('bash', [resolve(root, 'scripts/image-base-digest.sh'), resolve(dir, 'Dockerfile')], { encoding: 'utf8' });
+      return [r.status, r.stdout, r.stderr.trim()];
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const D1 = `sha256:${'a'.repeat(64)}`;
+  const D2 = `sha256:${'b'.repeat(64)}`;
+
+  it('is read from the literal in the runtime FROM of the real Dockerfile', () => {
+    const literal = readFileSync(resolve(root, 'deploy/image/Dockerfile'), 'utf8')
+      .split('\n').filter((l) => l.startsWith('FROM mirror.gcr.io/library/node:24-bookworm-slim@'))
+      .map((l) => l.split('@')[1]);
+    expect(literal).toEqual(['sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20']);
+    expect(run(readFileSync(resolve(root, 'deploy/image/Dockerfile'), 'utf8'))).toEqual([0, `${literal[0]}\n`, '']);
+  });
+
+  it('is the one pinned slim FROM, whatever comes after it on the line', () => {
+    expect(run(`FROM x/node:24-bookworm@${D2} AS build\nFROM x/node:24-bookworm-slim@${D1}\n`)).toEqual([0, `${D1}\n`, '']);
+  });
+
+  it.each([
+    ['none', `FROM x/node:24-bookworm@${D2} AS build\n`],
+    ['two', `FROM x/node:24-bookworm-slim@${D1}\nFROM x/node:24-bookworm-slim@${D2}\n`],
+    ['a build arg instead of a literal', 'FROM x/node:24-bookworm-slim@${RUNTIME_BASE_DIGEST}\n'],
+  ])('refuses %s', (_name, dockerfile) => {
+    expect(run(dockerfile)[0]).toBe(1);
+  });
+
+  it('is what CI passes as RUNTIME_BASE_DIGEST', () => {
+    expect(job('image').map((l) => l.trim())).toContain(
+      '--build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)"');
+  });
+});
+
 describe('ci.yml: the runtime artifact is gone', () => {
   it('has no package job and uploads no artifact', () => {
     expect([workflow.indexOf('  package:'), workflow.filter((l) => l.includes('upload-artifact'))]).toEqual([-1, []]);

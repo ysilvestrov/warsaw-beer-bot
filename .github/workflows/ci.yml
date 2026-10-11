@@ -78,6 +78,7 @@ jobs:
         run: >-
           docker buildx build -f deploy/image/Dockerfile --platform linux/amd64
           --provenance=false --sbom=false --load
+          --build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)"
           --build-arg SOURCE_SHA="$GITHUB_SHA" --build-arg RUN_ID="$GITHUB_RUN_ID"
           --build-arg RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" -t wbb-image:smoke .
 
