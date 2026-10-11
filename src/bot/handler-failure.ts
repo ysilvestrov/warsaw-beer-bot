@@ -25,10 +25,19 @@ export function noteFailure(
   }
 }
 
+// An update of a shape failureSource does not expect must not turn the error handler into a thrower.
+function sourceOf(ctx: BotContext): string {
+  try {
+    return failureSource(ctx.update);
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** #836: everything a handler did not catch itself ends here. Never throws. */
 export async function onHandlerFailure(deps: AppDeps, err: unknown, ctx: BotContext, now: Date = new Date()): Promise<void> {
   deps.log.error({ err, update: ctx.update }, 'bot error');
-  noteFailure(deps, failureSource(ctx.update), err, now);
+  noteFailure(deps, sourceOf(ctx), err, now);
   if (isHandlerTimeout(err) || ctx.chat === undefined) return;
   // ctx.t is missing when the i18n middleware itself failed; 'en' is that middleware's own default.
   const t = ctx.t ?? createTranslator('en');

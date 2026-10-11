@@ -5,7 +5,9 @@ import type { Update } from '@telegraf/types';
 export function failureSource(update: Update): string {
   if ('callback_query' in update) return 'callback';
   if ('message' in update && 'text' in update.message) {
-    const command = /^\/([A-Za-z0-9_]+)/.exec(update.message.text);
+    // 32 is Telegram's own limit for a command name; anything longer is not a command but text
+    // the person typed, and that is not kept.
+    const command = /^\/([A-Za-z0-9_]{1,32})(?![A-Za-z0-9_])/.exec(update.message.text);
     return command ? `/${command[1].toLowerCase()}` : 'text';
   }
   return Object.keys(update).find((key) => key !== 'update_id') ?? 'unknown';

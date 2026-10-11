@@ -31,3 +31,16 @@ test('any other update is named by its update type', () => {
 test('an update with nothing but its id is "unknown"', () => {
   expect(failureSource({ update_id: 1 } as unknown as Update)).toBe('unknown');
 });
+test('a command name of 32 characters is kept, 33 is text the person typed', () => {
+  expect([failureSource(text(`/${'a'.repeat(32)} x`)), failureSource(text(`/${'a'.repeat(33)}`))]).toEqual([
+    '/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'text',
+  ]);
+});
+test('a lone slash is text', () => {
+  expect(failureSource(text('/'))).toBe('text');
+});
+test('an edited message with a command is named by its update type, never by its text', () => {
+  const update = { update_id: 1, edited_message: { message_id: 1, date: 0, chat: { id: 5, type: 'private' }, text: '/beers secret' } };
+  expect(failureSource(update as unknown as Update)).toBe('edited_message');
+});

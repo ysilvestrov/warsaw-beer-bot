@@ -113,6 +113,15 @@ describe('onHandlerFailure', () => {
   });
 });
 
+describe('onHandlerFailure — an update it cannot name', () => {
+  it('records it as "unknown" instead of throwing', async () => {
+    const s = setup({ fail: new Error('unused') });
+    const ctx = { update: { update_id: 1, message: null }, chat: undefined } as unknown as BotContext;
+    await onHandlerFailure(s.deps, new Error('boom'), ctx, NOW);
+    expect(s.rows()).toEqual([{ at: '2026-10-11T10:00:00.000Z', source: 'unknown', error: 'boom' }]);
+  });
+});
+
 describe('noteFailure', () => {
   it('writes one row with the given source', () => {
     const s = setup({ fail: new Error('unused') });
