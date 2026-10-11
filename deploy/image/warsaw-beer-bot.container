@@ -1,0 +1,41 @@
+# Quadlet template for the bot's container (spec
+# docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md §3.2).
+# Not installed by anything yet: the root helper `wbb-image activate` will write it to
+# /etc/containers/systemd/warsaw-beer-bot.container with @@DIGEST@@ (sha256:<hex>),
+# @@UID@@ and @@GID@@ (the bot's numeric ids) filled in. Image is pinned by digest, never a tag.
+#
+# Volume= lists every absolute path the bot reads or writes on the host;
+# scripts/image-volumes.test.ts fails on a path literal in src/ that none of them covers.
+[Unit]
+Description=Warsaw Beer Crawler Bot (container)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=warsaw-beer-bot
+Image=ghcr.io/ysilvestrov/warsaw-beer-bot@@@DIGEST@@
+Pull=never
+User=@@UID@@
+Group=@@GID@@
+ReadOnly=true
+Tmpfs=/tmp
+DropCapability=ALL
+NoNewPrivileges=true
+Network=host
+EnvironmentFile=/etc/warsaw-beer-bot/.env
+Environment=WBB_RELEASE_REQUIRED=true
+# Database, media, triage logs, MCP OAuth state.
+Volume=/var/lib/warsaw-beer-bot:/var/lib/warsaw-beer-bot:rw
+# Reboot request (src/jobs/reboot-request.ts).
+Volume=/var/lib/wbb-host-patch:/var/lib/wbb-host-patch:rw
+# Host patch collector summary (src/jobs/host-patch.ts).
+Volume=/var/tmp/wbb-host-patch:/var/tmp/wbb-host-patch:ro
+# Resource monitor summary (src/jobs/test-diagnostics.ts).
+Volume=/var/tmp/wbb-resource-monitor:/var/tmp/wbb-resource-monitor:ro
+
+[Service]
+Restart=on-failure
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

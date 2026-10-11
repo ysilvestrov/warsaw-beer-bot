@@ -1,0 +1,17 @@
+# Build context of deploy/image/Dockerfile. The build stage copies the whole checkout
+# (COPY . .); only what package_runtime.py packs reaches the image, but secrets and
+# local state must not reach even the build stage.
+.git
+node_modules
+extension/node_modules
+extension/dist
+dist
+tmp
+coverage
+.worktrees
+**/__pycache__
+.env
+.env.local
+*.db
+*.db-wal
+*.db-shm
