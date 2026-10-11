@@ -26,7 +26,8 @@ Order is dependencies first (M2 #527): library -> wrappers -> sudoers -> units -
 that the checkout no longer installs are removed (helpers_adapter.lib_orphans, the tick's own notion).
 
 --check writes nothing: it prints every difference and exits 1 if there is one.
-Exit codes: 0 done / no difference; 1 a difference (--check) or a refused precondition; 64 usage; 70 internal.
+Exit codes: 0 done / no difference; 1 a difference (--check), a difference that remains after an install, or a
+refused precondition; 64 usage; 70 internal (also a module of the installer that fails to import).
 All absolute paths are taken under `root` (tests pass a temporary directory; the host is '/').
 """
 import argparse
@@ -40,16 +41,24 @@ import stat
 import sys
 import traceback
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bounded  # noqa: E402
-import installed as ins  # noqa: E402
-import sandbox as sb  # noqa: E402
-from helpers import HelperError  # noqa: E402
-from helpers_adapter import lib_orphans, unsafe_copy  # noqa: E402
-from safe_tar import Refused  # noqa: E402
-from wbb_release import PRODUCTION_ROOTS, TOKEN_FILE, TOKEN_KEY, TRIAL_ROOT, read_token  # noqa: E402
-
 EX_OK, EX_DIFF, EX_USAGE, EX_SOFTWARE = 0, 1, 64, 70
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import bounded  # noqa: E402
+    import installed as ins  # noqa: E402
+    import sandbox as sb  # noqa: E402
+    from helpers import HelperError  # noqa: E402
+    from helpers_adapter import lib_orphans, unsafe_copy  # noqa: E402
+    from safe_tar import Refused  # noqa: E402
+    from wbb_release import PRODUCTION_ROOTS, TOKEN_FILE, TOKEN_KEY, TRIAL_ROOT, read_token  # noqa: E402
+except Exception:
+    # e2e review N4, as wbb_release.py: Python exits 1 on an uncaught import error, and 1 here means "a difference
+    # or a refused precondition". Run as the installer, a broken module is an internal error; imported, it raises.
+    if __name__ != '__main__':
+        raise
+    traceback.print_exc()
+    sys.exit(EX_SOFTWARE)
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 CMD_TIMEOUT_S = 120
 

@@ -121,6 +121,11 @@ class BrokenImport(unittest.TestCase):
     def test_the_tick_exits_71(self):
         self.assertEqual(self.run_broken('tick.py', 'prepare.py', 'timer'), (71, '', 'ImportError: broken on purpose'))
 
+    def test_the_installer_exits_70_not_1(self):
+        """e2e review N4: 1 from the installer is "a difference or a refusal", never a broken module."""
+        self.assertEqual(self.run_broken('installer.py', 'sandbox.py', '--check'),
+                         (70, '', 'ImportError: broken on purpose'))
+
     def test_imported_by_an_adapter_the_failure_stays_an_exception(self):
         """helpers_adapter imports wbb_release: inside tick's make_env the failure must be catchable (EnvFailed),
         not a SystemExit that skips the notice."""

@@ -431,9 +431,13 @@ sudo bash deploy/install-release.sh --check   # writes nothing; exit 1 lists eve
 | `deploy/sudoers.d/wbb-release` | `/etc/sudoers.d/wbb-release` | root:root 0440, `visudo -cf` on a dotted temp file before the rename |
 | `deploy/wbb-tick.service`, `.timer`, `wbb-tick-failed.service` | `/etc/systemd/system/` | root:root 0644, then `daemon-reload` |
 
+The sudoers file holds one rule per helper verb the adapters call through sudo (`audit` runs without root,
+so it has none) plus `systemctl stop|start` of the bot and litestream.
+
 It also creates the system user `wbb-trial` (nologin, no home, own group; an existing one is checked and
-**never fixed** — a wrong one is a refusal) and the root-private directories `/var/lib/wbb-trial` (0755),
-`/var/lib/wbb-deploy/receipts` (0700) and `/etc/wbb-deploy` (0700). The GitHub token
+**never fixed** — a wrong one is a refusal) and the directories `/var/lib/wbb-trial` (root 0755, not
+private: the parent of each run's 0700 `wbb-trial` scratch), and the root-private `/var/lib/wbb-deploy`,
+`/var/lib/wbb-deploy/receipts` and `/etc/wbb-deploy` (all 0700). The GitHub token
 `/etc/wbb-deploy/github.env` (root 0600, one `WBB_GITHUB_TOKEN=` — fine-grained, Actions: read on this repo)
 is only checked; a missing one is reported, not an error (the transition needs it, this step does not).
 
@@ -450,9 +454,10 @@ Run as root inside your checkout, it leaves nothing root-owned there: Python run
 `__pycache__`), git with `--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null` (no index
 rewrite, no fsmonitor, no hook). The wrappers run the installed library with `-I -B` too.
 
-Exit codes: 0 done / no difference; 1 a difference (`--check`) or a refused precondition (`REFUSED: …`
-on stderr: dirty checkout, unusable `wbb-trial`, `visudo` rejected the file — the old one stays); 64 usage;
-70 internal error.
+Exit codes: 0 done / no difference; 1 a difference (`--check`, or one that remains after an install) or a
+refused precondition (`REFUSED: …` on stderr: dirty checkout, unusable `wbb-trial`, `visudo` rejected the
+file — the old one stays, a directory where a file goes, a symlink or submodule tracked in scope); 64 usage;
+70 internal error (also a module of the installer that fails to import).
 
 **Installed copies root must read.** `/etc/sudoers.d/*` is 0440, so the operator cannot compare it;
 the tick asks `sudo -n /usr/local/libexec/wbb-release digest --path <installed path>`, which prints
