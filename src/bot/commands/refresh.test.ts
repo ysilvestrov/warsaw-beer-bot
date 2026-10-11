@@ -491,6 +491,29 @@ describe('createRefreshCommand scope forwarding', () => {
     expect(sent).toEqual([expected]);
   });
 
+  test('a failing run is recorded as a /refresh failure by the command itself', async () => {
+    const { db } = dbWithPubs();
+    const telegramId = 1301;
+    ensureProfile(db, telegramId);
+    setUserCity(db, telegramId, 'warszawa');
+    const command = createRefreshCommand(
+      async () => { throw new Error('sweep exploded'); },
+      () => ({ kind: 'empty' }),
+    );
+
+    await command.middleware()(refreshContext({
+      db,
+      telegramId,
+      adminTelegramId: '42',
+      text: '/refresh',
+      sent: [],
+    }), async () => {});
+
+    await vi.waitFor(() => expect(
+      db.prepare('SELECT source, error FROM handler_failures').all(),
+    ).toEqual([{ source: '/refresh', error: 'sweep exploded' }]));
+  });
+
   test('pub_not_found starts no work and does not consume the caller scoped cooldown', async () => {
     const { db } = dbWithPubs();
     const telegramId = 1201;

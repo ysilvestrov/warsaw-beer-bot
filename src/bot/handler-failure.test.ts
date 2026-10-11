@@ -83,6 +83,16 @@ describe('onHandlerFailure', () => {
     ]);
   });
 
+  it('an AbortSignal timeout that escaped a handler is answered, not mistaken for Telegraf\'s own', async () => {
+    const abort = Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    const s = setup({ fail: abort });
+    await s.bot.handleUpdate(message('/route'));
+    expect(s.replies).toEqual(['Не вдалося виконати команду. Спробуйте пізніше.']);
+    expect(s.rows()).toEqual([
+      { at: '2026-10-11T10:00:00.000Z', source: '/route', error: 'The operation was aborted due to timeout' },
+    ]);
+  });
+
   it('a reply that fails is logged as a warning and does not throw', async () => {
     const s = setup({ fail: new Error('boom'), replyRejects: true });
     await expect(s.bot.handleUpdate(message('/pubs'))).resolves.toBeUndefined();

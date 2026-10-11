@@ -9,7 +9,9 @@ const errorText = (err: unknown): string => (err instanceof Error ? err.message 
 
 // Telegraf wraps every handler in p-timeout (handlerTimeout, 90 s). The handler is NOT cancelled —
 // it keeps running — so "failed" would be a claim we cannot make to the person.
-const isHandlerTimeout = (err: unknown): boolean => err instanceof Error && err.name === 'TimeoutError';
+// AbortSignal.timeout() also rejects with a TimeoutError, so the name alone is not enough.
+const isHandlerTimeout = (err: unknown): boolean =>
+  err instanceof Error && err.name === 'TimeoutError' && /^Promise timed out after /.test(err.message);
 
 /** #836: records a failure for the daily status. Bookkeeping must never break the answer, so it never throws. */
 export function noteFailure(

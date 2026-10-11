@@ -30,8 +30,7 @@ import { formatRouteResult, type RoutePubFormat } from './route-format';
 import { googleMapsWalkingUrl } from '../../domain/maps';
 import { trackProgress } from '../active-progress';
 import { splitMessage } from './message-split';
-import { sendRouteResult } from './route-send';
-import { noteFailure } from '../handler-failure';
+import { runRouteWork, sendRouteResult } from './route-send';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
 
@@ -118,8 +117,9 @@ routeCommand.command('route', async (ctx) => {
   // Detach the work: even with /table API + DB cache, a cold call still
   // exceeds Telegraf's 90s handlerTimeout on a fresh deploy. Captured locals
   // above keep the background promise independent of ctx's lifetime.
-  void (async () => {
-    try {
+  void runRouteWork(
+    { db, log },
+    async () => {
       const n = routePubs.length;
       const totalPairs = (n * (n - 1)) / 2;
       const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
@@ -237,19 +237,17 @@ routeCommand.command('route', async (ctx) => {
         : undefined;
       type Keyboard = typeof keyboard;
       const extra = (kb: Keyboard) => ({ parse_mode: 'HTML' as const, ...(kb ? { reply_markup: kb } : {}) });
-      // No .catch here: a rejected result must reach the catch below, which tells the person and
+      // No .catch here: a rejected result must reach runRouteWork, which tells the person and
       // records it. It used to be a warn in the journal and «шукаю маршрут…» forever (#836).
       await sendRouteResult<Keyboard>(splitMessage(head, lines), {
-        edit: (text, kb) => telegram.editMessageText(chatId, messageId, undefined, text, extra(kb)),
+        edit: async (text, kb) => {
+          await telegram.editMessageText(chatId, messageId, undefined, text, extra(kb));
+          tracker.release(); // from here on this message is the result, not progress
+        },
         send: (text, kb) => telegram.sendMessage(chatId, text, extra(kb)),
         keyboard,
       });
-    } catch (e) {
-      log.error({ err: e }, 'route failed');
-      noteFailure({ db, log }, '/route', e);
-      await notify(t('route.failed'), { force: true });
-    } finally {
-      tracker.release();
-    }
-  })();
+    },
+    () => notify(t('route.failed'), { force: true }),
+  ).finally(() => tracker.release());
 });
