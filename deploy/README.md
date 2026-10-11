@@ -412,6 +412,55 @@ first line of defense, not the only one — the privileged `sudo systemctl
 stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
 stop.
 
+## Installing the release control plane (stage В core — switches nothing)
+
+Plan: `docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-install-core.md`.
+From a **clean** checkout of `main` on the host:
+
+```bash
+sudo bash deploy/install-release.sh           # install / refresh; prints what it did, then a full check
+sudo bash deploy/install-release.sh --check   # writes nothing; exit 1 lists every difference
+```
+
+| Repo | Installed | Owner / mode |
+|---|---|---|
+| `deploy/release/**` (no `test_*`, `fake_*`, `release_testkit.py`) | `/usr/local/lib/wbb-release/` | root:root 0644, dirs 0755; files it no longer installs are removed |
+| `deploy/wbb-release.sh` | `/usr/local/libexec/wbb-release` (root helper, only via `sudo -n`) | root:root 0755 |
+| `deploy/wbb-tick.sh` | `/usr/local/bin/wbb-tick` (operator) | root:root 0755 |
+| `deploy/wbb-tick-failed.sh` | `/usr/local/libexec/wbb-tick-failed` | root:root 0755 |
+| `deploy/sudoers.d/wbb-release` | `/etc/sudoers.d/wbb-release` | root:root 0440, `visudo -cf` on a dotted temp file before the rename |
+| `deploy/wbb-tick.service`, `.timer`, `wbb-tick-failed.service` | `/etc/systemd/system/` | root:root 0644, then `daemon-reload` |
+
+It also creates the system user `wbb-trial` (nologin, no home, own group; an existing one is checked and
+**never fixed** — a wrong one is a refusal) and the root-private directories `/var/lib/wbb-trial` (0755),
+`/var/lib/wbb-deploy/receipts` (0700) and `/etc/wbb-deploy` (0700). The GitHub token
+`/etc/wbb-deploy/github.env` (root 0600, one `WBB_GITHUB_TOKEN=` — fine-grained, Actions: read on this repo)
+is only checked; a missing one is reported, not an error (the transition needs it, this step does not).
+
+What it deliberately does **not** do: enable, disable, start or stop anything (`wbb-tick.timer` stays
+disabled; its state is only printed), write under `/opt` (still the flat tree — merge-deploy's
+`rsync --delete` would wipe a `releases/` there), touch `.env`, or install files other installers own
+(`/etc/sudoers.d/warsaw-beer-bot`, `warsaw-beer-bot.service`, `litestream.*`, `wbb-autodeploy.*` and
+merge-deploy's `/usr/local/bin` copies, the host-patch and reboot-request files). Merge-deploy keeps
+deploying as before.
+
+Exit codes: 0 done / no difference; 1 a difference (`--check`) or a refused precondition (`REFUSED: …`
+on stderr: dirty checkout, unusable `wbb-trial`, `visudo` rejected the file — the old one stays); 64 usage;
+70 internal error.
+
+**Installed copies root must read.** `/etc/sudoers.d/*` is 0440, so the operator cannot compare it;
+the tick asks `sudo -n /usr/local/libexec/wbb-release digest --path <installed path>`, which prints
+`DIGEST <path> <sha256> uid <n> mode <0nnn>` (or `ABSENT <path>`) only for a file directly in
+`/etc/sudoers.d` or `/etc/litestream.yml`, refusing symlinks. A copy the operator can read is never
+sent to root.
+
+**Exit codes of the wrappers.** A library that is missing or fails to import exits **70** (`wbb-release`)
+or **71** (`wbb-tick`), never Python's default 1 — 1 is "bad candidate" for the helper and a success
+(`SuccessExitStatus=0 1 2`) for the tick. `wbb-tick-failed.service` (the tick's `OnFailure=`) alerts the
+admin through the Bot API only for failures the tick did not report itself: a timeout, a signal or a core
+dump, exit 64, 71 or a code the tick does not define (3, 4, 70 it reports on its own) — once per UTC day
+per text.
+
 ## Runtime artifact (CI only, not used by the host yet)
 
 Design: `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`.
