@@ -443,6 +443,9 @@ disabled; its state is only printed), write under `/opt` (still the flat tree �
 (`/etc/sudoers.d/warsaw-beer-bot`, `warsaw-beer-bot.service`, `litestream.*`, `wbb-autodeploy.*` and
 merge-deploy's `/usr/local/bin` copies, the host-patch and reboot-request files). Merge-deploy keeps
 deploying as before.
+Run as root inside your checkout, it leaves nothing root-owned there: Python runs with `-I -B` (no
+`__pycache__`), git with `--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null` (no index
+rewrite, no fsmonitor, no hook). The wrappers run the installed library with `-I -B` too.
 
 Exit codes: 0 done / no difference; 1 a difference (`--check`) or a refused precondition (`REFUSED: …`
 on stderr: dirty checkout, unusable `wbb-trial`, `visudo` rejected the file — the old one stays); 64 usage;

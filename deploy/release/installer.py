@@ -72,6 +72,12 @@ PRIVATE_DIRS = (
 FORBIDDEN = '/opt'  # п.1: the live tree; nothing of this installer goes there
 
 GIT, USERADD, VISUDO, SYSTEMCTL = '/usr/bin/git', '/usr/sbin/useradd', '/usr/sbin/visudo', '/usr/bin/systemctl'
+# e2e review S3: git runs as root in the operator's checkout and must write nothing there (a root-owned
+# .git/index or index.lock breaks the operator's next git command). --no-optional-locks: `git status` does not
+# refresh and rewrite the index; core.fsmonitor=false: no fsmonitor hook or daemon (with its cookie files and
+# .git/fsmonitor--daemon state) started as root; core.hooksPath=/dev/null: none of the commands used runs a hook
+# today, but a hook is code from the checkout's config — whatever git command is added here, it never runs as root.
+GIT_ARGV = (GIT, '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null')
 USERADD_ARGV = (USERADD, '--system', '--no-create-home', '--home-dir', '/nonexistent', '--shell', '/usr/sbin/nologin',
                 '--user-group', sb.TRIAL_USER)
 NOLOGIN = ('/usr/sbin/nologin', '/sbin/nologin')
@@ -135,7 +141,7 @@ class Installer:
         return r.returncode, r.stdout.decode('utf-8', 'replace'), r.stderr.decode('utf-8', 'replace').strip()
 
     def git(self, *args):
-        code, out, err = self.cmd([GIT, '-C', self.repo, *args])
+        code, out, err = self.cmd([*GIT_ARGV, '-C', self.repo, *args])
         if code != 0:
             raise Refusal(f'git {args[0]}: exit {code}: {err}')
         return out

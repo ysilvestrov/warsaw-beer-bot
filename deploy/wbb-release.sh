@@ -4,7 +4,8 @@
 # Plan: docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-install-core.md, "Рішення" п.5.
 #
 # -I: no PYTHONPATH, no user site, no directory of the caller on sys.path — the library finds its own modules by
-# its own path. Without the library this exits 70 (internal error): Python itself would exit 2, and 2 from the root
+# its own path. -B: no bytecode written — root running the helper would leave root-owned __pycache__ (e2e review
+# S3). Without the library this exits 70 (internal error): Python itself would exit 2, and 2 from the root
 # helper means "refused", a reading the controller must never get from a missing install.
 SCRIPT=/usr/local/lib/wbb-release/wbb_release.py
 if [ ! -f "$SCRIPT" ]; then
@@ -18,4 +19,4 @@ if ! /usr/bin/python3 -I -B -c 'import sys; compile(open(sys.argv[1],"rb").read(
     echo "wbb-release: $SCRIPT does not compile under /usr/bin/python3" >&2
     exit 70
 fi
-exec /usr/bin/python3 -I /usr/local/lib/wbb-release/wbb_release.py "$@"
+exec /usr/bin/python3 -I -B /usr/local/lib/wbb-release/wbb_release.py "$@"

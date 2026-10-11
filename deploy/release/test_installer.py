@@ -5,6 +5,7 @@ Plan: docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-instal
 """
 import io
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from fake_run import FakeRun, done  # noqa: E402
 from test_installed import repo_files  # noqa: E402
 
 UID, GID = os.getuid(), os.getgid()
+DEPLOY = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRIAL = 'wbb-trial'
 TICK_FAILED = ins.installed_path('deploy/wbb-tick-failed.sh')
 
@@ -98,6 +100,7 @@ class Host:
         self.fake = FakeRun()
         self.visudo_code, self.timer = visudo, timer
         self.order = []
+        self.git_argvs = []
 
     def script(self, root):
         sudoers_tmp = os.path.join(root, 'etc/sudoers.d/.wbb-release.installing')
@@ -110,6 +113,7 @@ class Host:
 
     def __call__(self, argv, *, timeout):
         if argv[0] == inst.GIT:
+            self.git_argvs.append(tuple(argv))
             return subprocess.run(['git', *argv[1:]], timeout=timeout, capture_output=True)
         self.order.append(('run', tuple(argv)))
         result = self.fake(argv, timeout=timeout)
@@ -347,6 +351,39 @@ class Preconditions(Base):
         self.users.user, self.users.groups = NOLOGIN_USER, [TRIAL_GROUP]
         self.assertEqual(self.main()[0], 0)
         self.assertNotIn(tuple(inst.USERADD_ARGV), self.host.argvs())
+
+
+class RootLeavesNothingInTheCheckout(Base):
+    """e2e review S3: run as root in the operator's checkout, the installer must not leave root-owned files there."""
+    GIT_PREFIX = ('/usr/bin/git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+                  '-C')
+
+    def test_every_git_call_takes_no_optional_locks_no_fsmonitor_and_no_hooks(self):
+        self.main()
+        self.main('--check')
+        self.assertEqual(sorted({a[:8] for a in self.host.git_argvs}), [self.GIT_PREFIX + (self.repo,)])
+
+    def test_the_launcher_runs_the_installer_isolated_and_without_bytecode(self):
+        with open(os.path.join(DEPLOY, 'install-release.sh'), encoding='utf-8') as f:
+            lines = f.read().splitlines()
+        self.assertEqual([x for x in lines if x.startswith('exec ')],
+                         ['exec /usr/bin/python3 -I -B deploy/release/installer.py "$@"'])
+
+    def test_running_the_launcher_writes_no_pycache_into_the_checkout(self):
+        """A copy of install-release.sh and the library, the root check replaced (sed-like) so a non-root test
+        runs it; --help imports every module of the installer and exits before any work."""
+        copy = os.path.join(self.tmp.name, 'checkout')
+        shutil.copytree(os.path.join(DEPLOY, 'release'), os.path.join(copy, 'deploy', 'release'),
+                        ignore=shutil.ignore_patterns('__pycache__', 'test_*'))
+        with open(os.path.join(DEPLOY, 'install-release.sh'), encoding='utf-8') as f:
+            text = f.read()
+        self.assertIn('"$(id -u)"', text)
+        with open(os.path.join(copy, 'deploy', 'install-release.sh'), 'w', encoding='utf-8') as f:
+            f.write(text.replace('"$(id -u)"', '0'))
+        r = subprocess.run(['bash', os.path.join(copy, 'deploy', 'install-release.sh'), '--help'],
+                           capture_output=True, text=True, timeout=60, cwd=self.tmp.name)
+        self.assertEqual((r.returncode, r.stderr), (0, ''))
+        self.assertEqual([d for d, _, _ in os.walk(copy) if os.path.basename(d) == '__pycache__'], [])
 
 
 class NoSwitching(Base):

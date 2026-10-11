@@ -47,7 +47,7 @@ class Wrapper(unittest.TestCase):
             with self.subTest(name):
                 text, _ = self.copy(name)
                 self.assertEqual(text.splitlines()[0], '#!/bin/sh')
-                self.assertIn(f'exec /usr/bin/python3 -I {LIB}/{script} "$@"\n', text)
+                self.assertIn(f'exec /usr/bin/python3 -I -B {LIB}/{script} "$@"\n', text)
 
     def test_the_arguments_and_the_exit_code_pass_through_unchanged(self):
         for name, script in (('wbb-release.sh', 'wbb_release.py'), ('wbb-tick.sh', 'tick.py')):
@@ -56,6 +56,18 @@ class Wrapper(unittest.TestCase):
                 self.target(script)
                 self.assertEqual(self.run_sh(path, '3', 'verify', '--sha', 'a b', ''),
                                  (3, "['3', 'verify', '--sha', 'a b', ''] 1\n", ''))
+
+    def test_the_installed_library_gets_no_bytecode_written_into_it(self):
+        """e2e review S3: run as root, the helper would leave root-owned __pycache__ in the library directory."""
+        for name, script in (('wbb-release.sh', 'wbb_release.py'), ('wbb-tick.sh', 'tick.py')):
+            with self.subTest(name):
+                _, path = self.copy(name)
+                lib = os.path.join(self.dir, 'lib')
+                shutil.rmtree(lib, ignore_errors=True)
+                shutil.copytree(HERE, lib, ignore=shutil.ignore_patterns('__pycache__', 'test_*'))
+                code, out, _ = self.run_sh(path, '--no-such-option')
+                self.assertEqual((code, out), (64, ''))
+                self.assertEqual(os.path.exists(os.path.join(lib, '__pycache__')), False)
 
     def test_without_the_library_the_release_helper_exits_70_not_2(self):
         _, path = self.copy('wbb-release.sh')
