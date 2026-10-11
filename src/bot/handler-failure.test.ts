@@ -105,9 +105,14 @@ describe('onHandlerFailure', () => {
 
   it('an update without a chat is recorded and nothing is sent', async () => {
     const s = setup({ fail: new Error('boom') });
-    const ctx = { update: { update_id: 1, poll: {} }, chat: undefined, t: createTranslator('uk') } as unknown as BotContext;
+    // The reply spy sits on the very ctx that is passed: without the no-chat guard it would be called.
+    const attempted: string[] = [];
+    const ctx = {
+      update: { update_id: 1, poll: {} }, chat: undefined, t: createTranslator('uk'),
+      reply: async (m: string) => { attempted.push(m); },
+    } as unknown as BotContext;
     await onHandlerFailure(s.deps, new Error('boom'), ctx, NOW);
-    expect(s.replies).toEqual([]);
+    expect(attempted).toEqual([]);
     expect(s.rows()).toEqual([{ at: '2026-10-11T10:00:00.000Z', source: 'poll', error: 'boom' }]);
   });
 

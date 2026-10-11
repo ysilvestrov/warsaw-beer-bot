@@ -17,6 +17,15 @@ const BATCH_SIZE = 500;
 const PROGRESS_INTERVAL_MS = 2000;
 const TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 
+// #836: the file is the person's own data and a parser error quotes it («…value is "<their venue>"»),
+// so handler_failures gets the KIND of an import error — its code, or failing that its class —
+// and never its message.
+export function importFailureKind(e: unknown): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (typeof code === 'string') return code;
+  return e instanceof Error ? e.name : 'unknown';
+}
+
 export const importCommand = new Composer<BotContext>();
 
 importCommand.command('import', async (ctx) => {
@@ -93,7 +102,7 @@ importCommand.on('document', async (ctx) => {
     // Not re-thrown (#836): bot.catch would answer the person a second time and record the
     // failure under the update type instead of the command.
     ctx.deps.log.error({ err: e, total }, 'import failed');
-    noteFailure(ctx.deps, '/import', e);
+    noteFailure(ctx.deps, '/import', new Error(importFailureKind(e)));
   } finally {
     stream.destroy();
   }

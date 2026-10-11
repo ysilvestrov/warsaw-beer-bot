@@ -3,7 +3,7 @@ import { migrate } from '../../storage/schema';
 import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { createTranslator } from '../../i18n';
 import { countCheckins } from '../../storage/checkins';
-import { importCommand } from './import';
+import { importCommand, importFailureKind } from './import';
 import { Context, Telegram } from 'telegraf';
 import pino from 'pino';
 
@@ -74,7 +74,8 @@ test('a failing import tells the person once, records /import, and does not re-t
   vi.spyOn(db, 'transaction').mockImplementationOnce(() => { throw new Error('disk on fire'); });
   await expect(importCommand.middleware()(ctx as never, async () => {})).resolves.toBeUndefined();
   expect(messages).toEqual(['❌ Помилка після 0 рядків: disk on fire']);
-  expect(db.prepare('SELECT source FROM handler_failures').all()).toEqual([{ source: '/import' }]);
+  // The message («disk on fire») goes to the person and the journal; the row keeps only the kind.
+  expect(db.prepare('SELECT source, error FROM handler_failures').all()).toEqual([{ source: '/import', error: 'Error' }]);
   db.close();
 });
 
@@ -84,4 +85,18 @@ test('an account change is not a failure: nothing is recorded', async () => {
   await importCommand.middleware()(ctx as never, async () => {});
   expect(db.prepare('SELECT source FROM handler_failures').all()).toEqual([]);
   db.close();
+});
+
+test('importFailureKind: a parser error that quotes the file is reduced to its code', () => {
+  const parserError = Object.assign(
+    new Error('Invalid Opening Quote: a quote is found on field "venue_name" at line 2, value is "Private home"'),
+    { code: 'INVALID_OPENING_QUOTE' },
+  );
+  expect(importFailureKind(parserError)).toBe('INVALID_OPENING_QUOTE');
+});
+
+test('importFailureKind: an error without a code is its class name; a non-error is "unknown"', () => {
+  expect([importFailureKind(new TypeError('x is not iterable')), importFailureKind('plain'), importFailureKind(null)]).toEqual([
+    'TypeError', 'unknown', 'unknown',
+  ]);
 });
