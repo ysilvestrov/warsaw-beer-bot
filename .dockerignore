@@ -10,8 +10,17 @@ tmp
 coverage
 .worktrees
 **/__pycache__
+# Docker anchors a pattern at the context root: `*.db` would miss data/bot.db, hence `**/`.
+# .env.example goes too: package_runtime.py packs no env file, the image does not need it.
 .env
 .env.local
+**/.env
+**/.env.*
 *.db
 *.db-wal
 *.db-shm
+**/*.db
+**/*.db-wal
+**/*.db-shm
+migrate_env.sh
+extension/*.zip

@@ -249,6 +249,46 @@ describe('ci.yml concurrency', () => {
   });
 });
 
+// The image's build context (deploy/image/Dockerfile copies the whole checkout): secrets and local
+// state must not reach even the build stage, wherever they lie. Docker anchors a pattern at the
+// context root (`*.db` misses data/bot.db), so this asks Docker itself: a scratch build copies the
+// context, filtered by the real .dockerignore, out to a local directory.
+const dockerUp = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8', timeout: 20_000 }).status === 0;
+describe.skipIf(!dockerUp)('.dockerignore (as Docker applies it)', () => {
+  const excluded = [
+    'bot.db', 'data/bot.db', 'data/bot.db-wal', 'data/bot.db-shm',
+    '.env', 'deploy/.env', '.env.local', '.env.production', '.env.example', 'scripts/.env.test',
+    'migrate_env.sh', 'extension/warsaw-beer-bot-1.2.0.zip',
+    'tmp/x.html', 'node_modules/x/index.js', 'dist/a.js', 'deploy/release/__pycache__/x.pyc',
+  ];
+  const kept = [
+    '.dockerignore', 'package.json', 'package-lock.json', 'tsconfig.release.json', 'src/index.ts',
+    'deploy/image/Dockerfile', 'deploy/release/package_runtime.py', 'deploy/litestream.env.example',
+    'tests/fixtures/untappd/export.zip',
+  ];
+
+  it('keeps what the build needs and drops databases, env files, migrate_env.sh and extension zips at any depth', () => {
+    const work = mkdtempSync(resolve(tmpdir(), 'wbb-dockerignore-'));
+    try {
+      const ctx = resolve(work, 'ctx');
+      for (const f of [...excluded, ...kept.slice(1)]) {
+        mkdirSync(resolve(ctx, f, '..'), { recursive: true });
+        writeFileSync(resolve(ctx, f), 'x');
+      }
+      writeFileSync(resolve(ctx, '.dockerignore'), readFileSync(resolve(root, '.dockerignore')));
+      const r = spawnSync('docker', ['buildx', 'build', '-q', '-f', '-', '--output', `type=local,dest=${resolve(work, 'out')}`, ctx], {
+        input: 'FROM scratch\nCOPY . /\n', encoding: 'utf8', timeout: 60_000,
+      });
+      expect(r.status, r.stderr).toBe(0);
+      const listed = readdirSync(resolve(work, 'out'), { recursive: true, withFileTypes: true })
+        .filter((e) => e.isFile()).map((e) => resolve(e.parentPath, e.name).slice(resolve(work, 'out').length + 1)).sort();
+      expect(listed).toEqual([...kept].sort());
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  }, 70_000);
+});
+
 describe('ci.yml: the runtime artifact is gone', () => {
   it('has no package job and uploads no artifact', () => {
     expect([workflow.indexOf('  package:'), workflow.filter((l) => l.includes('upload-artifact'))]).toEqual([-1, []]);
