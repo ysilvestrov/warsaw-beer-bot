@@ -74,11 +74,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The runtime base digest in a step of its own: inside the build command a failing
+      # `$(…)` would only expand to "" and the build would fail later and obscurely. Here the
+      # helper's non-zero exit fails the step (bash -e), and its output is checked again.
+      - name: Runtime base digest
+        id: base
+        run: |
+          digest=$(scripts/image-base-digest.sh deploy/image/Dockerfile)
+          [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::bad runtime base digest: '$digest'"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Build image
+        env:
+          RUNTIME_BASE_DIGEST: ${{ steps.base.outputs.digest }}
         run: >-
           docker buildx build -f deploy/image/Dockerfile --platform linux/amd64
           --provenance=false --sbom=false --load
-          --build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)"
+          --build-arg RUNTIME_BASE_DIGEST="$RUNTIME_BASE_DIGEST"
           --build-arg SOURCE_SHA="$GITHUB_SHA" --build-arg RUN_ID="$GITHUB_RUN_ID"
           --build-arg RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" -t wbb-image:smoke .
 

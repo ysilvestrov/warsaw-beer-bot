@@ -82,6 +82,7 @@ describe('ci.yml image job', () => {
   it('builds, smokes, audits and labels on every event; logs in, pushes, attests and records on a main push only', () => {
     expect(steps(image).map((s) => [s.head, s.if])).toEqual([
       ['- uses: actions/checkout@v7', null],
+      ['- name: Runtime base digest', null],
       ['- name: Build image', null],
       ['- name: Smoke', null],
       ['- name: Audit production dependencies', null],
@@ -157,9 +158,51 @@ describe('runtime base digest', () => {
     expect(run(dockerfile)[0]).toBe(1);
   });
 
-  it('is what CI passes as RUNTIME_BASE_DIGEST', () => {
-    expect(job('image').map((l) => l.trim())).toContain(
-      '--build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)"');
+  // CI reads the digest in a step of its own before the build, so a helper failure is a red
+  // step with the helper's message, and an empty RUNTIME_BASE_DIGEST never reaches the build.
+  const base = () => steps(job('image')).find((s) => s.head === '- name: Runtime base digest')!;
+  const build = () => steps(job('image')).find((s) => s.head === '- name: Build image')!;
+
+  it('is what CI passes as RUNTIME_BASE_DIGEST: the output of its own step, through the env', () => {
+    expect([base().lines.map((l) => l.trim()).includes('id: base'), build().lines.map((l) => l.trim())])
+      .toEqual([true, expect.arrayContaining([
+        'RUNTIME_BASE_DIGEST: ${{ steps.base.outputs.digest }}',
+        '--build-arg RUNTIME_BASE_DIGEST="$RUNTIME_BASE_DIGEST"',
+      ])]);
+    expect(build().lines.filter((l) => l.includes('image-base-digest.sh'))).toEqual([]);
+  });
+
+  // The step's own shell, run as Actions runs it (bash -eo pipefail) in a checkout whose helper
+  // is the real one or one that fails.
+  const runBase = (helper: string | null) => {
+    const dir = mkdtempSync(resolve(tmpdir(), 'wbb-base-step-'));
+    try {
+      mkdirSync(resolve(dir, 'scripts'));
+      mkdirSync(resolve(dir, 'deploy/image'), { recursive: true });
+      writeFileSync(resolve(dir, 'deploy/image/Dockerfile'), readFileSync(resolve(root, 'deploy/image/Dockerfile')));
+      writeFileSync(resolve(dir, 'scripts/image-base-digest.sh'),
+        helper ?? readFileSync(resolve(root, 'scripts/image-base-digest.sh'), 'utf8'), { mode: 0o755 });
+      writeFileSync(resolve(dir, 'out'), '');
+      const r = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', runBlock(base().lines)], {
+        cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH, GITHUB_OUTPUT: resolve(dir, 'out') },
+      });
+      return [r.status, readFileSync(resolve(dir, 'out'), 'utf8')];
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('CI step: writes the helper\'s digest as its output', () => {
+    const digest = spawnSync('bash', [resolve(root, 'scripts/image-base-digest.sh'), resolve(root, 'deploy/image/Dockerfile')], { encoding: 'utf8' }).stdout.trim();
+    expect(runBase(null)).toEqual([0, `digest=${digest}\n`]);
+  });
+
+  it.each([
+    ['fails', '#!/bin/sh\necho "image-base-digest: boom" >&2\nexit 1\n'],
+    ['prints nothing', '#!/bin/sh\nexit 0\n'],
+    ['prints a non-digest', '#!/bin/sh\necho latest\n'],
+  ])('CI step: the helper that %s fails the step and writes no output', (_name, helper) => {
+    expect(runBase(helper)).toEqual([1, '']);
   });
 });
 
