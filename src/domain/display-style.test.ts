@@ -69,6 +69,14 @@ describe('displayStyle', () => {
     expect(displayStyle(description, 'Stout - Irish Dry')).toBe('Stout - Irish Dry');
   });
 
+  test('description + the same description as the catalogue style → null (ingest copies the tap text into an orphan row)', () => {
+    expect(displayStyle(description, description)).toBeNull();
+  });
+
+  test('description + a different description as the catalogue style → null', () => {
+    expect(displayStyle(description, LIVE_DESCRIPTIONS[5])).toBeNull();
+  });
+
   test('description + no catalogue style → null', () => {
     expect(displayStyle(description, null)).toBeNull();
   });

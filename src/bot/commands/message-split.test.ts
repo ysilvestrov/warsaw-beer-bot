@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { sendEach, splitMessage, TELEGRAM_MESSAGE_LIMIT } from './message-split';
 
 describe('splitMessage', () => {
@@ -43,6 +44,10 @@ describe('splitMessage', () => {
     expect(splitMessage([], ['xxxxxxx&amp;yy'], 10)).toEqual(['xxxxxxx…']);
   });
 
+  test('a complete HTML entity that ends exactly at the cut is kept', () => {
+    expect(splitMessage([], ['xxxx&amp;yyyyy'], 10)).toEqual(['xxxx&amp;…']);
+  });
+
   test('the cut never leaves half a surrogate pair', () => {
     expect(splitMessage([], ['ab😀😀'], 4)).toEqual(['ab…']);
   });
@@ -67,12 +72,8 @@ describe('sendEach', () => {
   });
 
   test('a failed message stops the rest and the error reaches the caller', async () => {
-    const sent: string[] = [];
-    const send = async (message: string): Promise<void> => {
-      sent.push(message);
-      if (message === 'b') throw new Error('400: Bad Request');
-    };
+    const send = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('400: Bad Request'));
     await expect(sendEach(['a', 'b', 'c'], send)).rejects.toThrow('400: Bad Request');
-    expect(sent).toEqual(['a', 'b']);
+    expect(send.mock.calls).toEqual([['a'], ['b']]);
   });
 });

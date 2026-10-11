@@ -14,8 +14,13 @@ export function isDescription(style: string): boolean {
   return SENTENCE_BREAK.test(style) || [...style].length > STYLE_MAX_LENGTH;
 }
 
-/** The style to print for a tap: the pub's own, unless it is a description — then the catalogue's, if any. */
+/**
+ * The style to print for a tap: the pub's own, unless it is a description — then the catalogue's, if it
+ * has one that is not itself a description. A tap not yet found on Untappd links to an orphan row that
+ * `ensureOrphan` fills with the pub's own text, so the "catalogue" style can be the same paragraph.
+ */
 export function displayStyle(tapStyle: string | null, catalogStyle: string | null): string | null {
   if (tapStyle === null) return null;
-  return isDescription(tapStyle) ? catalogStyle : tapStyle;
+  if (!isDescription(tapStyle)) return tapStyle;
+  return catalogStyle !== null && !isDescription(catalogStyle) ? catalogStyle : null;
 }

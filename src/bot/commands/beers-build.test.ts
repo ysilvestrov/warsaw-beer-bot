@@ -9,6 +9,7 @@ import { upsertPub } from '../../storage/pubs';
 import { createSnapshot, insertTaps } from '../../storage/snapshots';
 import { seedBeer } from '../../storage/seed-beer.testing';
 import { upsertMatch } from '../../storage/match_links';
+import { ensureOrphan } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
 import { markHad } from '../../storage/untappd_had';
 import { createTranslator } from '../../i18n';
@@ -368,6 +369,23 @@ describe('buildBeersMessage — #835 long lists and descriptions', () => {
     const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
     insertTaps(db, snap, [{ tap_number: 9, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
       abv: null, ibu: null, style: 'Ahhhh the old country. Where the grass is green and the pints are cream.', u_rating: null }]);
+    const { messages } = base(db, 'kufel') as { messages: string[] };
+    expect(messages[0].split('\n')[2]).toBe('9 • <b>Garage Beer Co. The Quiet Man</b> • — • — • ⚪');
+    db.close();
+  });
+
+  test('a description on a tap linked to an orphan row made by ingest leaves the style out', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
+    const description = 'Ahhhh the old country. Where the grass is green and the pints are cream.';
+    const beerId = ensureOrphan(db, {
+      name: 'The Quiet Man', brewery: 'Garage Beer Co.', style: description, abv: null, rating_global: null,
+      normalized_name: 'the quiet man', normalized_brewery: 'garage beer',
+    });
+    upsertMatch(db, 'Garage Beer Co.', 'The Quiet Man', beerId, 1.0);
+    insertTaps(db, snap, [{ tap_number: 9, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
+      abv: null, ibu: null, style: description, u_rating: null }]);
     const { messages } = base(db, 'kufel') as { messages: string[] };
     expect(messages[0].split('\n')[2]).toBe('9 • <b>Garage Beer Co. The Quiet Man</b> • — • — • ⚪');
     db.close();

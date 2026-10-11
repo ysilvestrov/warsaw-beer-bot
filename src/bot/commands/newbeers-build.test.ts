@@ -357,6 +357,10 @@ describe('candidateFromTap (#835)', () => {
     expect(candidateFromTap({ ...tap, style: 'Dry Stout (nitro)' }, 'White Crow').style).toBe('Dry Stout (nitro)');
   });
 
+  test('a description whose catalogue style is the same description gives no style', () => {
+    expect(candidateFromTap({ ...tap, catalog_style: tap.style }, 'White Crow').style).toBeNull();
+  });
+
   test('a description without a catalogue style gives no style', () => {
     expect(candidateFromTap({ ...tap, catalog_style: null }, 'White Crow').style).toBeNull();
   });
