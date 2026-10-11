@@ -62,10 +62,24 @@ class Map(unittest.TestCase):
             'deploy/trial-migrate.cjs': '/usr/local/bin/wbb-trial-migrate',
             'scripts/ops/reboot_request.py': '/usr/local/libexec/wbb-reboot-request',
             'scripts/ops/host_patch_collect.py': '/usr/local/libexec/wbb-host-patch-collect',
+            # plan C-core "Рішення" п.5, п.7: the control plane's entry points and the tick's failure notice
+            'deploy/wbb-release.sh': '/usr/local/libexec/wbb-release',
+            'deploy/wbb-tick.sh': '/usr/local/bin/wbb-tick',
+            'deploy/wbb-tick-failed.sh': '/usr/local/libexec/wbb-tick-failed',
         }
         for path, want in cases.items():
             with self.subTest(path):
                 self.assertEqual(ins.installed_path(path), want)
+
+    def test_the_entry_points_are_the_names_the_adapters_call(self):
+        self.assertEqual((ins.installed_path('deploy/wbb-release.sh'), ins.installed_path('deploy/wbb-tick.sh')),
+                         (ins.ROOT_HELPER, ins.TICK_BIN))
+
+    def test_every_repo_file_the_wrapper_pattern_holds_is_installed(self):
+        """`deploy/wbb-*.sh` holds a merge (gates) only for what the installer copies: no unrelated script."""
+        held = [f for f in repo_files('deploy') if gates.matches(f, 'deploy/wbb-*.sh')]
+        self.assertIn('deploy/wbb-*.sh', gates.INSTALLED_COPIES)
+        self.assertEqual([f for f in held if ins.installed_path(f) is None], [])
 
     def test_a_template_and_files_outside_the_patterns_have_no_copy(self):
         for path in ('deploy/litestream.env.example', 'deploy/README.md', 'deploy/deploy.sh',

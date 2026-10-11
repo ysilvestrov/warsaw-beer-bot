@@ -28,7 +28,8 @@ Exit (2b review B1; the controller records a failed SHA only on 1 together with 
    2  refused: an input or a precondition (no receipt, changed tree, bad name; `REFUSED:` on stderr) —
       not a verdict on the candidate
   64  usage
-  70  internal error (a traceback on stderr) — not a verdict on the candidate
+  70  internal error (a traceback on stderr) — not a verdict on the candidate; also a module of the library
+      that fails to import, and /usr/local/libexec/wbb-release without the library (deploy/wbb-release.sh)
   75  could not judge now — retry, never a failed SHA (EX_TEMPFAIL): no wbb-trial user, no scratch,
       a unit systemd did not start, another wbb-trial unit loaded, an audit with no report
 Only `switch` touches the `current` pointer (after re-verifying the tree against its receipt);
@@ -42,15 +43,25 @@ import sys
 import tempfile
 import traceback
 
+EX_SOFTWARE = 70
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bounded  # noqa: E402
-import github_trust as gt  # noqa: E402
-import host_audit  # noqa: E402
-import publish as pub  # noqa: E402
-import sandbox as sb  # noqa: E402
-import trial as tr  # noqa: E402
-from audit_verdict import render_verdict  # noqa: E402
-from safe_tar import Refused  # noqa: E402
+try:
+    import bounded  # noqa: E402
+    import github_trust as gt  # noqa: E402
+    import host_audit  # noqa: E402
+    import publish as pub  # noqa: E402
+    import sandbox as sb  # noqa: E402
+    import trial as tr  # noqa: E402
+    from audit_verdict import render_verdict  # noqa: E402
+    from safe_tar import Refused  # noqa: E402
+except Exception:
+    # Plan C-core "Рішення" п.6: Python exits 1 on an uncaught exception at module level, and 1 here is a bad
+    # candidate. Run as the helper, a broken library is an internal error; imported (helpers_adapter), it raises.
+    if __name__ != '__main__':
+        raise
+    traceback.print_exc()
+    sys.exit(EX_SOFTWARE)
 
 PRODUCTION_ROOTS = pub.Roots(
     releases='/opt/warsaw-beer-bot/releases',
@@ -66,7 +77,6 @@ SNAPSHOT_ROOT = '/var/lib/warsaw-beer-bot/deploy-snapshots'
 EX_FAILED = 1
 EX_REFUSED = 2
 EX_USAGE = 64
-EX_SOFTWARE = 70
 EX_TEMPFAIL = 75
 STEP_EXIT = {'ok': 0, 'failed': EX_FAILED, 'transient': EX_TEMPFAIL}
 AUDIT_EXIT = {'clean': 0, 'advisory': EX_FAILED, 'unrunnable': EX_TEMPFAIL}

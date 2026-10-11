@@ -35,10 +35,12 @@ By hand only, never from the timer (plan periphery-b2 "Рішення" п.4), un
 lastFailedSha when it is that SHA and the abort backoff of that SHA; `ack-baseline --from` clears the regression
 fence whose `from` is that SHA. Both print what they changed and log it as an evidence event of state v2.
 
-Exit codes (merge-deploy's unit has SuccessExitStatus=0 1 2):
+Exit codes (merge-deploy's unit and wbb-tick.service have SuccessExitStatus=0 1 2):
   0 nothing to do, waiting, settled, noop   1 refused candidate or hold (and a manual run not served)
   2 rolled back   3 recovery failed, or blocked with the bot down   4 state not written   64 usage / root
-  70 internal error
+  70 internal error, the critical notice sent (or tried) by the tick itself
+  71 not started and nobody told: a module failed to import, make_env failed before notify was built, or
+     /usr/local/bin/wbb-tick without the library (deploy/wbb-tick.sh) — wbb-tick-failed.service reports it
 """
 import argparse
 import fcntl
@@ -49,17 +51,28 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Callable
 
+# Not started, nobody told (plan C-core "Рішення" п.6): wbb-tick-failed.service sends the notice for this code.
+EX_NOT_STARTED = 71
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import activate  # noqa: E402
-import gates  # noqa: E402
-import prepare as pp  # noqa: E402
-import tick_state  # noqa: E402
-from activate import HostError  # noqa: E402
-from deploy_state import StateError  # noqa: E402
-from gates import UNREAD, Ci, CommitPrs, Inputs  # noqa: E402
-from github_trust import SHA as FULL_SHA, NoRunYet, RunFailed  # noqa: E402
-from safe_tar import Refused  # noqa: E402
-from tick_state import Blocked, TickState  # noqa: E402
+try:
+    import activate  # noqa: E402
+    import gates  # noqa: E402
+    import prepare as pp  # noqa: E402
+    import tick_state  # noqa: E402
+    from activate import HostError  # noqa: E402
+    from deploy_state import StateError  # noqa: E402
+    from gates import UNREAD, Ci, CommitPrs, Inputs  # noqa: E402
+    from github_trust import SHA as FULL_SHA, NoRunYet, RunFailed  # noqa: E402
+    from safe_tar import Refused  # noqa: E402
+    from tick_state import Blocked, TickState  # noqa: E402
+except Exception:
+    # Python would exit 1, which the unit takes for an answer (SuccessExitStatus=0 1 2): nothing would tell anyone.
+    if __name__ != '__main__':
+        raise
+    import traceback
+    traceback.print_exc()
+    sys.exit(EX_NOT_STARTED)
 
 NOTIFY_LIMIT = 3500
 # A lock held longer than the longest legitimate tick has a holder that will not let go (merge-deploy).
@@ -867,7 +880,7 @@ class EnvFailed(Exception):
 
 
 def _real_factories():
-    # Imported here: a broken adapter module is a failure of make_env (exit 70 and a notice), not of tick.py.
+    # Imported here: a broken adapter module is a failure of make_env (no notify yet: exit 71), not of tick.py.
     import helpers_adapter
     import host_adapter
     import notify_telegram
@@ -903,13 +916,14 @@ def make_env(mode, target=None, environ=None, clock=time.time, sleep=time.sleep,
 
 
 def _start_failed(e, clock=time.time):
-    """make_env failed: the critical notice of the top-level catch (once per UTC day per text), and 70."""
+    """make_env failed: the critical notice of the top-level catch (once per UTC day per text), and 70; with no
+    notify to send it, 71 (the unit's OnFailure tells the admin instead)."""
     if not isinstance(e, EnvFailed):
         e = EnvFailed(e)
     text = f'🔥 wbb-deploy: could not start, nothing judged: {e}'
     print(text, file=sys.stderr)
     if e.notify is None:
-        return 70
+        return EX_NOT_STARTED
     env = Env(e.state_dir or '', None, None, e.notify, clock=clock, out=lambda line: print(line, file=sys.stderr))
     if e.state_dir is None:
         _notify(env, text)
@@ -933,7 +947,7 @@ def main(argv=None, make_env=make_env, geteuid=os.geteuid):
     `tick.py rearm --sha <sha>` | `tick.py ack-baseline --from <sha>` (by hand only; see `operator`).
 
     make_env(mode, target) builds the Env with the real Host and Helpers; if it fails, the tick does not run:
-    a critical notice (when notify was built) and exit 70. --target is the operator's checkout HEAD
+    a critical notice and exit 70 when notify was built, otherwise exit 71. --target is the operator's checkout HEAD
     (deploy.sh passes it — Б-периферія).
     """
     p = argparse.ArgumentParser(prog='tick.py')

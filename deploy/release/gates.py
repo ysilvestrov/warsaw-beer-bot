@@ -139,6 +139,7 @@ INSTALLED_COPIES = (
     'deploy/sudoers.d/**',
     'deploy/*.service', 'deploy/*.timer', 'deploy/*.path',
     'deploy/litestream.*',
+    'deploy/wbb-*.sh',                      # the control plane's entry points (installed.COPIES, stage В)
     # merge-deploy's installed copies (install-autodeploy.sh), while they are installed
     'deploy/autodeploy.sh', 'deploy/ships.sh', 'deploy/read-env.sh', 'deploy/installed-current.sh',
     'deploy/db-snapshot.sh', 'deploy/trial-migrate.cjs',

@@ -1358,11 +1358,13 @@ class StartFailed(unittest.TestCase):
         self.assertEqual(self.main(error), (70, "🔥 wbb-deploy: could not start, nothing judged: KeyError: 'HOME'\n"))
         self.assertEqual(self.sent, ["🔥 wbb-deploy: could not start, nothing judged: KeyError: 'HOME'"])
 
-    def test_without_notify_it_only_says_so(self):
+    def test_without_notify_it_only_says_so_and_exits_71(self):
+        """(plan C-core "Рішення" п.6) 71 — not started and nobody told: wbb-tick-failed sends it, never 70's
+        "the tick told the admin itself"."""
         self.assertEqual(self.main(tick.EnvFailed(ImportError('host_adapter'))),
-                         (70, '🔥 wbb-deploy: could not start, nothing judged: ImportError: host_adapter\n'))
+                         (71, '🔥 wbb-deploy: could not start, nothing judged: ImportError: host_adapter\n'))
         self.assertEqual(self.main(ValueError('bare')),
-                         (70, '🔥 wbb-deploy: could not start, nothing judged: ValueError: bare\n'))
+                         (71, '🔥 wbb-deploy: could not start, nothing judged: ValueError: bare\n'))
         self.assertEqual(self.sent, [])
 
 

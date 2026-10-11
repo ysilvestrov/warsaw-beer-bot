@@ -43,6 +43,10 @@ COPIES = {
     'deploy/litestream.yml': '/etc/litestream.yml',
     'scripts/ops/host_patch_collect.py': '/usr/local/libexec/wbb-host-patch-collect',
     'scripts/ops/reboot_request.py': '/usr/local/libexec/wbb-reboot-request',
+    # The control plane's entry points and the tick's failure notice (plan C-core "Рішення" п.5, п.7).
+    'deploy/wbb-release.sh': ROOT_HELPER,
+    'deploy/wbb-tick.sh': TICK_BIN,
+    'deploy/wbb-tick-failed.sh': '/usr/local/libexec/wbb-tick-failed',
 }
 # Matched by a pattern, never copied as it is: a human fills it in (secrets) at its own path.
 NOT_COPIED = ('deploy/litestream.env.example',)
