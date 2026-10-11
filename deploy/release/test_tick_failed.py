@@ -33,6 +33,11 @@ case "$2" in
   ADMIN_TELEGRAM_ID) echo "$FAKE_CHAT" ;;
 esac
 '''
+# The UTC day comes from the test, never the clock: a run across midnight must not change what a test sees.
+FAKE_DATE = r'''#!/bin/sh
+[ "$*" = "-u +%F" ] || { echo "fake date: unexpected $*" >&2; exit 9; }
+echo "$FAKE_TODAY"
+'''
 FAKE_CURL = r'''#!/bin/sh
 for a in "$@"; do printf '%s\n' "$a"; done >> "$FAKE_LOG/curl.argv"
 echo --- >> "$FAKE_LOG/curl.argv"
@@ -49,7 +54,8 @@ class TickFailed(unittest.TestCase):
         self.bin, self.log, self.state = (os.path.join(self.dir, d) for d in ('bin', 'log', 'state'))
         for d in (self.bin, self.log, self.state):
             os.makedirs(d)
-        for name, body in (('sudo', FAKE_SUDO), ('wbb-read-env', FAKE_READ_ENV), ('curl', FAKE_CURL)):
+        for name, body in (('sudo', FAKE_SUDO), ('wbb-read-env', FAKE_READ_ENV), ('curl', FAKE_CURL),
+                           ('date', FAKE_DATE)):
             path = os.path.join(self.bin, name)
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(body)
@@ -61,7 +67,7 @@ class TickFailed(unittest.TestCase):
         env = {'PATH': f'{self.bin}:/usr/bin:/bin', 'HOME': os.path.join(self.dir, 'home'),
                'XDG_STATE_HOME': self.state, 'FAKE_LOG': self.log, 'FAKE_TOKEN': TOKEN, 'FAKE_CHAT': CHAT,
                'MONITOR_SERVICE_RESULT': result, 'MONITOR_EXIT_STATUS': status, 'MONITOR_EXIT_CODE': 'exited',
-               **extra}
+               'MONITOR_UNIT': 'wbb-tick.service', 'FAKE_TODAY': '2026-10-11', **extra}
         r = subprocess.run(['bash', SCRIPT], env=env, capture_output=True, text=True, timeout=30)
         return r.returncode, r.stdout, r.stderr
 
@@ -76,8 +82,9 @@ class TickFailed(unittest.TestCase):
                 and argv[i + 1].startswith('text=')]
 
     def test_a_timeout_is_reported(self):
-        code, out, err = self.run_failed('timeout', '15', MONITOR_EXIT_CODE='killed')
-        text = ('🔥 wbb-tick failed and reported nothing itself: timeout (killed 15). '
+        # What systemd hands over for a unit stopped at TimeoutStartSec: the signal's name, not a number.
+        code, out, err = self.run_failed('timeout', 'TERM', MONITOR_EXIT_CODE='killed')
+        text = ('🔥 wbb-tick failed and reported nothing itself: timeout (killed TERM). '
                 'See: journalctl -u wbb-tick.service')
         self.assertEqual((code, out, err), (0, f'wbb-tick-failed: reported: {text}\n', ''))
         self.assertEqual(self.sent(), [text])
@@ -126,18 +133,31 @@ class TickFailed(unittest.TestCase):
 
     def test_another_text_the_same_day_is_sent(self):
         self.run_failed('exit-code', '71')
-        self.run_failed('timeout', '15')
+        self.run_failed('timeout', 'TERM')
         self.assertEqual(len(self.sent()), 2)
 
-    def test_yesterday_s_mark_does_not_hold_back_today_s_notice(self):
-        self.run_failed('exit-code', '71')
-        path = os.path.join(self.state, NOTICE)
-        with open(path, encoding='utf-8') as f:
-            mark = f.read()
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write('2000-01-01' + mark[10:])
-        self.run_failed('exit-code', '71')
+    def test_two_alternating_failures_are_each_sent_once_a_day(self):
+        """e2e review N3: one line per text sent today, not just the last text."""
+        for result, status in (('exit-code', '71'), ('timeout', 'TERM'), ('exit-code', '71'), ('timeout', 'TERM')):
+            self.run_failed(result, status, MONITOR_EXIT_CODE='killed')
+        prefix = '🔥 wbb-tick failed and reported nothing itself: '
+        suffix = '. See: journalctl -u wbb-tick.service'
+        self.assertEqual(self.sent(), [
+            prefix + 'exit 71: did not start (the library is missing or failed to import)' + suffix,
+            prefix + 'timeout (killed TERM)' + suffix])
+
+    def test_yesterday_s_mark_does_not_hold_back_today_s_notice_and_is_dropped(self):
+        self.run_failed('exit-code', '71', FAKE_TODAY='2026-10-10')
+        self.run_failed('exit-code', '71', FAKE_TODAY='2026-10-11')
         self.assertEqual(len(self.sent()), 2)
+        with open(os.path.join(self.state, NOTICE), encoding='utf-8') as f:
+            self.assertEqual([line.split(' ')[0] for line in f.read().splitlines()], ['2026-10-11'])
+
+    def test_a_manual_run_without_monitor_unit_sends_nothing(self):
+        code, out, err = self.run_failed('exit-code', '71', MONITOR_UNIT='')
+        self.assertEqual((code, out, err), (0, '', "wbb-tick-failed: no MONITOR_UNIT — not started by "
+                                                   "wbb-tick.service's OnFailure=; nothing to report\n"))
+        self.assertEqual((self.logged('sudo.argv'), self.logged('curl.argv')), ('', ''))
 
     def test_the_notice_falls_back_to_home_without_xdg_state_home(self):
         env_home = os.path.join(self.dir, 'home')
@@ -175,7 +195,7 @@ class TickFailed(unittest.TestCase):
 
     def test_the_token_is_in_no_argv_and_no_output(self):
         outputs = [self.run_failed('exit-code', '71'), self.run_failed('exit-code', '64', FAKE_CURL_EXIT='22'),
-                   self.run_failed('timeout', '15', FAKE_READ_ENV_FAIL='1')]
+                   self.run_failed('timeout', 'TERM', FAKE_READ_ENV_FAIL='1')]
         seen = ''.join(out + err for _, out, err in outputs)
         seen += self.logged('curl.argv') + self.logged('sudo.argv') + self.logged('read-env.argv')
         self.assertEqual(TOKEN in seen, False)

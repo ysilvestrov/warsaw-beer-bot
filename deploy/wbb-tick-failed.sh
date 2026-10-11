@@ -14,8 +14,12 @@
 #       any other  a status the tick does not define                         -> report
 #
 # Once per UTC day per text (${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy/tick-failed-notice): a tick
-# that fails every 5 minutes says so once a day, not 288 times. The mark is written only after Telegram
-# accepted the message, so a notice that could not be sent is tried again on the next failure.
+# that fails every 5 minutes says so once a day, not 288 times. The file keeps one `<UTC date> <sha256 of the
+# text>` line per text sent today (older days are dropped on each write), so two failures that alternate are each
+# sent once a day, not on every switch. A line is added only after Telegram accepted the message, so a notice
+# that could not be sent is tried again on the next failure.
+#
+# Run by hand (no MONITOR_UNIT: not started by OnFailure=), it says so on stderr and sends nothing, exit 0.
 #
 # Like merge-deploy's _notify_default: TELEGRAM_BOT_TOKEN and ADMIN_TELEGRAM_ID through wbb-read-env as the bot
 # user (the operator cannot read the bot's .env), curl straight to the Bot API, never through a proxy. The token
@@ -26,6 +30,11 @@ set -uo pipefail
 READ_ENV_BIN=/usr/local/bin/wbb-read-env
 BOT_ENV_FILE=/etc/warsaw-beer-bot/.env
 NOTICE="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy/tick-failed-notice"
+
+if [ -z "${MONITOR_UNIT:-}" ]; then
+  echo "wbb-tick-failed: no MONITOR_UNIT — not started by wbb-tick.service's OnFailure=; nothing to report" >&2
+  exit 0
+fi
 
 result=${MONITOR_SERVICE_RESULT:-}
 status=${MONITOR_EXIT_STATUS:-}
@@ -42,8 +51,9 @@ else
 fi
 text="🔥 wbb-tick failed and reported nothing itself: ${why}. See: journalctl -u wbb-tick.service"
 
-mark="$(date -u +%F) $(printf '%s' "$text" | sha256sum | cut -d' ' -f1)"
-if [ -f "$NOTICE" ] && [ "$(cat "$NOTICE" 2>/dev/null)" = "$mark" ]; then
+today=$(date -u +%F)
+mark="$today $(printf '%s' "$text" | sha256sum | cut -d' ' -f1)"
+if [ -f "$NOTICE" ] && grep -qFx -- "$mark" "$NOTICE" 2>/dev/null; then
   echo "wbb-tick-failed: already reported today: $text" >&2
   exit 0
 fi
@@ -76,7 +86,11 @@ if [ "$rc" -ne 0 ]; then
   exit 1
 fi
 
-mkdir -p "$(dirname "$NOTICE")" && printf '%s\n' "$mark" > "$NOTICE" ||
+# Today's lines and this one; a line of another day is dropped (grep exits 1 when none is left — not an error).
+if ! { mkdir -p "$(dirname "$NOTICE")" &&
+       { grep -s -- "^$today " "$NOTICE"; printf '%s\n' "$mark"; } > "$NOTICE.tmp" &&
+       mv -f "$NOTICE.tmp" "$NOTICE"; }; then
   echo "wbb-tick-failed: WARNING: could not record the notice in $NOTICE" >&2
+fi
 echo "wbb-tick-failed: reported: $text"
 exit 0
