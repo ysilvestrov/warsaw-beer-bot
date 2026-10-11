@@ -113,6 +113,35 @@ def parse_digest(dest, result):
     raise HelperError(f'wbb-release digest {dest}: unexpected answer: {reason(result)}')
 
 
+def lib_orphans(lib_dir, wanted):
+    """[(path, is_symlinked_dir)] under lib_dir that are not in `wanted` (installed paths), sorted; bytecode caches
+    left out. The tick's installed_stale and the installer's removal (installer.py) share this one notion."""
+    if not os.path.isdir(lib_dir):
+        return []
+    out = []
+
+    def fail(e):
+        # #828 AI review: a directory the scan cannot read hides what is in it — cannot assess, not "none".
+        raise HelperError(f'{e.filename}: {type(e).__name__}: {e.strerror}')
+
+    for root, dirs, names in os.walk(lib_dir, onerror=fail):
+        for name in dirs:
+            full = os.path.join(root, name)
+            if os.path.islink(full):
+                # os.walk does not descend into it: whatever it points at would escape the scan (#828 AI review).
+                out.append((full, True))
+        for name in names:
+            full = os.path.join(root, name)
+            if full not in wanted and '__pycache__' not in full.split(os.sep):
+                out.append((full, False))
+    return sorted(out)
+
+
+def unsafe_copy(uid, mode, owner):
+    """An installed copy sudo or root would run that someone other than `owner` could rewrite (#828 AI review)."""
+    return uid != owner or bool(mode & 0o022)
+
+
 class RealHelpers:
     def __init__(self, data_dir, run=bounded.run, api_factory=gt.GitHubApi, clock=time.time, roots=PRODUCTION_ROOTS,
                  snapshot_root=SNAPSHOT_ROOT, db=ins.DB_PATH, locate=ins.installed_path, repo=gt.REPO,
@@ -293,32 +322,17 @@ class RealHelpers:
         """Files in LIB_DIR that no file of origin/main installs there (#828 AI review: a module deleted from the
         repository keeps running from its old installed copy). Other destinations (/etc/...) are shared with other
         software and cannot be listed as ours; the installer removes what it stops installing (stage В)."""
-        if not os.path.isdir(self._lib_dir):
-            return []
-        wanted = {self._locate(p) for p in paths}
         out = []
-
-        def fail(e):
-            # #828 AI review: a directory the scan cannot read hides what is in it — cannot assess, not "none".
-            raise HelperError(f'{e.filename}: {type(e).__name__}: {e.strerror}')
-
-        for root, dirs, names in os.walk(self._lib_dir, onerror=fail):
-            for name in dirs:
-                full = os.path.join(root, name)
-                if os.path.islink(full):
-                    # os.walk does not descend into it: whatever it points at would escape the scan (#828 AI review).
-                    out.append(f'{full} (a symlink inside the installed library)')
-            for name in names:
-                full = os.path.join(root, name)
-                if full not in wanted and '__pycache__' not in full.split(os.sep):
-                    out.append(f'{full} (installed, but nothing in {REF} installs it)')
-        return sorted(out)
+        for full, linked in lib_orphans(self._lib_dir, {self._locate(p) for p in paths}):
+            out.append(f'{full} (a symlink inside the installed library)' if linked
+                       else f'{full} (installed, but nothing in {REF} installs it)')
+        return out
 
     def _judge(self, path, dest, uid, mode, same):
         """The stale entry of one installed copy, read by the operator or digested by root: one condition for both."""
         # #828 AI review: the right bytes in a file the operator could rewrite later are not an installed
         # copy — what sudo runs must be root's and writable by nobody else.
-        if uid != self._installed_owner or mode & 0o022:
+        if unsafe_copy(uid, mode, self._installed_owner):
             return [f'{path} ({dest} is not {self._installed_owner}-owned and closed to group/other writes)']
         return [] if same else [path]
 
