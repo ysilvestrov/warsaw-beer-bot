@@ -459,7 +459,8 @@ any other `--archive` (exit 2): root never opens a path the operator names (a pa
 `/etc/shadow` or a device and answer about it). The tick opens its downloaded ZIP itself and pipes it in;
 root copies at most the ZIP cap into its private staging and checks only that copy.
 
-**Exit codes of the wrappers.** A library that is missing or fails to import exits **70** (`wbb-release`)
+**Exit codes of the wrappers.** A library that is missing, an entry script that does not compile (checked by
+the wrapper before it runs it) or a module that fails to import exits **70** (`wbb-release`)
 or **71** (`wbb-tick`), never Python's default 1 — 1 is "bad candidate" for the helper and a success
 (`SuccessExitStatus=0 1 2`) for the tick. `wbb-tick-failed.service` (the tick's `OnFailure=`) alerts the
 admin through the Bot API only for failures the tick did not report itself: a timeout, a signal or a core

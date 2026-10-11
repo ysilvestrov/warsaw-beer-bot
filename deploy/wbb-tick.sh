@@ -10,4 +10,11 @@ if [ ! -f "$SCRIPT" ]; then
     echo "wbb-tick: $SCRIPT is not installed (sudo bash deploy/install-release.sh)" >&2
     exit 71
 fi
+# Compiled before it runs (e2e review S2): a SyntaxError in the entry script itself (syntax newer than this
+# python3) is raised before its own import guard exists, and Python would exit 1 —
+# a success for the tick's unit, so nobody would be told.
+if ! /usr/bin/python3 -I -B -c 'import sys; compile(open(sys.argv[1],"rb").read(), sys.argv[1], "exec")' "$SCRIPT"; then
+    echo "wbb-tick: $SCRIPT does not compile under /usr/bin/python3" >&2
+    exit 71
+fi
 exec /usr/bin/python3 -I /usr/local/lib/wbb-release/tick.py "$@"

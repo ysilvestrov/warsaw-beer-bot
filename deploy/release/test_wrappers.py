@@ -63,6 +63,20 @@ class Wrapper(unittest.TestCase):
         self.assertEqual((code, out, err), (70, '', f'wbb-release: {self.dir}/lib/wbb_release.py is not installed '
                                                     '(sudo bash deploy/install-release.sh)\n'))
 
+    def test_an_entry_script_that_does_not_compile_exits_70_or_71_not_1(self):
+        """e2e review S2: its own SyntaxError comes before its import guard; Python alone would exit 1."""
+        for name, script, code in (('wbb-release.sh', 'wbb_release.py', 70), ('wbb-tick.sh', 'tick.py', 71)):
+            with self.subTest(name):
+                _, path = self.copy(name)
+                os.makedirs(os.path.join(self.dir, 'lib'), exist_ok=True)
+                with open(os.path.join(self.dir, 'lib', script), 'w', encoding='utf-8') as f:
+                    f.write('import sys\nmatch sys.argv:\n    case [_, *rest] if (x := 1:\n        pass\n')
+                got, out, err = self.run_sh(path, 'verify')
+                self.assertEqual((got, out, err.splitlines()[-1]),
+                                 (code, '', f'{name[:-3]}: {self.dir}/lib/{script} does not compile under '
+                                            '/usr/bin/python3'))
+                self.assertIn('SyntaxError', err)
+
     def test_without_the_library_the_tick_exits_71(self):
         _, path = self.copy('wbb-tick.sh')
         code, out, err = self.run_sh(path, 'timer')

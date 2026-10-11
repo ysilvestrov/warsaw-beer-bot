@@ -11,4 +11,11 @@ if [ ! -f "$SCRIPT" ]; then
     echo "wbb-release: $SCRIPT is not installed (sudo bash deploy/install-release.sh)" >&2
     exit 70
 fi
+# Compiled before it runs (e2e review S2): a SyntaxError in the entry script itself (syntax newer than this
+# python3) is raised before its own import guard exists, and Python would exit 1 —
+# "bad candidate" from the root helper.
+if ! /usr/bin/python3 -I -B -c 'import sys; compile(open(sys.argv[1],"rb").read(), sys.argv[1], "exec")' "$SCRIPT"; then
+    echo "wbb-release: $SCRIPT does not compile under /usr/bin/python3" >&2
+    exit 70
+fi
 exec /usr/bin/python3 -I /usr/local/lib/wbb-release/wbb_release.py "$@"
