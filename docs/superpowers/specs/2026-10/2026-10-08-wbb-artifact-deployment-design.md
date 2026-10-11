@@ -1,5 +1,6 @@
 # Warsaw Beer Bot: deployment готових GitHub-артефактів
 
+**Superseded 11.10.2026** як шлях до production: `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md` (деплой OCI-образом, відкат лише коду). Що з цього дизайну переходить, а що видаляється — §9 нової спеки.
 **Статус:** прийнята власником до реалізації 08.10.2026 (редакція 2). Реалізація поетапна (§12). Змерджено: Ядро-1 (CI-артефакт, план `docs/superpowers/plans/2026-10/2026-10-08-wbb-artifact-deployment-core-1.md`) і Ядро-2а (довіра й публікація, план `…/2026-10-09-wbb-artifact-deployment-core-2a.md`) і Ядро-2б (аудит, sandbox-проба, trial; план `…/2026-10-09-wbb-artifact-deployment-core-2b.md`). Змерджено також ядро 2в (рушій активації й відкату, план `…/2026-10-09-wbb-artifact-deployment-core-2c.md`) і обв'язка 2в, етапи А–Б (tick, гейти, справжні адаптери, `/health.releaseSha`; плани `…/2026-10-10-wbb-artifact-deployment-2c-periphery-*.md`). У роботі етап В, ядро: встановлення control plane без перемикання (план `…/2026-10-11-wbb-artifact-deployment-c-install-core.md`); далі план переходу (§10). На хості нічого не встановлено.
 **Дата:** 2026-10-08.
 **Редакція:** 2; враховано review від 08.10.2026.
