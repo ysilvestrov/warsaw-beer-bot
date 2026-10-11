@@ -235,6 +235,20 @@ describe('dependabot docker updates', () => {
   });
 });
 
+// A main push publishes (push, attest, record): a newer push must queue behind it, not cancel it
+// half-way. A PR's superseded run is still cancelled. The group is per ref, so main pushes
+// queue among themselves only.
+describe('ci.yml concurrency', () => {
+  it('cancels in progress on a pull request only', () => {
+    const at = workflow.indexOf('concurrency:');
+    expect(workflow.slice(at, at + 3)).toEqual([
+      'concurrency:',
+      '  group: ci-${{ github.workflow }}-${{ github.ref }}',
+      "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+    ]);
+  });
+});
+
 describe('ci.yml: the runtime artifact is gone', () => {
   it('has no package job and uploads no artifact', () => {
     expect([workflow.indexOf('  package:'), workflow.filter((l) => l.includes('upload-artifact'))]).toEqual([-1, []]);

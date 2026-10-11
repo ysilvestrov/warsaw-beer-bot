@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A superseded PR run is cancelled; a main push publishes the image (push, attest, record),
+# so a newer main push queues behind it instead of cancelling it half-way.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
