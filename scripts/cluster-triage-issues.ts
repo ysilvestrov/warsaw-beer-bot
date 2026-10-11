@@ -571,7 +571,7 @@ export function groupIntoClusters(classifiedIssues: ClassifiedIssue[]): IssueClu
       c.systemicLeverage = 4;
       c.blastRadius = 1;
       c.complexity = 2;
-      c.recommendedAction = 'Re-query on saturated Algolia candidate pools (nbHits > hitsPerPage)';
+      c.recommendedAction = 'Raise hitsPerPage or refine query specificity on saturated Algolia candidate pools (nbHits > hitsPerPage)';
     }
 
     // Impact formula: (uniqueBeerCount * leverage * 10) / (blastRadius * complexity)

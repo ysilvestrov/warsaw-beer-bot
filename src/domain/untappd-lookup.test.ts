@@ -3955,7 +3955,7 @@ describe('#664 numbered-series retry', () => {
   });
 
   describe('#393 sibling pool candidate depth', () => {
-    test('exact candidate at index >= 5 matches instead of letting earlier suffix candidate win', async () => {
+    test('exact 1-token candidate at rank 6 matches when top 5 lacks the base product', async () => {
       // CITADEL Томатка case (#393):
       // The true product "Томатка" (5.0%) is at rank 6 (index 5).
       // Variants at ranks 1-5 have flavour suffixes ("Томатка: Аджика", etc.) with 4.4% ABV.
@@ -3970,7 +3970,7 @@ describe('#664 numbered-series retry', () => {
         { bid: 108, beer_name: 'Томатка: Барбекю', brewery_name: 'CITADEL Brewpub', style: 'Sour', abv: 5.0, global_rating: 3.9 },
       ];
 
-      // With truncated 5 candidates, rank 6 exact match is missing from the pool:
+      // With truncated 5 candidates, rank 6 exact match is missing, resulting in not_found:
       const truncatedSearch = fakeSearch(() => candidates.slice(0, 5));
       const truncatedOut = await lookupBeer({
         brewery: 'CITADEL',
@@ -3980,7 +3980,7 @@ describe('#664 numbered-series retry', () => {
       });
       expect(truncatedOut.kind).toBe('not_found');
 
-      // With full candidates (hitsPerPage = 15), rank 6 exact match wins in Stage 2a:
+      // With full candidates (hitsPerPage = 15), rank 6 exact match enters pool and wins:
       const fullSearch = fakeSearch(() => candidates);
       const fullOut = await lookupBeer({
         brewery: 'CITADEL',
@@ -3990,21 +3990,81 @@ describe('#664 numbered-series retry', () => {
       });
       expect(fullOut.kind).toBe('matched');
       assert(fullOut.kind === 'matched');
-      expect(fullOut.result.bid).toBe(6697878); // exact match: Томатка
+      expect(fullOut.result.bid).toBe(6697878);
     });
 
-    test('generic style name with multiple single-hop variants safely returns not_found', async () => {
+    test('Magic Road Stout: exact 1-token candidate at rank 7 resolves tie between top-5 variants', async () => {
+      // Magic Road Stout case (#393):
+      // The true product "Stout" @ 4.5% is at rank 7 (index 6, 35 ratings).
+      // Top 5 contains two other 4.5% stouts (Only Dry Stout, Simple Stout), creating a tie.
+      const candidates: SearchResult[] = [
+        { bid: 301, beer_name: 'Foreign Extra Stout', brewery_name: 'Magic Road', style: 'Stout', abv: 8.1, global_rating: 3.8, rating_count: 645 },
+        { bid: 302, beer_name: '3rd Anniversary Imperial Stout', brewery_name: 'Magic Road', style: 'Stout', abv: 14.0, global_rating: 4.1, rating_count: 308 },
+        { bid: 303, beer_name: 'Only Dry Stout', brewery_name: 'Magic Road', style: 'Stout - Irish Dry', abv: 4.5, global_rating: 3.6, rating_count: 257 },
+        { bid: 304, beer_name: 'Maple Chocolate Imperial Stout', brewery_name: 'Magic Road', style: 'Stout', abv: 16.0, global_rating: 3.9, rating_count: 101 },
+        { bid: 305, beer_name: 'Simple Stout', brewery_name: 'Magic Road', style: 'Stout - Irish Dry', abv: 4.5, global_rating: 3.5, rating_count: 41 },
+        { bid: 306, beer_name: 'One More Ice', brewery_name: 'Magic Road', style: 'Stout', abv: 15.0, global_rating: 4.0, rating_count: 37 },
+        { bid: 6632734, beer_name: 'Stout', brewery_name: 'Magic Road', style: 'Stout - Irish Dry', abv: 4.5, global_rating: 3.5, rating_count: 35 },
+      ];
+
+      // With 5 candidates, Only Dry Stout and Simple Stout tie at score 1.0 / ABV 4.5% without dominance -> not_found:
+      const truncatedOut = await lookupBeer({
+        brewery: 'Magic Road',
+        name: 'Stout',
+        abv: 4.5,
+        search: fakeSearch(() => candidates.slice(0, 5)),
+      });
+      expect(truncatedOut.kind).toBe('not_found');
+
+      // With full candidates (hitsPerPage = 15), exact name "Stout" at rank 7 wins:
+      const fullOut = await lookupBeer({
+        brewery: 'Magic Road',
+        name: 'Stout',
+        abv: 4.5,
+        search: fakeSearch(() => candidates),
+      });
+      expect(fullOut.kind).toBe('matched');
+      assert(fullOut.kind === 'matched');
+      expect(fullOut.result.bid).toBe(6632734);
+    });
+
+    test('boundary: exact match at 15th position (index 14) is reachable and matches', async () => {
+      const candidates: SearchResult[] = Array.from({ length: 15 }, (_, i) => ({
+        bid: 500 + i,
+        beer_name: i === 14 ? 'True Target' : `Variant #${i + 1} Target`,
+        brewery_name: 'Craft Brewery',
+        style: 'IPA',
+        abv: i === 14 ? 6.0 : 6.5,
+        global_rating: 3.8,
+        rating_count: 100 - i,
+      }));
+
+      const out = await lookupBeer({
+        brewery: 'Craft Brewery',
+        name: 'True Target',
+        abv: 6.0,
+        search: fakeSearch(() => candidates),
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(514); // index 14
+    });
+
+    test('generic style name with multiple single-hop variants safely returns not_found preserving all candidates', async () => {
       // Nieczajna Session IPA case (#393/#803):
       // Tap has generic "Session IPA 12°" @ 5.0%.
-      // Sibling pool has multiple single-hop variants all sharing 5.0% ABV.
+      // Sibling pool has 12 variants, multiple sharing 5.0% ABV.
       const candidates: SearchResult[] = [
         { bid: 201, beer_name: 'Session Black IPA Konkursowe', brewery_name: 'Browar Nieczajna', style: 'IPA', abv: 5.3, global_rating: 3.84 },
         { bid: 202, beer_name: 'DDH Session Black IPA', brewery_name: 'Browar Nieczajna', style: 'IPA', abv: 4.9, global_rating: 3.74 },
         { bid: 203, beer_name: 'Talus Single Hop Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.8 },
         { bid: 204, beer_name: 'Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.9, global_rating: 3.63 },
         { bid: 205, beer_name: 'New England Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.68 },
-        { bid: 206, beer_name: 'Cascade Single Hop Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.73 },
-        { bid: 207, beer_name: 'Session West Coast IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.66 },
+        { bid: 206, beer_name: 'DDH Session IPA Footgator 2.0', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 4.9, global_rating: 3.68 },
+        { bid: 207, beer_name: 'Session IPA HBC 586', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.1, global_rating: 3.58 },
+        { bid: 208, beer_name: 'Cascade Single Hop Session IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.73 },
+        { bid: 209, beer_name: 'Session West Coast IPA', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.66 },
+        { bid: 210, beer_name: 'Session IPA Citra', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.2, global_rating: 3.5 },
         { bid: 6828812, beer_name: 'Session IPA - Single Hop: NZ Rhapzody', brewery_name: 'Browar Nieczajna', style: 'IPA - Other', abv: 5.0, global_rating: 3.5 },
         { bid: 6999832, beer_name: 'Session IPA - Nelson Sauvin & Riwaka', brewery_name: 'Browar Nieczajna', style: 'IPA - Session', abv: 5.0, global_rating: 3.5 },
       ];
@@ -4017,6 +4077,10 @@ describe('#664 numbered-series retry', () => {
         search,
       });
       expect(out.kind).toBe('not_found');
+      assert(out.kind === 'not_found');
+      // Assert that all 12 candidates were passed to lookup and retained in triage evidence:
+      expect(out.candidates).toHaveLength(12);
+      expect(out.candidates.map((c) => c.bid)).toEqual(candidates.map((c) => c.bid));
     });
   });
 });

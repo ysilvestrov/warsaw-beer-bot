@@ -64,15 +64,15 @@
 
 ---
 
-### Task 3: Unpark Row 34221 & Verification
+### Task 3: PR, Deployment & Operational Unparking
 
 **Files:**
 - Operational DB action on operator host: `/var/lib/warsaw-beer-bot/bot.db`
 
-- [ ] **Step 1: Check status of row 34221 in `bot.db`**
-  Verify `SELECT id, name, brewery, abv, untappd_lookup_count FROM beers WHERE id = 34221;`
-- [ ] **Step 2: Unpark and re-arm row 34221**
-  Reset `untappd_lookup_count = 0` so the enrich cron can resolve it.
-- [ ] **Step 3: Run cross-review per AGENTS.md**
+- [ ] **Step 1: Run cross-review per AGENTS.md**
   Run: `npm run cross-review -- --reviewer claude`
-- [ ] **Step 4: Push branch and open PR**
+- [ ] **Step 2: Push branch and open PR**
+- [ ] **Step 3: Post-deploy: Unpark and re-arm row 34221**
+  After merge and automatic deployment, on the host run:
+  `sudo -u warsaw-beer-bot bash -lc "sqlite3 /var/lib/warsaw-beer-bot/bot.db 'UPDATE beers SET untappd_lookup_count = 0 WHERE id = 34221'"`
+  Verify live enrich resolves row 34221 to bid 6697878.
