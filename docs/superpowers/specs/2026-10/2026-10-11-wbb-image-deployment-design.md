@@ -168,7 +168,7 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 
 ### 6.5 Лінтер у CI — сигнал для рев'ю, не доказ
 
-Чек на SQL нових міграцій (`DROP`, `RENAME`, `INSERT INTO … SELECT` для перебудови, `UPDATE`, `DELETE`) вимагає мітки `migration:contract` + `[deploy:hold]`. Зміни даних у TypeScript він не бачить — тому він лише піднімає питання на рев'ю, а гарантією сумісності не вважається ніде в цій спеці. Розширює чинний `deploy-hold` чек.
+Чек на SQL нових міграцій (`DROP`, `RENAME`, `UPDATE`, `DELETE`, `REPLACE INTO`, `INSERT OR REPLACE`, `CREATE UNIQUE INDEX`; перебудову таблиці ловлять її `DROP`/`RENAME`, тож окремого правила на `INSERT INTO … SELECT` нема — воно давало хибні спрацювання на сидах нових таблиць, як v42; подія тригера — не оператор, тіло тригера — так) вимагає мітки `migration:contract` + `[deploy:hold]`. Зміни даних у TypeScript він не бачить — тому він лише піднімає питання на рев'ю, а гарантією сумісності не вважається ніде в цій спеці. Розширює чинний `deploy-hold` чек.
 
 ### 6.6 Що прибирається з деплою
 

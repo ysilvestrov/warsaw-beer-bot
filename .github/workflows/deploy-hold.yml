@@ -45,7 +45,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         # Migrations newer than the base's largest version are the PR's own. Their SQL is
-        # read from the PR tree; DROP/RENAME/UPDATE/DELETE/INSERT … SELECT need the
-        # migration:contract label + [deploy:hold] (spec 2026-10-11 §6.2, §6.5). Data-format
+        # read from the PR tree; DROP/RENAME/UPDATE/DELETE/REPLACE INTO/INSERT OR REPLACE/
+        # CREATE UNIQUE INDEX need the migration:contract label + [deploy:hold] (spec 2026-10-11 §6.2, §6.5). Data-format
         # changes in TypeScript are invisible to it — decide rollback:unsafe on review.
         run: git show HEAD^1:src/storage/schema.ts | npx tsx scripts/migrations/contract-lint.ts

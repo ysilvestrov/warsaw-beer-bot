@@ -3,8 +3,8 @@
  *
  * Rolling back only the code means the previous release must still run on the schema the
  * candidate left behind. Expand changes (new table, nullable/DEFAULT column, index) keep
- * that true; contract changes (DROP, RENAME, table rebuild, UPDATE/DELETE of existing rows)
- * do not, so they wait until the release that stopped using the old form is settled and
+ * that true; contract changes (DROP, RENAME, table rebuild, UPDATE/DELETE/REPLACE of existing
+ * rows, a new UNIQUE index) do not, so they wait until the release that stopped using the old form is settled and
  * are deployed by a human (§6.2, §6.4). This check reads the SQL of the migrations the PR
  * adds and asks for the `migration:contract` label + [deploy:hold] when it sees contract
  * keywords. It does not see data-format changes made in TypeScript — those are
@@ -65,19 +65,35 @@ export function stripSqlComments(sql: string): string {
   return scan(sql, false);
 }
 
+// A table rebuild always DROPs the old table and RENAMEs the new one, so the copy between them
+// (INSERT … SELECT) is not a keyword of its own: alone it is the seed of a new table (v42).
 const KEYWORDS: ReadonlyArray<[string, RegExp]> = [
   ['DROP', /\bDROP\b/i],
   ['RENAME', /\bRENAME\b/i],
   ['UPDATE', /\bUPDATE\b/i],
   ['DELETE', /\bDELETE\b/i],
-  // Within one statement: the table-rebuild copy. A ; inside a literal is already masked.
-  ['INSERT … SELECT', /\bINSERT\b[^;]*\bSELECT\b/i],
+  // REPLACE deletes the conflicting row and inserts a new one: a rewrite of existing rows.
+  ['REPLACE INTO', /(?<!\bOR\s+)\bREPLACE\s+INTO\b/i],
+  ['INSERT OR REPLACE', /\bINSERT\s+OR\s+REPLACE\b/i],
+  // A new uniqueness rule the previous release does not know: its writes may now fail.
+  ['CREATE UNIQUE INDEX', /\bCREATE\s+UNIQUE\s+INDEX\b/i],
 ];
+
+// A trigger's event — CREATE [TEMP] TRIGGER [IF NOT EXISTS] name [BEFORE|AFTER|INSTEAD OF]
+// DELETE|UPDATE [OF cols] ON — says when it fires, it is not a statement. Its body still counts.
+const NAME = String.raw`(?:"[^"]*"|\w+)(?:\s*\.\s*(?:"[^"]*"|\w+))?`;
+const TRIGGER_EVENT = new RegExp(
+  String.raw`\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\s+(?:IF\s+NOT\s+EXISTS\s+)?${NAME}\s+` +
+  String.raw`(?:(?:BEFORE|AFTER|INSTEAD\s+OF)\s+)?(?:DELETE|UPDATE)(?:\s+OF\s+[^;]*?)?\s+ON\b`,
+  'gi',
+);
 
 /** Contract keywords the SQL runs, outside comments and literals, in KEYWORDS order. */
 export function contractKeywords(sql: string): string[] {
-  // A foreign-key action (REFERENCES … ON DELETE CASCADE) is part of a CREATE TABLE, not DML.
-  const code = scan(sql, true).replace(/\bON\s+(DELETE|UPDATE)\b/gi, ' ');
+  const code = scan(sql, true)
+    .replace(TRIGGER_EVENT, ' ')
+    // A foreign-key action (REFERENCES … ON DELETE CASCADE) is part of a CREATE TABLE, not DML.
+    .replace(/\bON\s+(DELETE|UPDATE)\b/gi, ' ');
   return KEYWORDS.filter(([, re]) => re.test(code)).map(([name]) => name);
 }
 
