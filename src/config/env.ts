@@ -64,6 +64,16 @@ const Schema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .default('false')
     .transform((v) => v === 'true'),
+
+  // Image deployment (spec 2026-10-11-wbb-image-deployment-design.md §3.2): the UID that owns the
+  // resource-monitor export the daily status reads. In a container there is no `ysi` account to
+  // resolve with `id -u ysi`. Unset or empty ⇒ resolved by name, as on the flat host. Digits only:
+  // z.coerce would read '' or ' ' as 0 and quietly trust root-owned files.
+  WBB_OPERATOR_UID: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().regex(/^\d+$/, 'WBB_OPERATOR_UID must be a non-negative integer')
+      .transform(Number).pipe(z.number().int().min(0).max(4_294_967_295)).optional(),
+  ),
 });
 
 export type Env = z.infer<typeof Schema>;

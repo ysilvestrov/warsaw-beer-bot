@@ -10,8 +10,10 @@ const UP: HostUpstream = {
   nodeEnd: { ok: true, value: '2028-04-30' },
   litestream: { ok: true, value: { version: '0.5.17', publishedAt: '2026-08-31T21:59:32Z' } },
 };
-const at = (patch: Partial<HostUpstream>, packages: HostPatchFacts['packages'] | null = PACKAGES, now = NOW) =>
-  upstreamFindings({ ...UP, ...patch }, packages, now);
+// The Node rule reads the version of the running process (spec 2026-10-11 §10), not packages.nodejs.
+const RUNTIME_NODE = '24.21.0';
+const at = (patch: Partial<HostUpstream>, packages: HostPatchFacts['packages'] | null = PACKAGES, now = NOW, runtimeNode = RUNTIME_NODE) =>
+  upstreamFindings({ ...UP, ...patch }, packages, runtimeNode, now);
 
 describe('debianUpstreamVersion', () => {
   it.each([
@@ -48,8 +50,15 @@ describe('upstreamFindings', () => {
       expect(at(security('24.21.0', '2026-01-01'))).toEqual([]);
     });
     it('compares numerically: 24.9.0 is older than 24.10.0', () => {
-      expect(at(security('24.10.0', '2026-01-01'), { ...PACKAGES, nodejs: '24.9.0-1nodesource1' })).toEqual([
+      expect(at(security('24.10.0', '2026-01-01'), PACKAGES, NOW, '24.9.0')).toEqual([
         { colour: 'red', reason: 'Node 24.9.0 < безпековий 24.10.0 (з 2026-01-01)' }]);
+    });
+    it('judges the process, not the host package: an old package with a current process is silent', () => {
+      expect(at(security('24.22.0', '2026-10-01'), { ...PACKAGES, nodejs: '24.9.0-1nodesource1' }, NOW, '24.22.0')).toEqual([]);
+    });
+    it('a current host package does not hide an old process', () => {
+      expect(at(security('24.22.0', '2026-10-01'), { ...PACKAGES, nodejs: '24.22.0-1nodesource1' }, NOW, '24.21.0')).toEqual([
+        { colour: 'red', reason: 'Node 24.21.0 < безпековий 24.22.0 (з 2026-10-01)' }]);
     });
     it('a release dated tomorrow is silent', () => {
       expect(at(security('24.22.0', '2026-10-09'))).toEqual([]);
@@ -65,12 +74,17 @@ describe('upstreamFindings', () => {
       expect(at({ nodeSecurity: { ok: false, reason: 'безпекові релізи Node ще не завантажено' } })).toEqual([
         { colour: 'yellow', reason: 'нема даних: безпекові релізи Node ще не завантажено' }]);
     });
-    it('an installed version dpkg could not name is "нема даних"', () => {
-      expect(at({}, { ...PACKAGES, nodejs: null })).toEqual([
-        { colour: 'yellow', reason: 'нема даних: встановлена версія nodejs' }]);
+    it('a host package dpkg could not name no longer matters', () => {
+      expect(at(security('24.22.0', '2026-10-01'), { ...PACKAGES, nodejs: null })).toEqual([
+        { colour: 'red', reason: 'Node 24.21.0 < безпековий 24.22.0 (з 2026-10-01)' }]);
     });
-    it('without a host summary the package rules stay quiet (the host line already says why)', () => {
-      expect(at(security('24.22.0', '2026-10-01'), null)).toEqual([]);
+    it('without a host summary the Node row is still judged', () => {
+      expect(at(security('24.22.0', '2026-10-01'), null)).toEqual([
+        { colour: 'red', reason: 'Node 24.21.0 < безпековий 24.22.0 (з 2026-10-01)' }]);
+    });
+    it('a process version that is not x.y.z is "нема даних", not a pass', () => {
+      expect(at(security('24.22.0', '2026-10-01'), PACKAGES, NOW, 'v24')).toEqual([
+        { colour: 'yellow', reason: 'нема даних: версія Node процесу' }]);
     });
   });
 
@@ -123,6 +137,9 @@ describe('upstreamFindings', () => {
     it('an installed version dpkg could not name is "нема даних"', () => {
       expect(at({}, { ...PACKAGES, litestream: null })).toEqual([
         { colour: 'yellow', reason: 'нема даних: встановлена версія litestream' }]);
+    });
+    it('without a host summary the litestream rule stays quiet (the host line already says why)', () => {
+      expect(at(latest('0.5.18', '2026-09-07T12:00:00Z'), null)).toEqual([]);
     });
   });
 });

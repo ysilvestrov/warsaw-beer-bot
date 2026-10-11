@@ -96,7 +96,7 @@ export function evaluateFest(fest: FestInputs, now: Date): Evaluation {
 function hostFindings(i: StatusInputs): Finding[] {
   return [
     ...hostPatchFindings(i.hostPatch, i.now),
-    ...upstreamFindings(i.upstream, i.hostPatch.ok ? i.hostPatch.value.packages : null, i.now),
+    ...upstreamFindings(i.upstream, i.hostPatch.ok ? i.hostPatch.value.packages : null, i.runtimeNode, i.now),
   ];
 }
 

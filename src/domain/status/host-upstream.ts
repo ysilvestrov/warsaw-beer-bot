@@ -5,8 +5,10 @@ import { STATUS_RULES as R } from './rules';
 import { ukDays } from './helpers';
 import { compareVersions } from '../../sources/cws-version';
 
-// Upstream rows of the host-patch rules (#469 stage 2). Node's end of life does not depend on the
-// host summary and is reported even when it is unreadable; the version rules need `packages`.
+// Upstream rows of the host-patch rules (#469 stage 2). The Node rows judge the Node that runs the
+// bot — `runtimeNode` is process.versions.node (spec 2026-10-11 §10: in a container the host
+// package says nothing about it) — so they are reported even when the host summary is unreadable.
+// Only the litestream rule needs `packages`.
 const red = (reason: string): HostFinding => ({ colour: 'red', reason });
 const yellow = (reason: string): HostFinding => ({ colour: 'yellow', reason });
 
@@ -18,7 +20,7 @@ export function debianUpstreamVersion(raw: string): string | null {
 }
 
 export function upstreamFindings(
-  u: HostUpstream, packages: HostPatchFacts['packages'] | null, now: Date,
+  u: HostUpstream, packages: HostPatchFacts['packages'] | null, runtimeNode: string, now: Date,
 ): HostFinding[] {
   const t = Math.floor(now.getTime() / 1000);
   const f: HostFinding[] = [];
@@ -40,10 +42,10 @@ export function upstreamFindings(
   }
 
   if (!u.nodeSecurity.ok) f.push(yellow(`нема даних: ${u.nodeSecurity.reason}`));
-  else if (u.nodeSecurity.value !== null && packages !== null) {
-    const installed = packages.nodejs === null ? null : debianUpstreamVersion(packages.nodejs);
+  else if (u.nodeSecurity.value !== null) {
+    const installed = /^\d+\.\d+\.\d+$/.test(runtimeNode) ? runtimeNode : null;
     const sec = u.nodeSecurity.value;
-    if (installed === null) f.push(yellow('нема даних: встановлена версія nodejs'));
+    if (installed === null) f.push(yellow('нема даних: версія Node процесу'));
     else if (compareVersions(installed, sec.version) < 0) {
       const age = ago(sec.date);
       if (age === null) f.push(yellow('нема даних: дата безпекового релізу Node'));

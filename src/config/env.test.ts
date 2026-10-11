@@ -86,6 +86,24 @@ describe('loadEnv', () => {
     expect(EXPECTED_PROD_KEYS.map((k) => k.key as string)).not.toContain('WBB_RELEASE_REQUIRED');
   });
 
+  it('WBB_OPERATOR_UID parses a non-negative integer and is absent when unset or empty', () => {
+    expect([
+      loadEnv({ ...baseEnv, WBB_OPERATOR_UID: '1001' }).WBB_OPERATOR_UID,
+      loadEnv({ ...baseEnv, WBB_OPERATOR_UID: '0' }).WBB_OPERATOR_UID,
+      loadEnv(baseEnv).WBB_OPERATOR_UID,
+      loadEnv({ ...baseEnv, WBB_OPERATOR_UID: '' }).WBB_OPERATOR_UID,
+    ]).toEqual([1001, 0, undefined, undefined]);
+  });
+
+  // An empty or blank value must not coerce to 0 and quietly trust root-owned files.
+  it.each(['-1', 'abc', '1.5', ' ', '1e3', '4294967296'])('WBB_OPERATOR_UID=%j is a config error', (raw) => {
+    expect(() => loadEnv({ ...baseEnv, WBB_OPERATOR_UID: raw })).toThrow(/WBB_OPERATOR_UID/);
+  });
+
+  it('WBB_OPERATOR_UID is not an expected prod key: the flat host resolves the operator by name', () => {
+    expect(EXPECTED_PROD_KEYS.map((k) => k.key as string)).not.toContain('WBB_OPERATOR_UID');
+  });
+
   it('WEB_SEARCH_DAILY_CAP defaults to 30', () => {
     const env = loadEnv(baseEnv);
     expect(env.WEB_SEARCH_DAILY_CAP).toBe(30);

@@ -65,6 +65,7 @@ export interface StatusInputs {
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
   hostPatch: Avail<HostPatchFacts>; // #469 stage 2: the root collector's summary
   upstream: HostUpstream;           // #469 stage 2: Node/litestream releases, fetched daily
+  runtimeNode: string;             // process.versions.node of the bot (spec 2026-10-11 §10)
   fest: FestInputs | null;         // null = no current or upcoming fest
 }
 

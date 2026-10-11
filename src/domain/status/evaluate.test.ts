@@ -205,6 +205,15 @@ describe('Інфраструктура', () => {
       subsystem: 'infra', colour: 'yellow', reasons: ['нема даних: збирач патчів мовчить'],
     });
   });
+
+  // Spec 2026-10-11 §10: the Node row judges the running process, so it survives a silent collector.
+  it('an unreadable host summary does not hide an old Node process', () => {
+    const upstream = { ...greenInputs().upstream, nodeSecurity: { ok: true as const, value: { version: '24.22.0', date: '2026-10-01' } } };
+    expect(evaluateInfra(greenInputs({ upstream, runtimeNode: '24.21.0', hostPatch: { ok: false, reason: 'збирач патчів мовчить' } }))).toEqual({
+      subsystem: 'infra', colour: 'red',
+      reasons: ['нема даних: збирач патчів мовчить', 'Node 24.21.0 < безпековий 24.22.0 (з 2026-10-01)'],
+    });
+  });
 });
 
 describe('evaluateChannels — handler failures (#836)', () => {

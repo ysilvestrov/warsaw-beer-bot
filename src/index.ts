@@ -46,7 +46,7 @@ import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { enrichOrphans } from './jobs/enrich-orphans';
 import { hydrateRatings } from './jobs/hydrate-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
-import { dailyStatus } from './jobs/daily-status';
+import { dailyStatus, dailyStatusEnvDeps } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
 import { unlockFixedOrphans } from './jobs/unlock-fixed-orphans';
 import { hostUpstream } from './jobs/host-upstream';
@@ -373,7 +373,7 @@ async function main(): Promise<void> {
     // and catches up if the bot was down at 09:00. Self-noops when
     // ADMIN_TELEGRAM_ID is unset.
     cron.schedule('*/15 * * * *', () => {
-      dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
+      dailyStatus({ db, log, notifyAdmin, ...dailyStatusEnvDeps(env) })
         .catch((e) => log.error({ err: e }, 'daily-status cron'));
     }),
     // orphan-triage: daily LLM triage of enrich_failures, Warsaw [06:00,09:00)
@@ -536,7 +536,7 @@ async function main(): Promise<void> {
   // the digest go out (finally), reading whatever job_state holds.
   hostUpstream({ db, log })
     .catch((e) => log.error({ err: e }, 'host-upstream startup'))
-    .finally(() => dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
+    .finally(() => dailyStatus({ db, log, notifyAdmin, ...dailyStatusEnvDeps(env) })
       .catch((e) => log.error({ err: e }, 'daily-status startup')));
 
   const apiApp = createApiApp({

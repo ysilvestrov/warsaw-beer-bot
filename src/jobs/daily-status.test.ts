@@ -1,14 +1,18 @@
 import pino from 'pino';
 import { tmpdir } from 'node:os';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import childProcess from 'node:child_process';
+import { loadEnv } from '../config/env';
 import { join } from 'node:path';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { buildBugReportLine, buildDailyReport, dailyStatus, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
+import { buildBugReportLine, buildDailyReport, dailyStatus, dailyStatusEnvDeps, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
 import { getJobState, setJobState } from '../storage/job_state';
 import { insertReport, markDone } from '../storage/bug_reports';
 import { recordMatchUsage } from '../storage/api_usage';
-import { saveStatusSnapshot } from '../storage/status_snapshots';
+import { listStatusSnapshots, saveStatusSnapshot } from '../storage/status_snapshots';
 import { recordHandlerFailure } from '../storage/handler_failures';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
@@ -387,4 +391,44 @@ test('an unreadable failures table is «нема даних» in the report, not
   expect(report.split('\n').filter((line) => line.includes('збої команд'))).toEqual([
     '  • нема даних: збої команд — таблицю збоїв не прочитано',
   ]);
+});
+
+describe('dailyStatusEnvDeps', () => {
+  const base = { TELEGRAM_BOT_TOKEN: 'abc:1234567', DATABASE_PATH: '/tmp/bot.db', OSRM_BASE_URL: 'https://osrm.example', NOMINATIM_USER_AGENT: 'ua' };
+  it('carries WBB_OPERATOR_UID as the monitor owner', () => {
+    expect(dailyStatusEnvDeps(loadEnv({ ...base, WBB_OPERATOR_UID: '1001' })))
+      .toEqual({ repo: 'ysilvestrov/warsaw-beer-bot', testDiagnosticsUid: 1001 });
+  });
+  it('without it the owner is left to the reader (`id -u ysi`, as before)', () => {
+    expect(dailyStatusEnvDeps(loadEnv(base))).toEqual({ repo: 'ysilvestrov/warsaw-beer-bot', testDiagnosticsUid: undefined });
+  });
+});
+
+test('dailyStatus: testDiagnosticsUid reaches the monitor reader — disk is read and `id` never runs', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-daily-uid-'));
+  const spy = vi.spyOn(childProcess, 'execFileSync').mockImplementation(() => {
+    throw new Error('id must not run when the operator UID is configured');
+  });
+  syncBuiltinESMExports();
+  try {
+    chmodSync(dir, 0o755);
+    const file = join(dir, 'summary.json');
+    const now = new Date('2026-06-21T07:00:00Z');
+    writeFileSync(file, JSON.stringify({
+      version: 1, timestamp: now.getTime() / 1000 - 60, inodes_free: 2_000_000, bytes_available: 32_212_254_720,
+      runs_inventory_available: true, pending_runs: 0,
+    }), { mode: 0o644 });
+    chmodSync(file, 0o644);
+    const db = emptyDb();
+    await dailyStatus({
+      db, log: silentLog, ...missingMonitor, testDiagnosticsPath: file, testDiagnosticsUid: process.getuid!(),
+      notifyAdmin: async () => {}, now: () => now,
+    });
+    const [snap] = listStatusSnapshots(db, '2026-06-21', '2026-06-22');
+    expect([snap.metrics.diskBytesAvailable, spy.mock.calls.length]).toEqual([32_212_254_720, 0]);
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

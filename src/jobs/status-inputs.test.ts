@@ -1,4 +1,6 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import childProcess from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb } from '../storage/db';
@@ -253,4 +255,36 @@ test('handlerFailures: an unreadable table is a value, not an exception', () => 
   expect(collectStatusInputs(db, NOW, DATE, missing).handlerFailures).toEqual({
     ok: false, reason: 'таблицю збоїв не прочитано',
   });
+});
+
+// Image deployment core, Task 5: in a container there is no `ysi` account to resolve, so the
+// operator UID comes from WBB_OPERATOR_UID and must reach the monitor reader without `id`.
+test('testDiagnosticsUid is the trusted owner of the monitor file and `id` is never run', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-status-inputs-uid-'));
+  const spy = vi.spyOn(childProcess, 'execFileSync').mockImplementation(() => {
+    throw new Error('id must not run when the operator UID is configured');
+  });
+  syncBuiltinESMExports();
+  try {
+    chmodSync(dir, 0o755);
+    const file = join(dir, 'summary.json');
+    writeFileSync(file, JSON.stringify({
+      version: 1, timestamp: NOW.getTime() / 1000 - 60, inodes_free: 2_000_000, bytes_available: 32_212_254_720,
+      runs_inventory_available: true, pending_runs: 0,
+    }), { mode: 0o644 });
+    chmodSync(file, 0o644);
+    const inputs = collectStatusInputs(emptyDb(), NOW, DATE, { ...missing, testDiagnosticsPath: file, testDiagnosticsUid: process.getuid!() });
+    expect([inputs.disk, spy.mock.calls.length]).toEqual([
+      { ok: true, value: { bytesAvailable: 32_212_254_720, inodesFree: 2_000_000, pendingRuns: 0 } }, 0,
+    ]);
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The status judges the Node that runs the bot, not the host package (spec 2026-10-11 §10).
+test('runtimeNode is the version of this process', () => {
+  expect(collectStatusInputs(emptyDb(), NOW, DATE, missing).runtimeNode).toBe(process.versions.node);
 });

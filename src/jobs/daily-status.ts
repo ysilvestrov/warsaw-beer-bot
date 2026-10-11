@@ -1,5 +1,6 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
+import type { Env } from '../config/env';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import type { StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
@@ -69,6 +70,12 @@ export interface DailyStatusDeps {
   testDiagnosticsUid?: number;
   hostPatchPath?: string;
   hostPatchUid?: number;
+}
+
+// The env half of DailyStatusDeps (composition root). WBB_OPERATOR_UID, when set, is the owner the
+// monitor reader trusts instead of resolving `id -u ysi` — there is no such account in a container.
+export function dailyStatusEnvDeps(env: Pick<Env, 'GITHUB_REPO' | 'WBB_OPERATOR_UID'>): Pick<DailyStatusDeps, 'repo' | 'testDiagnosticsUid'> {
+  return { repo: env.GITHUB_REPO, testDiagnosticsUid: env.WBB_OPERATOR_UID };
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';

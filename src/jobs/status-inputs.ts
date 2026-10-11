@@ -154,6 +154,7 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
       : { ok: false, reason: diag.kind === 'stale' ? 'дані монітора застарілі' : 'дані монітора недоступні' },
     hostPatch: readHostPatchInput(now, opts),
     upstream: readHostUpstream(db, now),
+    runtimeNode: process.versions.node,
     fest: readFest(db, now),
   };
 }
