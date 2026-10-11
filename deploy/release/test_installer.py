@@ -522,6 +522,17 @@ class WhatIsAlreadyThere(Base):
                                           '/usr; not touching it\n'))
         self.assertEqual(os.listdir(outside), [])
 
+    def test_a_symlink_above_a_private_directory_is_refused_too(self):
+        # #834 AI review, 2nd pass: /var/lib holds none of the installed files, only wbb-trial and the receipts.
+        outside = os.path.join(self.tmp.name, 'elsewhere')
+        os.makedirs(outside)
+        os.makedirs(self.p('var'))
+        os.symlink(outside, self.p('var/lib'))
+        code, _, err = self.main()
+        self.assertEqual((code, err), (1, 'REFUSED: a symlink or a non-directory on the way to an installed file: '
+                                          '/var/lib; not touching it\n'))
+        self.assertEqual((os.listdir(outside), self.host.argvs()), ([], []))
+
 class RootLeavesNothingInTheCheckout(Base):
     """e2e review S3: run as root in the operator's checkout, the installer must not leave root-owned files there."""
     GIT_PREFIX = ('/usr/bin/git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
