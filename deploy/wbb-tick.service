@@ -1,0 +1,21 @@
+[Unit]
+Description=release tick: deploy origin/main's verified artifact when it is quiet, green and unheld
+After=network-online.target
+Wants=network-online.target
+# Plan: docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-install-core.md, "Рішення" п.7.
+# A failure the tick did not report itself (timeout, signal, exit 64/71) is reported by this unit.
+OnFailure=wbb-tick-failed.service
+
+[Service]
+Type=oneshot
+User=ysi
+Environment=HOME=/home/ysi
+ExecStart=/usr/local/bin/wbb-tick timer
+# A deploying tick lasts stop + start + the observation window; a oneshot's default 90 s would cut it.
+TimeoutStartSec=30min
+# 1 = refused or held, 2 = rolled back — the tick reports both itself and neither is a unit failure.
+# 3, 4 and 70 are failures the tick reported itself; 64 and 71 are failures nobody reported (OnFailure does).
+# No NoNewPrivileges: every root step goes through sudo. No proxy in the environment: /health is local.
+SuccessExitStatus=0 1 2
+StandardOutput=journal
+StandardError=journal

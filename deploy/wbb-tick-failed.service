@@ -1,0 +1,13 @@
+[Unit]
+Description=release tick: tell the admin about a wbb-tick failure the tick did not report itself
+# Plan: docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-install-core.md, "Рішення" п.7.
+# Started by wbb-tick.service's OnFailure=; systemd passes MONITOR_SERVICE_RESULT / MONITOR_EXIT_STATUS.
+
+[Service]
+Type=oneshot
+User=ysi
+Environment=HOME=/home/ysi
+ExecStart=/usr/local/libexec/wbb-tick-failed
+TimeoutStartSec=2min
+StandardOutput=journal
+StandardError=journal

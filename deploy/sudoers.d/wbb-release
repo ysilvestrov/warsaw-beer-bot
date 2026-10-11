@@ -1,0 +1,31 @@
+# /etc/sudoers.d/wbb-release
+#
+# Lets the operator user (default: ysi) run the release control plane's root steps without a password prompt:
+# the root helper's verbs, as helpers_adapter.py and host_adapter.py call them, and the stop/start of the bot and
+# litestream that the activation engine performs. Installed by deploy/install-release.sh (plan
+# docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-install-core.md, "Рішення" п.8), which
+# checks it with `visudo -cf` before the rename; by hand it is the same as for the merge-deploy file:
+#
+#   sudo visudo -cf deploy/sudoers.d/wbb-release
+#   sudo install -m 0440 -o root -g root \
+#       deploy/sudoers.d/wbb-release /etc/sudoers.d/wbb-release
+#
+# A `*` in sudoers matches spaces too, so the patterns below are not the trust boundary: the helper itself is
+# (argparse refuses extra arguments, --sha is a full SHA, --snapshot a pre-snapshot name, --path an installed copy
+# installed.digestable admits). `audit` is deliberately absent: it runs without root. systemctl stop/start repeat
+# the rules of /etc/sudoers.d/warsaw-beer-bot on purpose, so the transition can narrow that file to maintenance
+# without breaking the tick. deploy/release/test_host_units.py derives every `sudo -n` call from the adapters
+# and requires a rule here for each — and a caller for each rule.
+#
+# If the operator user is not `ysi`, change `ysi` below to match.
+
+ysi ALL=(root) NOPASSWD: /usr/local/libexec/wbb-release publish --sha * --archive *, \
+    /usr/local/libexec/wbb-release verify --sha *, \
+    /usr/local/libexec/wbb-release switch --sha *, \
+    /usr/local/libexec/wbb-release probe --sha *, \
+    /usr/local/libexec/wbb-release trial --sha * --snapshot *, \
+    /usr/local/libexec/wbb-release digest --path *, \
+    /usr/bin/systemctl stop warsaw-beer-bot, \
+    /usr/bin/systemctl start warsaw-beer-bot, \
+    /usr/bin/systemctl stop litestream, \
+    /usr/bin/systemctl start litestream

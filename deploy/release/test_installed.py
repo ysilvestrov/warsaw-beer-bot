@@ -117,7 +117,7 @@ class Digestable(unittest.TestCase):
         """What the operator may be unable to read (sudoers 0440; the litestream config, if closed) has the root path."""
         dests = [ins.installed_path(f) for f in repo_files('deploy')]
         self.assertEqual(sorted(d for d in dests if d is not None and ins.digestable(d)),
-                         ['/etc/litestream.yml', '/etc/sudoers.d/warsaw-beer-bot'])
+                         ['/etc/litestream.yml', '/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/wbb-release'])
 
 
 if __name__ == '__main__':
