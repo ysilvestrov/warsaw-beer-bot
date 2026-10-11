@@ -444,8 +444,9 @@ class Installer:
         would carry the root write somewhere else — /etc/sudoers.d -> elsewhere. Every component below the root
         prefix is looked at with lstat; on Ubuntu 24.04 none of /etc, /usr, /usr/local and below is a link."""
         bad = set()
-        # (#834 AI review, 2nd pass) the private directories too: /var/lib -> elsewhere is the same redirect.
-        starts = [posixpath.dirname(dest) for _, _, dest, _ in files] + [posixpath.dirname(d) for d, _ in PRIVATE_DIRS]
+        # (#834 AI review, 2nd/3rd pass) the private directories and their paths too: /var/lib -> elsewhere is the
+        # same redirect, and a /var/lib/wbb-trial link must be refused before useradd, not after.
+        starts = [posixpath.dirname(dest) for _, _, dest, _ in files] + [d for d, _ in PRIVATE_DIRS]
         for path in starts:
             while path not in ('/', ''):
                 full = self.p(path)

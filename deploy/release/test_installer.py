@@ -533,6 +533,17 @@ class WhatIsAlreadyThere(Base):
                                           '/var/lib; not touching it\n'))
         self.assertEqual((os.listdir(outside), self.host.argvs()), ([], []))
 
+    def test_a_private_directory_that_is_a_symlink_is_refused_before_the_user_is_created(self):
+        # #834 AI review, 3rd pass: mkdir refused it, but only after useradd had run.
+        outside = os.path.join(self.tmp.name, 'elsewhere')
+        os.makedirs(outside)
+        os.makedirs(self.p('var/lib'))
+        os.symlink(outside, self.p('var/lib/wbb-trial'))
+        code, _, err = self.main()
+        self.assertEqual((code, err), (1, 'REFUSED: a symlink or a non-directory on the way to an installed file: '
+                                          '/var/lib/wbb-trial; not touching it\n'))
+        self.assertEqual((os.listdir(outside), self.host.argvs()), ([], []))
+
 class RootLeavesNothingInTheCheckout(Base):
     """e2e review S3: run as root in the operator's checkout, the installer must not leave root-owned files there."""
     GIT_PREFIX = ('/usr/bin/git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
