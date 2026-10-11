@@ -1023,6 +1023,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // #809: canonicalize WFP22 festival venue feed_path in existing databases
     sql: V46_CANONICALIZE_WFP22_SQL,
   },
+  {
+    version: 47,
+    // #836: one row per handler failure. bot.catch used to only log it, so nobody saw it; the
+    // daily status counts these rows. Nothing about the person is stored. Idempotent like v45.
+    sql: `
+      CREATE TABLE IF NOT EXISTS handler_failures (
+        id     INTEGER PRIMARY KEY,
+        at     TEXT NOT NULL,
+        source TEXT NOT NULL,
+        error  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS handler_failures_at ON handler_failures(at);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
