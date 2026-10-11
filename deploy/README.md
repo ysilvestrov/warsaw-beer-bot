@@ -479,13 +479,36 @@ admin through the Bot API only for failures the tick did not report itself: a ti
 dump, exit 64, 71 or a code the tick does not define (3, 4, 70 it reports on its own) — once per UTC day
 per text.
 
-## Runtime artifact (CI only, not used by the host yet)
+## Runtime image (CI only, not used by the host yet)
 
-Design: `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`.
-Stage Ядро-1 is CI only: every push to `main` runs the `package` job in
-`.github/workflows/ci.yml`, which publishes `wbb-release-<sha>-<run_id>-<attempt>`
-(`runtime.tar.gz` + `runtime.tar.gz.sha256`, kept 30 days). Nothing on the host reads
-it yet; `deploy.sh` and the merge-deploy tick still build on the host as described above.
+Design: `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`.
+The `image` job in `.github/workflows/ci.yml` builds `deploy/image/Dockerfile` on every PR and
+push, smokes it (`scripts/image-smoke.sh`: start to `/health` with the right `releaseSha`, trial,
+payload probes, audit verdicts, read-only `/app`) and audits the production dependencies from the
+image. On a push to `main` it pushes `ghcr.io/ysilvestrov/warsaw-beer-bot:<sha>` and attests it;
+the run summary has `IMAGE-DIGEST sha=… digest=… content=…`. Nothing on the host pulls it yet:
+`deploy.sh` and the merge-deploy tick still build on the host as described above.
+
+Check an image from the host (as the operator, `gh` logged in):
+
+```bash
+gh attestation verify oci://ghcr.io/ysilvestrov/warsaw-beer-bot@<digest> \
+  --repo ysilvestrov/warsaw-beer-bot \
+  --signer-workflow ysilvestrov/warsaw-beer-bot/.github/workflows/ci.yml \
+  --source-ref refs/heads/main --source-digest <sha> --deny-self-hosted-runners
+```
+
+`wbb.content` (label) = sha256 of the payload manifest without `release.json`, plus the runtime
+base digest: equal labels mean the same runtime. The runtime base digest is a literal in the
+Dockerfile's `FROM` (Dependabot `docker` bumps it); `scripts/image-base-digest.sh` reads it for the
+build arg. Local build behind a TLS-intercepting proxy:
+`docker build -f deploy/image/Dockerfile --secret id=ca,src=<ca-bundle> --build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)" --build-arg SOURCE_SHA=$(git rev-parse HEAD) .`
+
+## Runtime artifact (history: replaced by the image above)
+
+Design: `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`, superseded.
+CI no longer publishes `wbb-release-*` artifacts; the host-side tools below stay in
+`deploy/release/` until the image transition removes them.
 
 The tools live in `deploy/release/` (Python 3.12+ stdlib):
 

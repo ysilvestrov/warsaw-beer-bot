@@ -2880,9 +2880,27 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   Сам `deploy.sh`: rsync allowlist build/runtime-файлів → `/opt` → `npm ci` → `npm run build` →
   `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**.
   (`enable --now` на запущеному unit'і не перезапускає).
-- **Runtime artifact (перехід на деплой готових артефактів, спека
-  `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`; зараз зроблено
-  Ядро-1 — лише CI).** На кожен push у `main` job `package` у `.github/workflows/ci.yml`
+- **Runtime-образ (деплой образом і відкат лише коду, спека
+  `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`; зараз — ядро, лише
+  CI, хост образ не використовує).** Job `image` у `.github/workflows/ci.yml` на кожному PR і push
+  збирає образ `deploy/image/Dockerfile` (`linux/amd64`, один маніфест; build-stage
+  `node:24-bookworm`, runtime `node:24-bookworm-slim`, обидва за digest із `mirror.gcr.io`;
+  runtime-digest — літерал у `FROM`, щоб його бампав Dependabot `docker`). У `/app` — payload
+  `package_runtime.py` (як нижче, плюс `scripts/autodeploy/audit-verdict*.ts`), `trial-migrate.cjs`,
+  `start-check.cjs` і `.content-digest`. Мітка `wbb.content` — sha256 маніфесту payload-у без
+  `release.json` разом із digest-ом runtime-бази: однакова мітка означає той самий runtime
+  (майбутній noop на хості). Smoke у CI, усе з `--read-only --network=none` і підставним оточенням:
+  старт до `api listening` і `/health` з правильним `releaseSha` (`start-check` запускає бота з
+  `--unhandled-rejections=warn`: без мережі `bot.launch()` відхиляється й інакше вбиває процес),
+  trial на свіжій БД, проби payload-у (SQLite, міграція, assets, ops), вердикти аудиту на фікстурах,
+  відмова запису в `/app`. Аудит production-залежностей — з образу, тим самим `audit-verdict-cli`,
+  що й на хості (high/critical — червоно, на PR теж). На push у `main` образ іде в
+  `ghcr.io/ysilvestrov/warsaw-beer-bot:<sha>` з атестацією `attest-build-provenance`; рядок
+  `IMAGE-DIGEST sha=… digest=… content=…` — у summary run-у. Check `ci` вимагає `image=success`
+  на будь-якій події. Артефакт Actions `wbb-release-*` більше не публікується.
+- **Runtime artifact (історія; спека
+  `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`, замінена спекою
+  2026-10-11; код `deploy/release/` лишається до плану переходу).** Колись на кожен push у `main` job `package` у `.github/workflows/ci.yml`
   (`ubuntu-24.04`, Node 24, тільки після зеленого `build`) збирає payload саме цього SHA:
   `dist` без тестів (`tsconfig.release.json`), production `node_modules` (`npm ci --omit=dev`),
   `src/api/fest-print/**` (сторінку й бібліотеку роут читає з диска) і TS-джерела десяти ops-команд
