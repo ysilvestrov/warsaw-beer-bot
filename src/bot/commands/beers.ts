@@ -2,6 +2,7 @@ import { Composer } from 'telegraf';
 import type { BotContext } from '../index';
 import { buildBeersMessage } from './beers-build';
 import { getUserCity } from '../../storage/user_profiles';
+import { sendEach } from './message-split';
 
 export const beersCommand = new Composer<BotContext>();
 
@@ -17,7 +18,7 @@ beersCommand.command('beers', async (ctx) => {
   });
   switch (result.kind) {
     case 'ok':
-      await ctx.replyWithHTML(result.html);
+      await sendEach(result.messages, (message) => ctx.replyWithHTML(message));
       return;
     case 'no_arg':
       await ctx.reply(ctx.t('beers.usage'));

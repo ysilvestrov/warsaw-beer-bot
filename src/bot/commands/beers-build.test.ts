@@ -38,7 +38,7 @@ describe('buildBeersMessage — resolution', () => {
       abv: null, ibu: null, style: null, u_rating: null }]);
     markHad(db, 1, beerId, '2026-09-28T03:00:00Z', 4.25);
     const result = base(db, 'kufel');
-    expect(result).toMatchObject({ kind: 'ok', html: expect.stringContaining(' • ✅ 4.3') });
+    expect(result).toMatchObject({ kind: 'ok', messages: [expect.stringContaining(' • ✅ 4.3')] });
     db.close();
   });
 
@@ -119,11 +119,11 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    expect(out.html).toContain('PINTA Atak Chmielu');
-    expect(out.html).toContain('Kufel');
-    expect(out.html).toContain('Foo 1');
-    expect(out.html).toContain('Кранів: 1');
-    const matchedLine = out.html.split('\n').find((line) => line.startsWith('1 '))!;
+    expect(out.messages[0]).toContain('PINTA Atak Chmielu');
+    expect(out.messages[0]).toContain('Kufel');
+    expect(out.messages[0]).toContain('Foo 1');
+    expect(out.messages[0]).toContain('Кранів: 1');
+    const matchedLine = out.messages[0].split('\n').find((line) => line.startsWith('1 '))!;
     expect(matchedLine).toBe(
       '1 • ' +
       '<a href="https://untappd.com/beer/1"><b>PINTA PINTA Atak Chmielu</b></a>' +
@@ -151,7 +151,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
+    const line = out.messages[0].split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toMatch(/ • ✅$/);
   });
 
@@ -167,7 +167,7 @@ describe('buildBeersMessage — ok rendering', () => {
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     // line is: "— • <b>No Numbers</b> • — • — • ⚪"
-    expect(out.html).toContain('— • <b>No Numbers</b> • — • — • ⚪');
+    expect(out.messages[0]).toContain('— • <b>No Numbers</b> • — • — • ⚪');
   });
 
   test('empty tap (beer_ref "N/A") collapses to "{tap#} • N/A"', () => {
@@ -181,7 +181,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    const line = out.html.split('\n').find((l) => l.startsWith('2 '));
+    const line = out.messages[0].split('\n').find((l) => l.startsWith('2 '));
     expect(line).toBe('2 • N/A'); // no abv/rating/icon trailing fields
   });
 
@@ -205,7 +205,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
+    const line = out.messages[0].split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toMatch(/ • ⚪$/);
   });
 
@@ -227,7 +227,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
+    const line = out.messages[0].split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toMatch(/ • ⭐$/);
   });
 
@@ -248,7 +248,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    expect(out.html).toContain('<a href="https://untappd.com/beer/6172039"><b>JBW Brewery Wocky Talky</b></a>');
+    expect(out.messages[0]).toContain('<a href="https://untappd.com/beer/6172039"><b>JBW Brewery Wocky Talky</b></a>');
   });
 
   test('orphan beer name has no link', () => {
@@ -262,7 +262,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    expect(out.html).not.toContain('<a href=');
+    expect(out.messages[0]).not.toContain('<a href=');
   });
 });
 
@@ -284,6 +284,110 @@ test('/beers uses one account snapshot for its drunk badge and rating', () => {
     const result = original(...args); setUntappdUsername(other, 1, 'account-b'); return result;
   });
   try {
-    expect(base(db, 'kufel')).toMatchObject({ kind: 'ok', html: expect.stringContaining(' • ✅ 0.0') });
+    expect(base(db, 'kufel')).toMatchObject({ kind: 'ok', messages: [expect.stringContaining(' • ✅ 0.0')] });
   } finally { spy.mockRestore(); other.close(); db.close(); rmSync(dir, { recursive: true }); }
+});
+
+describe('buildBeersMessage — #835 long lists and descriptions', () => {
+  // 78 linked taps: the size of the pub that broke /beers (Piw Paw, Foksal). The expected split below
+  // was computed independently of the implementation (greedy pack at 4096 over these exact strings).
+  function seedBigPub(db: ReturnType<typeof fresh>) {
+    const pubId = upsertPub(db, { slug: 'big', name: 'Wielokran Testowy', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
+    const numbers = Array.from({ length: 78 }, (_, i) => i + 1);
+    for (const n of numbers) {
+      const beerId = seedBeer(db, {
+        untappd_id: 1000 + n, name: `Piwo Numer ${n}`, brewery: 'Browar Testowy',
+        normalized_name: `piwo numer ${n}`, normalized_brewery: 'browar testowy',
+      });
+      upsertMatch(db, 'Browar Testowy', `Piwo Numer ${n}`, beerId, 1.0);
+    }
+    insertTaps(db, snap, numbers.map((n) => ({
+      tap_number: n, beer_ref: `Piwo Numer ${n}`, brewery_ref: 'Browar Testowy',
+      abv: null, ibu: null, style: null, u_rating: null,
+    })));
+    return numbers;
+  }
+
+  const tapNumbers = (message: string): number[] =>
+    message.split('\n').filter((line) => /^\d+ • /.test(line)).map((line) => Number(line.split(' ')[0]));
+
+  test('78 taps arrive as two messages, the first filled to 4094 of 4096', () => {
+    const db = fresh();
+    seedBigPub(db);
+    const out = base(db, 'wielokran');
+    expect(out).toMatchObject({ kind: 'ok' });
+    const { messages } = out as { messages: string[] };
+    expect(messages.map((m) => m.length)).toEqual([4094, 3491]);
+    db.close();
+  });
+
+  test('the header is in the first message only and no tap is lost or reordered', () => {
+    const db = fresh();
+    const numbers = seedBigPub(db);
+    const { messages } = base(db, 'wielokran') as { messages: string[] };
+    expect(messages[0].split('\n').slice(0, 2)).toEqual(['🍺 <b>Wielokran Testowy</b>', 'Кранів: 78']);
+    expect(messages[1].startsWith('43 • ')).toBe(true);
+    expect(messages.flatMap(tapNumbers)).toEqual(numbers);
+    db.close();
+  });
+
+  test('every message is self-contained HTML: tags open and close inside it', () => {
+    const db = fresh();
+    seedBigPub(db);
+    const { messages } = base(db, 'wielokran') as { messages: string[] };
+    const count = (text: string, token: string): number => text.split(token).length - 1;
+    expect(messages.map((m) => [count(m, '<a '), count(m, '</a>'), count(m, '<b>'), count(m, '</b>')])).toEqual([
+      [42, 42, 43, 43],
+      [36, 36, 36, 36],
+    ]);
+    db.close();
+  });
+
+  test('a description on a linked tap is replaced by the catalogue style', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
+    const beerId = seedBeer(db, {
+      untappd_id: 7001, name: 'The Quiet Man', brewery: 'Garage Beer Co.', style: 'Stout - Irish Dry',
+      normalized_name: 'the quiet man', normalized_brewery: 'garage beer',
+    });
+    upsertMatch(db, 'Garage Beer Co.', 'The Quiet Man', beerId, 1.0);
+    insertTaps(db, snap, [{ tap_number: 9, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
+      abv: null, ibu: null, style: 'Ahhhh the old country. Where the grass is green and the pints are cream.', u_rating: null }]);
+    const { messages } = base(db, 'kufel') as { messages: string[] };
+    expect(messages[0].split('\n')[2]).toBe(
+      '9 • <a href="https://untappd.com/beer/7001"><b>Garage Beer Co. The Quiet Man</b></a> • Stout - Irish Dry • — • — • ⭐',
+    );
+    db.close();
+  });
+
+  test('a description on an unlinked tap leaves the style out', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
+    insertTaps(db, snap, [{ tap_number: 9, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
+      abv: null, ibu: null, style: 'Ahhhh the old country. Where the grass is green and the pints are cream.', u_rating: null }]);
+    const { messages } = base(db, 'kufel') as { messages: string[] };
+    expect(messages[0].split('\n')[2]).toBe('9 • <b>Garage Beer Co. The Quiet Man</b> • — • — • ⚪');
+    db.close();
+  });
+
+  test('a plain style is printed as the pub wrote it, even when the catalogue has another', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-10-11T12:00:00Z');
+    const beerId = seedBeer(db, {
+      untappd_id: 7002, name: 'Hop Cloud', brewery: 'Browar Testowy', style: 'IPA - New England / Hazy',
+      normalized_name: 'hop cloud', normalized_brewery: 'browar testowy',
+    });
+    upsertMatch(db, 'Browar Testowy', 'Hop Cloud', beerId, 1.0);
+    insertTaps(db, snap, [{ tap_number: 3, beer_ref: 'Hop Cloud', brewery_ref: 'Browar Testowy',
+      abv: null, ibu: null, style: 'NEIPA /Riwaka Cryo', u_rating: null }]);
+    const { messages } = base(db, 'kufel') as { messages: string[] };
+    expect(messages[0].split('\n')[2]).toBe(
+      '3 • <a href="https://untappd.com/beer/7002"><b>Browar Testowy Hop Cloud</b></a> • NEIPA /Riwaka Cryo • — • — • ⭐',
+    );
+    db.close();
+  });
 });

@@ -8,6 +8,8 @@ import { beerNameHtml } from './beer-link';
 import { isOntapEmptyTapRef } from '../../sources/ontap/pub';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer } from '../../storage/checkins';
+import { displayStyle } from '../../domain/display-style';
+import { splitMessage } from './message-split';
 
 export interface BeersDeps {
   db: DB;
@@ -19,7 +21,7 @@ export interface BeersDeps {
 }
 
 export type BeersResult =
-  | { kind: 'ok'; html: string }
+  | { kind: 'ok'; messages: string[] }
   | { kind: 'no_arg' }
   | { kind: 'pub_not_found'; query: string }
   | { kind: 'ambiguous'; pubs: { name: string; address: string | null }[] }
@@ -77,11 +79,14 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
       ? `✅${personalRating == null ? '' : ` ${personalRating.toFixed(1)}`}`
       : tap.untappd_id != null ? '⭐' : '⚪';
     const nameHtml = beerNameHtml(display, tap.untappd_id);
+    // #835: a description typed into the style field is not printed as a style.
+    const style = displayStyle(tap.style, tap.catalog_style);
     return (
-      `${fmtTapNum(tap.tap_number)} • ${nameHtml}${fmtStyle(tap.style)}` +
+      `${fmtTapNum(tap.tap_number)} • ${nameHtml}${fmtStyle(style)}` +
       ` • ${fmtAbv(tap.abv)} • ${fmtRating(tap.u_rating)} • ${icon}`
     );
   });
 
-  return { kind: 'ok', html: [header, ...lines].join('\n') };
+  // #835: /beers shows ALL taps, so a list over Telegram's limit is split, never truncated.
+  return { kind: 'ok', messages: splitMessage([header], lines) };
 }

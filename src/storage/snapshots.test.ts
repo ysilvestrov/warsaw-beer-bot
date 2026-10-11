@@ -226,6 +226,26 @@ describe('tapsForSnapshotWithBeer', () => {
     const rows = tapsForSnapshotWithBeer(db, snapId);
     expect(rows.map((r) => r.beer_ref)).toEqual(['A', 'B', 'C']);
   });
+
+  test('#835 catalog_style is the linked beer’s style; the tap’s own style is untouched', () => {
+    const { db, snapId } = setupWithBeer();
+    const beerId = seedBeer(db, {
+      untappd_id: 7001, name: 'The Quiet Man', brewery: 'Garage Beer Co.', style: 'Stout - Irish Dry',
+      normalized_name: 'the quiet man', normalized_brewery: 'garage beer',
+    });
+    upsertMatch(db, 'Garage Beer Co.', 'The Quiet Man', beerId, 1.0);
+    insertTaps(db, snapId, [
+      { tap_number: 1, beer_ref: 'The Quiet Man', brewery_ref: 'Garage Beer Co.',
+        abv: null, ibu: null, style: 'Ahhhh the old country. Where the grass is green.', u_rating: null },
+      { tap_number: 2, beer_ref: 'Unlinked', brewery_ref: 'Nobody',
+        abv: null, ibu: null, style: 'IPA', u_rating: null },
+    ]);
+    expect(tapsForSnapshotWithBeer(db, snapId).map((r) => [r.tap_number, r.style, r.catalog_style])).toEqual([
+      [1, 'Ahhhh the old country. Where the grass is green.', 'Stout - Irish Dry'],
+      [2, 'IPA', null],
+    ]);
+    db.close();
+  });
 });
 
 test('currentTapStyles returns styles from the latest snapshot of each pub only', () => {

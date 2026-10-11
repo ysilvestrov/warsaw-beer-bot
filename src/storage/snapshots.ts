@@ -56,6 +56,9 @@ export function latestSnapshotsPerPub(db: DB): SnapshotRow[] {
 export interface TapWithBeer extends TapRow {
   beer_id: number | null;
   untappd_id: number | null;
+  // #835: the linked beer's Untappd style. `style` stays the pub's own text; which one is PRINTED is
+  // decided by displayStyle (a pub may type a whole description into the style field).
+  catalog_style: string | null;
   // u_rating on this row is the COALESCEd value: tap.u_rating ?? beers.rating_global ?? null
   // abv prefers the matched beer's Untappd value over the tap's: beers.abv ?? tap.abv ?? null.
   // (Opposite precedence from rating: ontap's hand-entered tap ABV is unreliable — e.g. a
@@ -71,7 +74,8 @@ export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer
       t.ibu, t.style,
       COALESCE(t.u_rating, b.rating_global) AS u_rating,
       ml.untappd_beer_id AS beer_id,
-      b.untappd_id AS untappd_id
+      b.untappd_id AS untappd_id,
+      b.style AS catalog_style
     FROM taps t
     LEFT JOIN match_links ml ON ml.ontap_ref = t.beer_ref AND ml.brewery_ref = coalesce(t.brewery_ref, '')
     LEFT JOIN beers b ON ml.untappd_beer_id = b.id
