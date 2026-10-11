@@ -13,7 +13,7 @@ import { ensureOrphan } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
 import { markHad } from '../../storage/untappd_had';
 import { createTranslator } from '../../i18n';
-import { buildBeersMessage } from './beers-build';
+import { buildBeersMessage, type BeersResult } from './beers-build';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -24,6 +24,17 @@ function fresh() {
 const t = createTranslator('uk');
 const base = (db: ReturnType<typeof fresh>, pubQuery?: string, telegramId = 1) =>
   buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery, city: 'warszawa', telegramId });
+
+// Narrowing without a branch inside a test: a result of the wrong kind fails the assert here
+// instead of ending the test early (and silently) with a `return`.
+function okMessages(out: BeersResult): string[] {
+  expect(out.kind).toBe('ok');
+  return (out as Extract<BeersResult, { kind: 'ok' }>).messages;
+}
+function ambiguousPubs(out: BeersResult): { name: string; address: string | null }[] {
+  expect(out.kind).toBe('ambiguous');
+  return (out as Extract<BeersResult, { kind: 'ambiguous' }>).pubs;
+}
 
 describe('buildBeersMessage — resolution', () => {
   test('a pub beer displays a profile rating when no rated check-in exists', () => {
@@ -64,9 +75,8 @@ describe('buildBeersMessage — resolution', () => {
     upsertPub(db, { slug: 'a', name: 'PINTA Warszawa', address: 'Chmielna 7', lat: null, lon: null, city: 'warszawa' });
     upsertPub(db, { slug: 'b', name: 'PINTA Warszawa', address: 'Nowogrodzka 4', lat: null, lon: null, city: 'warszawa' });
     const out = base(db, 'pinta');
-    expect(out.kind).toBe('ambiguous');
-    if (out.kind !== 'ambiguous') return;
-    expect(out.pubs).toEqual([
+    const pubs = ambiguousPubs(out);
+    expect(pubs).toEqual([
       { name: 'PINTA Warszawa', address: 'Chmielna 7' },
       { name: 'PINTA Warszawa', address: 'Nowogrodzka 4' },
     ]);
@@ -78,9 +88,8 @@ describe('buildBeersMessage — resolution', () => {
       upsertPub(db, { slug: `m${i}`, name: `Multi Bar ${i}`, address: null, lat: null, lon: null, city: 'warszawa' });
     }
     const out = base(db, 'multi');
-    expect(out.kind).toBe('ambiguous');
-    if (out.kind !== 'ambiguous') return;
-    expect(out.pubs).toHaveLength(3);
+    const pubs = ambiguousPubs(out);
+    expect(pubs).toHaveLength(3);
   });
 
   test('matched pub without any snapshot returns empty with pub name', () => {
@@ -118,13 +127,12 @@ describe('buildBeersMessage — ok rendering', () => {
     });
 
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    expect(out.messages[0]).toContain('PINTA Atak Chmielu');
-    expect(out.messages[0]).toContain('Kufel');
-    expect(out.messages[0]).toContain('Foo 1');
-    expect(out.messages[0]).toContain('Кранів: 1');
-    const matchedLine = out.messages[0].split('\n').find((line) => line.startsWith('1 '))!;
+    const messages = okMessages(out);
+    expect(messages[0]).toContain('PINTA Atak Chmielu');
+    expect(messages[0]).toContain('Kufel');
+    expect(messages[0]).toContain('Foo 1');
+    expect(messages[0]).toContain('Кранів: 1');
+    const matchedLine = messages[0].split('\n').find((line) => line.startsWith('1 '))!;
     expect(matchedLine).toBe(
       '1 • ' +
       '<a href="https://untappd.com/beer/1"><b>PINTA PINTA Atak Chmielu</b></a>' +
@@ -150,9 +158,8 @@ describe('buildBeersMessage — ok rendering', () => {
       .run(1, orphanId, '2026-05-25T11:00:00Z');
 
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    const line = out.messages[0].split('\n').find((l) => l.startsWith('1 '))!;
+    const messages = okMessages(out);
+    const line = messages[0].split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toMatch(/ • ✅$/);
   });
 
@@ -165,10 +172,9 @@ describe('buildBeersMessage — ok rendering', () => {
         abv: null, ibu: null, style: null, u_rating: null },
     ]);
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
+    const messages = okMessages(out);
     // line is: "— • <b>No Numbers</b> • — • — • ⚪"
-    expect(out.messages[0]).toContain('— • <b>No Numbers</b> • — • — • ⚪');
+    expect(messages[0]).toContain('— • <b>No Numbers</b> • — • — • ⚪');
   });
 
   test('empty tap (beer_ref "N/A") collapses to "{tap#} • N/A"', () => {
@@ -180,9 +186,8 @@ describe('buildBeersMessage — ok rendering', () => {
         abv: null, ibu: null, style: null, u_rating: null },
     ]);
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    const line = out.messages[0].split('\n').find((l) => l.startsWith('2 '));
+    const messages = okMessages(out);
+    const line = messages[0].split('\n').find((l) => l.startsWith('2 '));
     expect(line).toBe('2 • N/A'); // no abv/rating/icon trailing fields
   });
 
@@ -204,9 +209,8 @@ describe('buildBeersMessage — ok rendering', () => {
     ]);
 
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    const line = out.messages[0].split('\n').find((l) => l.startsWith('1 '))!;
+    const messages = okMessages(out);
+    const line = messages[0].split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toMatch(/ • ⚪$/);
   });
 
@@ -226,9 +230,8 @@ describe('buildBeersMessage — ok rendering', () => {
     ]);
 
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    const line = out.messages[0].split('\n').find((l) => l.startsWith('1 '))!;
+    const messages = okMessages(out);
+    const line = messages[0].split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toMatch(/ • ⭐$/);
   });
 
@@ -247,9 +250,8 @@ describe('buildBeersMessage — ok rendering', () => {
         abv: 5, ibu: null, style: null, u_rating: null },
     ]);
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    expect(out.messages[0]).toContain('<a href="https://untappd.com/beer/6172039"><b>JBW Brewery Wocky Talky</b></a>');
+    const messages = okMessages(out);
+    expect(messages[0]).toContain('<a href="https://untappd.com/beer/6172039"><b>JBW Brewery Wocky Talky</b></a>');
   });
 
   test('orphan beer name has no link', () => {
@@ -261,9 +263,8 @@ describe('buildBeersMessage — ok rendering', () => {
         abv: null, ibu: null, style: null, u_rating: null },
     ]);
     const out = base(db, 'kufel');
-    expect(out.kind).toBe('ok');
-    if (out.kind !== 'ok') return;
-    expect(out.messages[0]).not.toContain('<a href=');
+    const messages = okMessages(out);
+    expect(messages[0]).not.toContain('<a href=');
   });
 });
 
