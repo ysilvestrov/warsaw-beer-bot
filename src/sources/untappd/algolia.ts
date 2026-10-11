@@ -29,7 +29,7 @@ export const ALGOLIA_DEFAULTS = {
   searchKey: '1d347324d67ec472bb7132c66aead485',
 } as const;
 export const ALGOLIA_INDEX_NAME = 'beer';
-export const ALGOLIA_HITS_PER_PAGE = 5;
+export const ALGOLIA_HITS_PER_PAGE = 15;
 
 function num(v: unknown): number | null {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN;

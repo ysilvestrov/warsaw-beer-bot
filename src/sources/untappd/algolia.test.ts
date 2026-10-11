@@ -67,7 +67,7 @@ describe('createAlgoliaSearch (direct)', () => {
     expect(out).toEqual([{ bid: 7, beer_name: 'B', brewery_name: 'Br', style: null, abv: null, global_rating: null, brewery_alias: [], alias_alt: [] }]);
     expect(calls[0].url).toBe('https://APP-dsn.algolia.net/1/indexes/beer/query');
     expect((calls[0].init.headers as Record<string, string>)['X-Algolia-Application-Id']).toBe('APP');
-    expect(JSON.parse(calls[0].init.body as string)).toEqual({ query: 'hazy ipa', hitsPerPage: 5 });
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ query: 'hazy ipa', hitsPerPage: 15 });
   });
 
   // #581 (AI-рев'ю PR #585): база зі слешем на кінці давала `//1/indexes/…`. Сервер, у якого

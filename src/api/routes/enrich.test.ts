@@ -161,7 +161,7 @@ describe('POST /enrich/candidates', () => {
       searchKey: '1d347324d67ec472bb7132c66aead485',
       indexName: 'beer',
       query: 'PINTA Atak Chmielu',
-      hitsPerPage: 5,
+      hitsPerPage: 15,
     });
 
     const row = findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Atak Chmielu'));
@@ -478,7 +478,7 @@ describe('POST /enrich/candidates', () => {
       searchKey: '1d347324d67ec472bb7132c66aead485',
       indexName: 'beer',
       query: 'CITADEL Томатка',
-      hitsPerPage: 5,
+      hitsPerPage: 15,
     });
   });
 
