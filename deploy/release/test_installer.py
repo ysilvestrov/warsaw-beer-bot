@@ -353,6 +353,70 @@ class Preconditions(Base):
         self.assertNotIn(tuple(inst.USERADD_ARGV), self.host.argvs())
 
 
+class FromGitObjects(Base):
+    """e2e review N1: what is installed is HEAD's objects, never the worktree's files."""
+
+    def test_the_bytes_are_head_s_even_where_the_worktree_differs_unseen(self):
+        # assume-unchanged hides the edit from `git status`: only HEAD's object can be what gets installed.
+        git(self.repo, 'update-index', '--assume-unchanged', 'deploy/release/tick.py')
+        with open(os.path.join(self.repo, 'deploy/release/tick.py'), 'wb') as f:
+            f.write(b'# worktree only\n')
+        code, out, err = self.main()
+        self.assertEqual((code, err), (0, ''), out)
+        with open(self.p('usr/local/lib/wbb-release/tick.py'), 'rb') as f:
+            self.assertEqual(f.read(), REPO_FILES['deploy/release/tick.py'])
+
+    def test_a_cut_git_answer_is_never_installed(self):
+        """bounded.run keeps a head and a tail of a flood: a truncated blob is an internal error, not a copy."""
+        real = self.host.__call__
+
+        def cut(argv, *, timeout):
+            r = real(argv, timeout=timeout)
+            r.truncated = argv[-2:-1] == ['blob']
+            return r
+        self.host.script(self.root)
+        err = io.StringIO()
+        old, sys.stderr = sys.stderr, err
+        try:
+            code = inst.main([], repo=self.repo, root=self.root, run=cut, chown=self.chown, users=self.users,
+                             owner=(UID, GID), out=io.StringIO())
+        finally:
+            sys.stderr = old
+        first = subprocess.run(['git', '-C', self.repo, 'rev-parse', 'HEAD:deploy/release/payload-probe.cjs'],
+                               capture_output=True, text=True).stdout.strip()
+        self.assertEqual((code, err.getvalue().splitlines()[-1]),
+                         (70, f'helpers.HelperError: cat-file blob {first}: output too large'))
+        self.assertEqual(self.tree(), {})
+
+    def test_a_tracked_symlink_in_scope_is_refused_before_any_write(self):
+        os.symlink('tick.py', os.path.join(self.repo, 'deploy/release/alias.py'))
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'link')
+        head = subprocess.run(['git', '-C', self.repo, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout
+        code, _, err = self.main()
+        self.assertEqual((code, err), (1, f'REFUSED: HEAD {head.strip()} tracks what is not a regular file where this '
+                                          'installer installs: deploy/release/alias.py (120000) (a symlink is '
+                                          '120000, a submodule 160000) — not installing\n'))
+        self.assertEqual((self.tree(), self.host.argvs()), ({}, []))
+
+    def test_a_tracked_submodule_in_scope_is_refused(self):
+        head = subprocess.run(['git', '-C', self.repo, 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout
+        git(self.repo, 'update-index', '--add', '--cacheinfo', f'160000,{head.strip()},deploy/release/vendored')
+        git(self.repo, 'commit', '-q', '-m', 'submodule')
+        os.mkdir(os.path.join(self.repo, 'deploy/release/vendored'))  # an uninitialised submodule: status is clean
+        code, _, err = self.main()
+        self.assertEqual(code, 1)
+        self.assertIn('deploy/release/vendored (160000)', err)
+        self.assertEqual(self.tree(), {})
+
+    def test_a_tracked_symlink_outside_the_scope_is_not_this_installer_s_business(self):
+        os.symlink('autodeploy.sh', os.path.join(self.repo, 'deploy/other-link.sh'))
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'link elsewhere')
+        code, out, err = self.main()
+        self.assertEqual((code, err), (0, ''), out)
+
+
 class RootLeavesNothingInTheCheckout(Base):
     """e2e review S3: run as root in the operator's checkout, the installer must not leave root-owned files there."""
     GIT_PREFIX = ('/usr/bin/git', '--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',

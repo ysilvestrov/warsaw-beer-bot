@@ -443,6 +443,9 @@ disabled; its state is only printed), write under `/opt` (still the flat tree â€
 (`/etc/sudoers.d/warsaw-beer-bot`, `warsaw-beer-bot.service`, `litestream.*`, `wbb-autodeploy.*` and
 merge-deploy's `/usr/local/bin` copies, the host-patch and reboot-request files). Merge-deploy keeps
 deploying as before.
+It installs the bytes of HEAD's git objects (`git ls-tree` / `git cat-file`), never the worktree's files, and
+prints the HEAD it installed; the checkout must still be clean, so what you see is what is installed. A symlink
+or a submodule tracked where it installs is a refusal.
 Run as root inside your checkout, it leaves nothing root-owned there: Python runs with `-I -B` (no
 `__pycache__`), git with `--no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null` (no index
 rewrite, no fsmonitor, no hook). The wrappers run the installed library with `-I -B` too.

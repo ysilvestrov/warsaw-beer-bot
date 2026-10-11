@@ -3,8 +3,9 @@
 Plan: docs/superpowers/plans/2026-10/2026-10-11-wbb-artifact-deployment-c-install-core.md, "Рішення" п.1, п.2, п.4,
 п.5, п.7, п.8, Task 4. Entry point: `sudo bash deploy/install-release.sh [--check]`.
 
-What it installs is an explicit part of installed.installed_path's map (SCOPE below), each copy from the clean
-checkout it runs in:
+What it installs is an explicit part of installed.installed_path's map (SCOPE below), each copy from the git objects
+of HEAD of the clean checkout it runs in (never the worktree's files; a symlink or a submodule HEAD tracks in scope
+is a refusal):
 
   deploy/release/** (no test modules)  -> LIB_DIR                  root:root 0644, directories 0755
   the two wrappers, wbb-tick-failed    -> ROOT_HELPER, TICK_BIN, … root:root 0755
@@ -136,33 +137,57 @@ class Installer:
     def say(self, line):
         print(line, file=self.out)
 
-    def cmd(self, argv):
+    def raw(self, argv):
         r = self.run(list(argv), timeout=CMD_TIMEOUT_S)
-        return r.returncode, r.stdout.decode('utf-8', 'replace'), r.stderr.decode('utf-8', 'replace').strip()
+        if getattr(r, 'truncated', False):
+            # bounded.run keeps a head and a tail of a flood: never install or compare a cut copy.
+            raise HelperError(f'{" ".join(argv[-3:])}: output too large')
+        return r.returncode, r.stdout, r.stderr.decode('utf-8', 'replace').strip()
 
-    def git(self, *args):
-        code, out, err = self.cmd([*GIT_ARGV, '-C', self.repo, *args])
+    def cmd(self, argv):
+        code, out, err = self.raw(argv)
+        return code, out.decode('utf-8', 'replace'), err
+
+    def git_bytes(self, *args):
+        code, out, err = self.raw([*GIT_ARGV, '-C', self.repo, *args])
         if code != 0:
             raise Refusal(f'git {args[0]}: exit {code}: {err}')
         return out
 
-    def source(self, repo_path):
-        full = os.path.join(self.repo, repo_path)
-        fd = os.open(full, os.O_RDONLY | os.O_NOFOLLOW)
-        with os.fdopen(fd, 'rb') as f:
-            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
-                raise Refusal(f'{repo_path}: not a regular file in the checkout')
-            return f.read()
+    def git(self, *args):
+        return self.git_bytes(*args).decode('utf-8', 'replace')
+
+    def tracked(self, head):
+        """{repo path: (mode, type, object id)} of every entry of the commit head (git ls-tree -r)."""
+        out = {}
+        for entry in self.git_bytes('ls-tree', '-r', '-z', '--full-tree', head).split(b'\0'):
+            if not entry:
+                continue
+            meta, _, path = entry.partition(b'\t')
+            mode, kind, oid = meta.decode('ascii').split(' ')
+            out[path.decode('utf-8', 'surrogateescape')] = (mode, kind, oid)
+        return out
 
     # --- preconditions ----------------------------------------------------------------------------------------
     def checkout(self):
-        """(HEAD, [(kind, repo path, installed path, bytes)]) of a clean checkout; Refusal otherwise."""
+        """(HEAD, [(kind, repo path, installed path, bytes)]) of a clean checkout; Refusal otherwise.
+
+        e2e review N1: the bytes come from HEAD's git objects, never from the worktree — no window between the
+        clean check and the read, no symlinked directory of the worktree followed. The clean check stays a
+        requirement: what the human sees in the checkout is what gets installed.
+        """
         dirty = self.git('status', '--porcelain')
         if dirty.strip():
             raise Refusal(f'the checkout {self.repo} is not clean (git status --porcelain):\n{dirty.rstrip()}')
-        head = self.git('rev-parse', 'HEAD').strip()
-        files = [f for f in self.git('ls-files', '-z').split('\0') if f]
-        return head, [(k, f, d, self.source(f)) for k, f, d in plan(files)]
+        head = self.git('rev-parse', '--verify', 'HEAD^{commit}').strip()
+        tracked = self.tracked(head)
+        files = plan(list(tracked))
+        links = [f'{f} ({tracked[f][0]})' for _, f, _ in files
+                 if tracked[f][:2] not in (('100644', 'blob'), ('100755', 'blob'))]
+        if links:
+            raise Refusal(f'HEAD {head} tracks what is not a regular file where this installer installs: '
+                          f'{", ".join(links)} (a symlink is 120000, a submodule 160000) — not installing')
+        return head, [(k, f, d, self.git_bytes('cat-file', 'blob', tracked[f][2])) for k, f, d in files]
 
     def sys_uid_max(self):
         try:
