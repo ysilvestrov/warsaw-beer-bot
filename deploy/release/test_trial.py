@@ -14,7 +14,7 @@ import sandbox as sb  # noqa: E402
 import trial as tr  # noqa: E402
 from release_testkit import SHA, packed, write  # noqa: E402
 from safe_tar import Refused  # noqa: E402
-from test_publish import trusted_for, zip_up  # noqa: E402
+from test_publish import publish_file, trusted_for, zip_up  # noqa: E402
 
 IDS = (os.geteuid(), os.getegid())
 NODE_REAL = os.path.realpath(sys.executable)
@@ -79,7 +79,7 @@ class Tmp(unittest.TestCase):
             os.makedirs(d)
         archive, _ = packed(os.path.join(base, 'src'))
         z = zip_up(archive, os.path.join(base, 'a.zip'))
-        pub.publish(trusted_for(z), z, self.roots, lambda: 'now')
+        publish_file(trusted_for(z), z, self.roots, lambda: 'now')
         self.trial_root = os.path.join(base, 'trial')
         os.makedirs(self.trial_root)
         self.snaps = os.path.join(base, 'snaps')

@@ -256,6 +256,13 @@ def release(verb, *extra, sudo=True):
 
 
 class Release(unittest.TestCase):
+    def setUp(self):
+        self.base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.base)
+        self.zip = os.path.join(self.base, 'a.zip')
+        with open(self.zip, 'wb') as f:
+            f.write(b'PK\x03\x04 the artifact')
+
     def one(self, verb, answer, *args, **kw):
         argv = release(verb, *kw.pop('extra', ()), sudo=kw.pop('sudo', True))
         h, run = helpers({argv: answer})
@@ -267,10 +274,10 @@ class Release(unittest.TestCase):
         cases = [
             ('verify', (), {}, done(0, f'VERIFIED {SHA}: tree {TREE} (run 7 attempt 1)\n'.encode()),
              Run(0, 'VERIFIED', f'VERIFIED {SHA}: tree {TREE} (run 7 attempt 1)', TREE)),
-            ('publish', ('/home/ysi/a.zip',), {'extra': ('--archive', '/home/ysi/a.zip')},
+            ('publish', (self.zip,), {'extra': ('--archive', '-')},
              done(0, f'ACCEPTED {SHA}: run 7 attempt 1, artifact 9\n'.encode()),
              Run(0, 'ACCEPTED', f'ACCEPTED {SHA}: run 7 attempt 1, artifact 9')),
-            ('publish', ('/home/ysi/a.zip',), {'extra': ('--archive', '/home/ysi/a.zip')},
+            ('publish', (self.zip,), {'extra': ('--archive', '-')},
              done(0, f'ALREADY-ACCEPTED {SHA}: run 7 attempt 1, artifact 9\n'.encode()),
              Run(0, 'ALREADY-ACCEPTED', f'ALREADY-ACCEPTED {SHA}: run 7 attempt 1, artifact 9')),
             ('audit', (), {'sudo': False}, done(0, f'AUDIT CLEAN {SHA} tree {TREE}\nno advisories\n'.encode()),
@@ -294,9 +301,34 @@ class Release(unittest.TestCase):
     def test_timeouts(self):
         h, run = helpers({release('verify'): done(2), release('audit', sudo=False): done(2), release('probe'): done(2),
                           release('trial', '--snapshot', PRE_NAME): done(2),
-                          release('publish', '--archive', '/a.zip'): done(2)})
-        h.verify(SHA), h.audit(SHA), h.probe(SHA), h.trial(SHA, PRE_NAME), h.publish(SHA, '/a.zip')
+                          release('publish', '--archive', '-'): done(2)})
+        h.verify(SHA), h.audit(SHA), h.probe(SHA), h.trial(SHA, PRE_NAME), h.publish(SHA, self.zip)
         self.assertEqual([t for _, t in run.calls], [300, 300, 300, 600, 900])
+
+    def test_publish_gives_root_the_zip_on_stdin_opened_by_the_operator(self):
+        """e2e review S1: the path never reaches root's argv; the bytes come through stdin."""
+        seen = []
+
+        def run(argv, *, timeout, stdin=None, **kwargs):
+            seen.append((argv, stdin.read()))
+            return subprocess.CompletedProcess(argv, 0, f'ACCEPTED {SHA}: run 7\n'.encode(), b'')
+        got = hpa.RealHelpers(DATA, run=run).publish(SHA, self.zip)
+        self.assertEqual(seen, [(list(release('publish', '--archive', '-')), b'PK\x03\x04 the artifact')])
+        self.assertEqual(got.kind, 'ACCEPTED')
+
+    def test_publish_refuses_what_is_not_the_operator_s_regular_file_before_sudo(self):
+        link = os.path.join(self.base, 'link.zip')
+        os.symlink(self.zip, link)
+        for path, why in ((link, f'{link}: OSError: Too many levels of symbolic links'),
+                          (self.base, f'{self.base}: not a regular file'),
+                          ('/dev/null', '/dev/null: not a regular file'),
+                          (os.path.join(self.base, 'none.zip'),
+                           f'{self.base}/none.zip: FileNotFoundError: No such file or directory')):
+            with self.subTest(path):
+                h, run = helpers({})
+                with self.assertRaises(HelperError) as cm:
+                    h.publish(SHA, path)
+                self.assertEqual((str(cm.exception), run.calls), (why, []))
 
     def test_exit_1_without_its_verdict_line_is_not_a_verdict(self):
         for verb, answer in (('probe', SUDO_FAILED), ('probe', done(1, f'PROBE FAILED {OTHER}: x\n'.encode())),

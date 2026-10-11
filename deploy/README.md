@@ -454,6 +454,11 @@ the tick asks `sudo -n /usr/local/libexec/wbb-release digest --path <installed p
 `/etc/sudoers.d` or `/etc/litestream.yml`, refusing symlinks. A copy the operator can read is never
 sent to root.
 
+**`publish` takes the ZIP on stdin.** The sudo rule is `publish --sha * --archive -`, and the helper refuses
+any other `--archive` (exit 2): root never opens a path the operator names (a path would make root open
+`/etc/shadow` or a device and answer about it). The tick opens its downloaded ZIP itself and pipes it in;
+root copies at most the ZIP cap into its private staging and checks only that copy.
+
 **Exit codes of the wrappers.** A library that is missing or fails to import exits **70** (`wbb-release`)
 or **71** (`wbb-tick`), never Python's default 1 — 1 is "bad candidate" for the helper and a success
 (`SuccessExitStatus=0 1 2`) for the tick. `wbb-tick-failed.service` (the tick's `OnFailure=`) alerts the
@@ -650,6 +655,7 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   | | `pr_labels` | `gh api repos/<repo>/commits/<sha>/pulls?per_page=100` (a full page → error) | operator |
   | | `trusted` / `download` | `gh auth token` → `github_trust` (ZIP into `~/.local/share/wbb-autodeploy/artifacts/<sha>.zip`, 0700 dir) | operator |
   | | `publish` `verify` `probe` `trial` | `sudo -n /usr/local/libexec/wbb-release <verb> --sha <sha> […]` | root helper |
+  | | `publish` | `… publish --sha <sha> --archive -`: the ZIP opened by the operator (no symlink, a regular file) and piped to root's stdin — root opens no operator path | operator → root helper |
   | | `audit` | `/usr/local/libexec/wbb-release audit --sha <sha>` | operator |
   | | `snapshot_pre` / `discard_pre` | `wbb-db-snapshot snapshot\|discard` (`<UTC>-<sha7>-pre.db` in the snapshot dir), `cat <pre>.sha256` | bot user |
   | | `manifest` | read `releases/<sha>/tree-manifest.json` (O_NOFOLLOW, ≤ 64 MiB) | operator |

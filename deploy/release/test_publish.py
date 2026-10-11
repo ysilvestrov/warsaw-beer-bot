@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import stat
@@ -40,6 +41,12 @@ def other_artifact(base):
     return zip_up(os.path.join(out, 'runtime.tar.gz'), os.path.join(base, 'artifact.zip'))
 
 
+def publish_file(trusted, zip_path, roots, now):
+    """publish with zip_path's bytes as the stream the helper reads from stdin (e2e review S1)."""
+    with open(zip_path, 'rb') as f:
+        return pub.publish(trusted, f, roots, now)
+
+
 def trusted_for(zip_path, run_id=7, attempt=2, artifact_id=99):
     return Trusted('o/r', SHA, '.github/workflows/ci.yml', run_id, attempt, artifact_id,
                    f'wbb-release-{SHA}-{run_id}-{attempt}', sha256_file(zip_path))
@@ -68,7 +75,7 @@ class Tmp(unittest.TestCase):
 
     def refused(self, trusted=None, zip_path=None):
         with self.assertRaises(Refused) as cm:
-            pub.publish(trusted or self.trusted, zip_path or self.zip, self.roots, lambda: NOW)
+            publish_file(trusted or self.trusted, zip_path or self.zip, self.roots, lambda: NOW)
         return str(cm.exception)
 
     def assert_nothing_published(self):
@@ -78,7 +85,7 @@ class Tmp(unittest.TestCase):
 
 class Publish(Tmp):
     def test_accepts_and_writes_an_exact_receipt(self):
-        self.assertEqual(pub.publish(self.trusted, self.zip, self.roots, lambda: NOW), 'accepted')
+        self.assertEqual(publish_file(self.trusted, self.zip, self.roots, lambda: NOW), 'accepted')
         self.assertEqual(json.loads(self.receipt_bytes()), {
             'formatVersion': 1, 'repo': 'o/r', 'sourceSha': SHA, 'runId': 7, 'runAttempt': 2, 'artifactId': 99,
             'zipSha256': sha256_file(self.zip), 'tarSha256': sha256_file(self.archive),
@@ -90,14 +97,33 @@ class Publish(Tmp):
         self.assertEqual(os.readlink(os.path.join(release, 'node_modules/.bin/pkg')), '../pkg/cli.js')
         self.assertEqual(pub.verify_release(SHA, self.roots)['treeSha256'], tm.tree_digest(self.manifest))
 
-    def test_symlinked_operator_archive(self):
-        link = os.path.join(self.base, 'link.zip')
-        os.symlink(self.zip, link)
-        self.assertEqual(self.refused(zip_path=link), f'{link}: is a symlink')
-        self.assert_nothing_published()
+    def test_an_archive_over_the_cap_is_refused_while_it_is_read(self):
+        """e2e review S1: the ZIP comes on stdin; the cap stops the read, it does not wait for the end."""
+        class Endless:
+            read_bytes = 0
 
-    def test_operator_archive_is_a_directory(self):
-        self.assertEqual(self.refused(zip_path=self.base), f'{self.base}: not a regular file')
+            def read(self, n):
+                Endless.read_bytes += n
+                return b'x' * n
+        dest = os.path.join(self.base, 'copy.zip')
+        with self.assertRaises(Refused) as cm:
+            pub.copy_archive_stream(Endless(), dest, 3 << 20)
+        self.assertEqual(str(cm.exception), f'the archive on stdin is over {3 << 20} bytes')
+        self.assertEqual(Endless.read_bytes, 4 << 20)
+
+    def test_an_archive_of_exactly_the_cap_is_copied_whole_and_private(self):
+        dest = os.path.join(self.base, 'copy.zip')
+        pub.copy_archive_stream(io.BytesIO(b'z' * 1000), dest, 1000)
+        with open(dest, 'rb') as f:
+            self.assertEqual(f.read(), b'z' * 1000)
+        self.assertEqual(stat.S_IMODE(os.stat(dest).st_mode), 0o600)
+
+    def test_an_empty_stdin_is_refused_by_the_digest_and_publishes_nothing(self):
+        with self.assertRaises(Refused) as cm:
+            pub.publish(self.trusted, io.BytesIO(b''), self.roots, lambda: NOW)
+        self.assertEqual(str(cm.exception), f'artifact ZIP sha256 {hashlib.sha256(b"").hexdigest()} != trusted digest '
+                                            f'{self.trusted.zip_sha256}')
+        self.assert_nothing_published()
 
     def test_archive_differing_from_the_trusted_digest(self):
         with open(self.zip, 'ab') as f:
@@ -120,28 +146,28 @@ class Publish(Tmp):
         self.assert_nothing_published()
 
     def test_same_artifact_again_is_a_no_op(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         before = (self.receipt_bytes(), os.stat(self.receipt_path()).st_mtime_ns)
-        self.assertEqual(pub.publish(self.trusted, self.zip, self.roots, lambda: 'later'), 'already-accepted')
+        self.assertEqual(publish_file(self.trusted, self.zip, self.roots, lambda: 'later'), 'already-accepted')
         self.assertEqual((self.receipt_bytes(), os.stat(self.receipt_path()).st_mtime_ns), before)
 
     def test_same_artifact_again_over_a_tampered_tree(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         write(os.path.join(self.roots.releases, SHA), 'dist/index.js', b'console.log(4);\n')
         self.assertEqual(self.refused(), f'{SHA}: release tree changed:\ndist/index.js: differs from manifest (sha256)')
 
     def test_new_attempt_with_the_same_tar_is_a_no_op(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         rezip = os.path.join(self.base, 'rezip.zip')
         with zipfile.ZipFile(rezip, 'w', zipfile.ZIP_STORED) as z:  # a different wrapper around the same files
             z.write(self.archive + '.sha256', 'runtime.tar.gz.sha256')
             z.write(self.archive, 'runtime.tar.gz')
         self.assertNotEqual(sha256_file(rezip), sha256_file(self.zip))
         # release.json still names attempt 2, so the identity check holds for this trusted record.
-        self.assertEqual(pub.publish(trusted_for(rezip, artifact_id=100), rezip, self.roots, lambda: NOW), 'already-accepted')
+        self.assertEqual(publish_file(trusted_for(rezip, artifact_id=100), rezip, self.roots, lambda: NOW), 'already-accepted')
 
     def test_conflicting_artifact_for_an_accepted_sha(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         before = self.receipt_bytes()
         other_zip = other_artifact(os.path.join(self.base, 'other'))
         other_tar = os.path.join(self.base, 'other', 'out', 'runtime.tar.gz')
@@ -157,13 +183,13 @@ class Publish(Tmp):
             return hashlib.sha256(f.read()).hexdigest()
 
     def test_tree_left_without_receipt_is_reverified_then_receipted(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         os.remove(self.receipt_path())  # a crash between the rename and the receipt
-        self.assertEqual(pub.publish(self.trusted, self.zip, self.roots, lambda: 'again'), 'accepted')
+        self.assertEqual(publish_file(self.trusted, self.zip, self.roots, lambda: 'again'), 'accepted')
         self.assertEqual(json.loads(self.receipt_bytes())['acceptedAt'], 'again')
 
     def test_changed_tree_left_without_receipt_is_refused(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         os.remove(self.receipt_path())
         write(os.path.join(self.roots.releases, SHA), 'dist/index.js', b'console.log(9);\n')
         self.assertEqual(self.refused(), f'{os.path.join(self.roots.releases, SHA)} exists without a receipt and '
@@ -171,7 +197,7 @@ class Publish(Tmp):
         self.assertEqual(os.listdir(self.roots.receipts), [])
 
     def test_loosened_tree_left_without_receipt_is_refused(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         os.remove(self.receipt_path())
         os.chmod(os.path.join(self.roots.releases, SHA, 'dist/index.js'), 0o666)
         self.assertEqual(self.refused(), f'{os.path.join(self.roots.releases, SHA)} exists without a receipt and '
@@ -201,7 +227,7 @@ class Publish(Tmp):
 
     def test_whole_tree_is_durable_before_the_receipt(self):
         # #815 review P2: every file, directory and the root, then releases/, then the receipt.
-        seen = self.fsync_log(lambda: pub.publish(self.trusted, self.zip, self.roots, lambda: NOW))
+        seen = self.fsync_log(lambda: publish_file(self.trusted, self.zip, self.roots, lambda: NOW))
         scratch_tree = next(p for p in seen if p.endswith('/tree'))
         synced, receipt_at = self.durable_before_receipt(seen, scratch_tree)
         self.assertEqual(synced, self.tree_entries())
@@ -209,9 +235,9 @@ class Publish(Tmp):
         self.assertEqual(seen[receipt_at + 1:], [self.roots.receipts])
 
     def test_reconciled_tree_is_made_durable_before_its_receipt(self):
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         os.remove(self.receipt_path())
-        seen = self.fsync_log(lambda: pub.publish(self.trusted, self.zip, self.roots, lambda: NOW))
+        seen = self.fsync_log(lambda: publish_file(self.trusted, self.zip, self.roots, lambda: NOW))
         synced, _ = self.durable_before_receipt(seen, os.path.join(self.roots.releases, SHA))
         self.assertEqual(synced, self.tree_entries())
 
@@ -228,7 +254,7 @@ class Publish(Tmp):
 class VerifyRelease(Tmp):
     def setUp(self):
         super().setUp()
-        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        publish_file(self.trusted, self.zip, self.roots, lambda: NOW)
         self.release_dir = os.path.join(self.roots.releases, SHA)
 
     def test_changed_file(self):
@@ -351,7 +377,7 @@ class Switch(Tmp):
         self.current = os.path.join(self.base, 'current')
 
     def published(self):
-        self.assertEqual(pub.publish(self.trusted, self.zip, self.roots, lambda: NOW), 'accepted')
+        self.assertEqual(publish_file(self.trusted, self.zip, self.roots, lambda: NOW), 'accepted')
 
     def tree(self):
         """The digest of the published tree's manifest (2в e2e review Ф4: switch returns its receipt's)."""

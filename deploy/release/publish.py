@@ -6,8 +6,9 @@ Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2a.
 `current_sha`/`switch` (the `current` pointer): plan .../2026-10-09-wbb-artifact-deployment-core-2c.md, Task 2.
 
 Every check runs on bytes this process copied into its own private scratch: the
-operator's download is opened once, without following a final symlink, and copied
-with a bounded read; after that the operator can change their file all they like.
+operator's download arrives on stdin (root opens no path the operator names — e2e
+review S1) and is copied with a bounded read; after that the operator can change
+their file all they like.
 The tree becomes releases/<sha> by one rename, and only then does the receipt
 appear, written atomically. A release tree without a receipt is never activated;
 the next publish re-verifies it in full before writing the receipt. Nothing from
@@ -19,7 +20,6 @@ import json
 import os
 import secrets
 import shutil
-import stat
 import sys
 import tempfile
 import time
@@ -49,31 +49,25 @@ def _utc_now():
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
 
 
-def copy_operator_archive(src, dest, cap):
-    """Copy src (a regular file, final component not a symlink) into dest (new, 0600), at most cap bytes."""
-    try:
-        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
-    except OSError as e:
-        if e.errno == errno.ELOOP:
-            raise Refused(f'{src}: is a symlink') from None
-        raise Refused(f'{src}: cannot open ({e.strerror})') from None
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
-        os.close(fd)
-        raise Refused(f'{src}: not a regular file')
-    with os.fdopen(fd, 'rb') as f:
-        out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(out_fd, 'wb') as out:
-            total = 0
-            while True:
-                chunk = f.read(1 << 20)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > cap:
-                    raise Refused(f'{src}: over {cap} bytes')
-                out.write(chunk)
-            out.flush()
-            os.fsync(out.fileno())
+def copy_archive_stream(source, dest, cap):
+    """Copy the binary stream source (the helper's stdin) into dest (new, 0600), refusing past cap bytes.
+
+    e2e review S1: root never opens a path the operator names — the operator's own process opens their ZIP and
+    hands it over as stdin. The cap is enforced while reading: at most cap + one chunk is ever read.
+    """
+    out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(out_fd, 'wb') as out:
+        total = 0
+        while True:
+            chunk = source.read(1 << 20)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > cap:
+                raise Refused(f'the archive on stdin is over {cap} bytes')
+            out.write(chunk)
+        out.flush()
+        os.fsync(out.fileno())
 
 
 def check_identity(payload, trusted):
@@ -257,8 +251,9 @@ def switch(sha, roots):
     return 'switched', tree
 
 
-def publish(trusted, operator_zip, roots, now=_utc_now):
-    """Accept trusted.sha from the operator's ZIP. Returns 'accepted' or 'already-accepted'."""
+def publish(trusted, source, roots, now=_utc_now):
+    """Accept trusted.sha from the operator's ZIP read from the binary stream source (the helper's stdin).
+    Returns 'accepted' or 'already-accepted'."""
     final, receipt_path = _paths(trusted.sha, roots)
     existing = read_receipt(receipt_path)
     if os.stat(roots.scratch).st_dev != os.stat(roots.releases).st_dev:
@@ -266,7 +261,7 @@ def publish(trusted, operator_zip, roots, now=_utc_now):
     work = tempfile.mkdtemp(dir=roots.scratch, prefix=f'publish-{trusted.sha[:12]}-')
     try:
         zip_copy = os.path.join(work, 'artifact.zip')
-        copy_operator_archive(operator_zip, zip_copy, ZipCaps().zip_bytes)
+        copy_archive_stream(source, zip_copy, ZipCaps().zip_bytes)
         tar, tar_sha = admit_zip(zip_copy, trusted.zip_sha256, os.path.join(work, 'zip'))
         tree = os.path.join(work, 'tree')
         extract(tar, tree)

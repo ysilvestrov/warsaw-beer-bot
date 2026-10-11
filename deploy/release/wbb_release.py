@@ -5,11 +5,13 @@ Spec: docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.m
 Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2a.md, Task 4.
 
 Meant to be installed root-owned and run as root through a fixed sudo rule (the
-installation is a later stage). It takes no paths but the operator's ZIP and `digest`'s: the
+installation is a later stage). It takes no paths but `digest`'s: the
 release, receipt and scratch roots and the token file are constants here, and
 trust comes from metadata fetched now, never from anything the operator passes.
+`publish` reads the ZIP from stdin (`--archive -`, the only value accepted): root never opens a path the operator
+names (e2e review S1 — `--archive /etc/shadow` or a device would be root's open, and its errors an oracle).
 
-Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>   (root)
+Usage: wbb_release.py publish --sha <full sha> --archive - < <artifact zip>   (root; the ZIP on stdin)
        wbb_release.py verify  --sha <full sha>                            (root)
        wbb_release.py switch  --sha <full sha>                            (root; points `current` at it)
        wbb_release.py audit   --sha <full sha>                            (operator, never root)
@@ -109,7 +111,7 @@ def _parser():
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('publish')
     p.add_argument('--sha', required=True)
-    p.add_argument('--archive', required=True)
+    p.add_argument('--archive', required=True, help="'-' only: the artifact ZIP comes on stdin")
     for name in ('verify', 'audit', 'probe', 'switch'):
         sub.add_parser(name).add_argument('--sha', required=True)
     t = sub.add_parser('trial')
@@ -165,8 +167,11 @@ def _print_step(cmd, sha, step):
     return STEP_EXIT[step.kind]
 
 
+ARCHIVE_STDIN = '-'
+
+
 def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc,
-         installed_root):
+         installed_root, stdin):
     if a.cmd == 'digest':
         print(digest(a.path, installed_root))
         return 0
@@ -194,23 +199,26 @@ def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, n
     if a.cmd == 'trial':
         return _print_step(a.cmd, a.sha, tr.trial(a.sha, a.snapshot, roots, trial_root, snapshot_root, runner, node,
                                                   ids, glibc))
+    if a.archive != ARCHIVE_STDIN:
+        # e2e review S1: a path here would be opened by root; the operator's process opens it and pipes it in.
+        raise Refused(f"--archive takes only '{ARCHIVE_STDIN}' (the ZIP on stdin), not {a.archive!r}")
     api = api_factory(read_token(token_file))
     trusted = gt.fetch_trusted(api, gt.REPO, a.sha)
-    outcome = pub.publish(trusted, a.archive, roots)
+    outcome = pub.publish(trusted, stdin if stdin is not None else sys.stdin.buffer, roots)
     print(f'{outcome.upper()} {a.sha}: run {trusted.run_id} attempt {trusted.run_attempt}, artifact {trusted.artifact_id}')
     return 0
 
 
 def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi, trial_root=TRIAL_ROOT,
          runner=bounded.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release,
-         snapshot_root=SNAPSHOT_ROOT, glibc=tr.host_glibc, installed_root='/'):
+         snapshot_root=SNAPSHOT_ROOT, glibc=tr.host_glibc, installed_root='/', stdin=None):
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:
         return EX_USAGE if e.code else 0
     try:
         return _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc,
-                    installed_root)
+                    installed_root, stdin)
     except (Refused, gt.Untrusted) as e:
         # Not a verdict on the candidate: nothing here may be recorded as its failure (2b review B1).
         print(f'REFUSED: {e}', file=sys.stderr)

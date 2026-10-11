@@ -71,22 +71,38 @@ class Cli(unittest.TestCase):
         return factory
 
     def run_cli(self, argv):
+        """The CLI with self.zip on its stdin, as the adapter pipes it (e2e review S1)."""
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = cli.main(argv, self.roots, self.token, self.api_factory())
+        with open(self.zip, 'rb') as stdin, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(argv, self.roots, self.token, self.api_factory(), stdin=stdin)
         return code, out.getvalue(), err.getvalue()
 
     def test_publish_then_verify(self):
-        code, out, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
+        code, out, err = self.run_cli(['publish', '--sha', SHA, '--archive', '-'])
         self.assertEqual((code, out, err), (0, f'ACCEPTED {SHA}: run 7 attempt 2, artifact 99\n', ''))
         self.assertEqual(self.tokens_seen, ['tok'])
         code, out, _ = self.run_cli(['verify', '--sha', SHA])
         receipt = pub.read_receipt(os.path.join(self.roots.receipts, f'{SHA}.json'))
         self.assertEqual((code, out), (0, f'VERIFIED {SHA}: tree {receipt["treeSha256"]} (run 7 attempt 2)\n'))
 
+    def test_publish_refuses_a_path_for_the_archive_before_anything_is_opened(self):
+        """e2e review S1: root never opens an operator path — not the token, not the path, nothing is read."""
+        opened = []
+        real_open = os.open
+
+        def recording_open(path, *args, **kwargs):
+            opened.append(path)
+            return real_open(path, *args, **kwargs)
+        for archive in (self.zip, '/etc/shadow', '/dev/watchdog', ''):
+            with self.subTest(archive), mock.patch.object(cli.os, 'open', recording_open):
+                code, out, err = self.run_cli(['publish', '--sha', SHA, '--archive', archive])
+                self.assertEqual((code, out, err),
+                                 (2, '', f"REFUSED: --archive takes only '-' (the ZIP on stdin), not {archive!r}\n"))
+        self.assertEqual((opened, self.tokens_seen, os.listdir(self.roots.scratch)), ([], [], []))
+
     def test_publish_refuses_a_release_for_another_repository(self):
         self.zip = self.artifact('fork', 'o/r')
-        code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
+        code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', '-'])
         self.assertEqual((code, err), (2, f"REFUSED: release.json does not match the trusted run: repo='o/r'\n"))
         self.assertEqual(self.tokens_seen, ['tok'])
 
@@ -100,18 +116,18 @@ class Cli(unittest.TestCase):
 
     def test_token_file_readable_by_others(self):
         os.chmod(self.token, 0o640)
-        code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
+        code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', '-'])
         self.assertEqual((code, err), (2, f'REFUSED: {self.token}: must be a regular file owned by this user, not readable by others\n'))
         self.assertEqual(self.tokens_seen, [])
 
     def test_token_file_without_the_key(self):
         with open(self.token, 'w') as f:
             f.write('OTHER=x\n')
-        code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
+        code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', '-'])
         self.assertEqual((code, err), (2, f'REFUSED: {self.token}: expected exactly one non-empty WBB_GITHUB_TOKEN=\n'))
 
     def published(self):
-        self.assertEqual(self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])[0], 0)
+        self.assertEqual(self.run_cli(['publish', '--sha', SHA, '--archive', '-'])[0], 0)
 
     def run_step(self, argv, **kw):
         code, out, _ = self.run_step_err(argv, **kw)

@@ -42,7 +42,7 @@ SHELLS = {'sh', 'bash', 'dash', 'zsh', 'su', 'env', 'sudo', 'python3'}
 # Every argument the adapters' public methods take, by parameter name: a new parameter name fails the test
 # until it is given here, so a new method is driven too.
 ARGS = {
-    'a': SHA, 'b': SHA, 'sha': SHA, 'trusted': None, 'zip_path': '/home/ysi/.local/share/x.zip',
+    'a': SHA, 'b': SHA, 'sha': SHA, 'trusted': None, 'zip_path': None,  # a real file, made by sudo_calls
     'pre_name': PRE_NAME, 'pre': Pre(os.path.join(hpa.SNAPSHOT_ROOT, PRE_NAME), '0' * 64, 0),
     'patterns': gates.INSTALLED_COPIES, 'out': '/var/lib/x', 'pre_path': '/var/lib/x.db', 'post_dir': '/var/lib/y',
     'seconds': 0,
@@ -139,12 +139,12 @@ def _no_network(*args, **kwargs):
     raise OSError('no network in this test')
 
 
-def drive(obj):
-    """Every public method of obj, with ARGS by parameter name; whatever it raises after its calls is not ours."""
+def drive(obj, args):
+    """Every public method of obj, with args by parameter name; whatever it raises after its calls is not ours."""
     for name, method in inspect.getmembers(obj, inspect.ismethod):
         if name.startswith('_'):
             continue
-        kwargs = {p: ARGS[p] for p in inspect.signature(method).parameters}
+        kwargs = {p: args[p] for p in inspect.signature(method).parameters}
         with contextlib.suppress(Exception):
             method(**kwargs)
 
@@ -161,12 +161,16 @@ def sudo_calls():
             raise PermissionError(errno.EACCES, 'Permission denied', path)
         return real_open(path, flags, *args)
 
+    # publish opens the ZIP as the operator before it calls sudo (e2e review S1): it must exist.
+    args = dict(ARGS, zip_path=os.path.join(data, 'x.zip'))
+    with open(args['zip_path'], 'wb') as f:
+        f.write(b'PK')
     try:
         with mock.patch.object(hpa.os, 'open', operator_open):
             drive(hpa.RealHelpers(data, run=run, api_factory=_no_network, clock=lambda: 1_760_083_200,
-                                  lib_dir=os.path.join(data, 'lib')))
+                                  lib_dir=os.path.join(data, 'lib')), args)
             drive(hsa.RealHost(run=run, urlopen=_no_network, clock=lambda: 1_760_083_200, sleep=lambda s: None,
-                               boot_id_file=os.path.join(data, 'boot_id')))
+                               boot_id_file=os.path.join(data, 'boot_id')), args)
     finally:
         shutil.rmtree(data)
     out = []
@@ -222,6 +226,13 @@ class SudoersCoverage(unittest.TestCase):
         self.assertEqual([r for r in self.release if r[2] == 'ALL' or r[3] is None
                           or os.path.basename(r[2]) in SHELLS], [])
         self.assertEqual([r for r in self.release if 'audit' in (r[3] or '').split()], [])
+
+    def test_publish_is_allowed_only_with_the_zip_on_stdin(self):
+        """e2e review S1: no rule lets the operator name a path for root to open."""
+        publish = [c for c in self.calls if c[2] == 'root' and c[4][0] == 'publish']
+        self.assertEqual([c[4] for c in publish], [['publish', '--sha', SHA, '--archive', '-']])
+        path = (OPERATOR, 'root', ins.ROOT_HELPER, ['publish', '--sha', SHA, '--archive', '/etc/shadow'])
+        self.assertEqual(any(rule_matches(r, *path) for r in self.release), False)
 
     def test_a_stray_argument_is_matched_by_star_so_the_helper_stays_the_boundary(self):
         """Documents why the plan puts the trust boundary in argparse: sudo's `*` crosses spaces."""

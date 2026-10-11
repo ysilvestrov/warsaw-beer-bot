@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import os
 import shutil
@@ -181,6 +182,31 @@ class Bounded(unittest.TestCase):
     def test_missing_binary_raises_file_not_found(self):
         with self.assertRaises(FileNotFoundError):
             bounded.run(['/nonexistent/binary'], timeout=5)
+
+    def test_a_file_given_as_stdin_reaches_the_child_whole(self):
+        """e2e review S1: publish hands root the ZIP as stdin, opened by the operator."""
+        path = os.path.join(self.tmp(), 'in')
+        data = bytes(range(256)) * 4096
+        with open(path, 'wb') as f:
+            f.write(data)
+        with open(path, 'rb') as f:
+            r = bounded.run(py('import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'),
+                            timeout=30, stdin=f, text=True)
+        self.assertEqual(r.stdout, hashlib.sha256(data).hexdigest() + '\n')
+
+    def test_without_stdin_the_child_reads_nothing(self):
+        r = bounded.run(py('import sys; print(repr(sys.stdin.read()))'), timeout=30, text=True)
+        self.assertEqual(r.stdout, "''\n")
+
+    def test_a_timeout_with_a_file_on_stdin_still_sends_sigterm_first(self):
+        path = os.path.join(self.tmp(), 'in')
+        with open(path, 'wb') as f:
+            f.write(b'zip')
+        Recording, sent, procs = self.recording_popen()
+        with open(path, 'rb') as f, mock.patch.object(bounded.subprocess, 'Popen', Recording), \
+                self.assertRaises(subprocess.TimeoutExpired):
+            bounded.run(py('import sys, time; sys.stdin.read(); time.sleep(60)'), timeout=2, term_grace=5, stdin=f)
+        self.assertEqual((sent, procs[0].returncode), (['TERM'], -signal.SIGTERM))
 
     def test_environment_and_directory_are_passed(self):
         r = bounded.run(py('import os; print(os.environ["X"], os.getcwd())'), timeout=30, text=True,

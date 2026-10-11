@@ -64,7 +64,7 @@ class Helpers(Protocol):
 
     # wbb_release.py (root through sudo, except audit)
     def publish(self, sha: str, zip_path: str) -> Run:
-        """wbb_release.py publish --sha sha --archive zip_path."""
+        """wbb_release.py publish --sha sha --archive - with zip_path's bytes on stdin (root opens no operator path)."""
 
     def verify(self, sha: str) -> Run:
         """wbb_release.py verify --sha sha."""

@@ -10,6 +10,8 @@ Task 2. The protocol is helpers.Helpers; the commands mirror merge-deploy's (dep
   pr_labels           gh api repos/<repo>/commits/<sha>/pulls?per_page=100
   trusted / download  github_trust over GitHubApi(`gh auth token`); the ZIP into <data>/artifacts (0700)
   publish verify probe trial   sudo -n /usr/local/libexec/wbb-release <verb> --sha <sha> [...]
+  publish             ... publish --sha <sha> --archive -, the ZIP opened HERE, as the operator (no symlink, a regular
+                      file) and given as stdin: root never opens an operator path (e2e review S1)
   audit               /usr/local/libexec/wbb-release audit --sha <sha>     (the operator, never root)
   snapshot_pre        wbb-db-snapshot snapshot <db> <dir>/<UTC>-<sha7>-pre.db as the bot user, then its .sha256
   discard_pre         wbb-db-snapshot discard <pre> as the bot user
@@ -246,18 +248,27 @@ class RealHelpers:
         return path
 
     # --- wbb_release ----------------------------------------------------------------------------------------------
-    def _helper(self, verb, *args, sudo=True, timeout):
+    def _helper(self, verb, *args, sudo=True, timeout, **kwargs):
         argv = (['sudo', '-n'] if sudo else []) + [ins.ROOT_HELPER, verb, *args]
-        return call(self._run, argv, timeout, HelperError)
+        return call(self._run, argv, timeout, HelperError, **kwargs)
 
-    def _release(self, verb, sha, *extra, sudo=True):
+    def _release(self, verb, sha, *extra, sudo=True, **kwargs):
         return parse_run(verb, sha, self._helper(verb, '--sha', _sha(sha), *extra, sudo=sudo,
-                                                 timeout=RELEASE_TIMEOUT_S[verb]))
+                                                 timeout=RELEASE_TIMEOUT_S[verb], **kwargs))
 
     def publish(self, sha, zip_path):
         if not os.path.isabs(zip_path):
             raise HelperError(f'not an absolute path: {zip_path!r}')
-        return self._release('publish', sha, '--archive', zip_path)
+        _sha(sha)
+        try:
+            fd = os.open(zip_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError as e:
+            raise HelperError(f'{zip_path}: {type(e).__name__}: {e.strerror}') from None
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            os.close(fd)
+            raise HelperError(f'{zip_path}: not a regular file')
+        with os.fdopen(fd, 'rb') as f:
+            return self._release('publish', sha, '--archive', '-', stdin=f)
 
     def verify(self, sha):
         return self._release('verify', sha)

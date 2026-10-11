@@ -12,7 +12,7 @@ import tree_manifest as tm  # noqa: E402
 from audit_verdict import Verdict  # noqa: E402
 from release_testkit import SHA, packed, write  # noqa: E402
 from safe_tar import Refused  # noqa: E402
-from test_publish import trusted_for, zip_up  # noqa: E402
+from test_publish import publish_file, trusted_for, zip_up  # noqa: E402
 
 CLEAN = b'{"auditReportVersion": 2, "vulnerabilities": {}}'
 
@@ -53,7 +53,7 @@ class Audit(unittest.TestCase):
         os.chmod(self.roots.releases, 0o755)
         archive, self.manifest = packed(os.path.join(base, 'src'))
         z = zip_up(archive, os.path.join(base, 'a.zip'))
-        pub.publish(trusted_for(z), z, self.roots, lambda: 'now')
+        publish_file(trusted_for(z), z, self.roots, lambda: 'now')
         self.release = os.path.join(self.roots.releases, SHA)
         self.work = os.path.join(base, 'work')
         os.makedirs(self.work)
@@ -203,7 +203,7 @@ class RootPublisherOperatorAuditor(unittest.TestCase):
                 os.makedirs(d)
             archive, _ = packed(os.path.join(base, 'src'))
             z = zip_up(archive, os.path.join(base, 'a.zip'))
-            pub.publish(trusted_for(z), z, roots, lambda: 'now')
+            publish_file(trusted_for(z), z, roots, lambda: 'now')
             code = (
                 'import sys; sys.path.insert(0, %r); import host_audit as ha, tempfile;'
                 'r = ha.audit_release(%r, %r, (0, 0), npm="/nonexistent/npm");'

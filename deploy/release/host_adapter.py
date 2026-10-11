@@ -88,10 +88,11 @@ def reason(result):
     return 'no output'
 
 
-def call(run, argv, timeout, error=HostError):
-    """run(argv) -> CompletedProcess; a failure to run at all (missing binary, timeout) raises `error`."""
+def call(run, argv, timeout, error=HostError, **kwargs):
+    """run(argv) -> CompletedProcess; a failure to run at all (missing binary, timeout) raises `error`.
+    kwargs (stdin=) go to run as they are."""
     try:
-        return run(argv, timeout=timeout)
+        return run(argv, timeout=timeout, **kwargs)
     except (OSError, subprocess.SubprocessError) as e:
         raise error(f'{argv[0]}: {type(e).__name__}') from None
 
