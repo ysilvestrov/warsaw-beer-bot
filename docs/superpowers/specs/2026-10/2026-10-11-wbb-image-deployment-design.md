@@ -1,6 +1,6 @@
 # Warsaw Beer Bot: деплой OCI-образом і відкат лише коду
 
-**Статус:** редакція 2, затверджена власником 11.10.2026; у роботі ядро (план `docs/superpowers/plans/2026-10/2026-10-11-wbb-image-deployment-core.md`: образ у CI, правила сумісності, підготовка застосунку). Уточнення з реалізації ядра: `start-check` передзавантажує в бота `offline-telegram.cjs`, що терпить лише відмову `bot.launch()` на `api.telegram.org` (без мережі вона інакше вбиває процес); будь-яка інша необроблена відмова — `START FAILED` — це стосується START (D) і COMPAT (S) §6.3; `verify_payload.py` в образі не працює (Python 3.11 bookworm без tar-фільтра), його проби робить smoke готового образу; `trial-migrate.cjs` і `start-check.cjs` лежать поза маніфестом і не входять у `wbb.content`; runtime-digest — літерал у `FROM` (Dependabot), build-arg береться з нього. Рішення власника 11.10: варіант Б (образ + Podman Quadlet, rootful з root-хелпером) і двокрокові міграції. Редакція 2 враховує зовнішнє рев'ю (Codex, на `fa9ceca`): межа compat-перевірки, режим вікна в стані, таблиця відновлення, джерело «що деплоїться» замість `rsync-filter`, старі checkout-и, ланцюжок digest → ID, аудит в образі, Node у моніторингу, підставне оточення, Quadlet-ключі, утримання знімків.
+**Статус:** редакція 2, затверджена власником 11.10.2026; у роботі ядро (план `docs/superpowers/plans/2026-10/2026-10-11-wbb-image-deployment-core.md`: образ у CI, правила сумісності, підготовка застосунку). Уточнення з реалізації ядра: `start-check` передзавантажує в бота `offline-telegram.cjs`, що терпить лише відмову `bot.launch()` на `api.telegram.org` (без мережі вона інакше вбиває процес); будь-яка інша необроблена відмова — `START FAILED` — це стосується START (D) і COMPAT (S) §6.3; `verify_payload.py` в образі не працює (Python 3.11 bookworm без tar-фільтра), його проби робить smoke готового образу; `trial-migrate.cjs` і `start-check.cjs` лежать поза маніфестом і не входять у `wbb.content`; runtime-digest — літерал у `FROM` (Dependabot), build-arg береться з нього. Ядро змерджене (PR #842, `4bb79e8`); проби 12.10 на справжньому образі (V9–V13 у §2) закрили §12 п.1 і п.3 і дали дві поправки: START не шле сигналів усередині контейнера (§6.3, AppArmor хоста) і `PodmanArgs=--stop-timeout=20` у шаблоні (§3.2); план ядра переходу — `docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md`. Рішення власника 11.10: варіант Б (образ + Podman Quadlet, rootful з root-хелпером) і двокрокові міграції. Редакція 2 враховує зовнішнє рев'ю (Codex, на `fa9ceca`): межа compat-перевірки, режим вікна в стані, таблиця відновлення, джерело «що деплоїться» замість `rsync-filter`, старі checkout-и, ланцюжок digest → ID, аудит в образі, Node у моніторингу, підставне оточення, Quadlet-ключі, утримання знімків.
 **Замінює:** `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md` як шлях до production. Змерджене за ним (Ядра 1–2в, обв'язка А–Б, етап В-ядро) лишається історією; що з нього переходить, а що видаляється — §11.
 **Вхідні дані:**
 - дослідження варіантів `docs/investigations/2026-10-11-deployment-options-evaluation.md` (spike, SHA `003f9c7`) і рев'ю до нього в сесії 11.10;
@@ -32,8 +32,13 @@
 | V6 | Quadlet під systemd 255 / Podman 4.9.3 | `Type=notify`; рестарт: TERM → EXIT → START (старий вийшов до старту нового), 1,8 с; зупинка 1,7 с; `NRestarts` росте після `kill -9` |
 | V7 | Відкат без реєстру | Перехід на інший локальний образ із `Pull=never`, коли всі реєстри недоступні; контрольний pull через той самий проксі падає |
 | V8 | Накладні витрати | conmon 2,6 MB RSS |
+| V9 | Справжній образ CI (12.10, `4bb79e8`, `sha256:5da35885…`) | Pull за digest без логіна; `.Digest == D`, мітки `revision == X` і `wbb.content` == `/app/.content-digest`; `gh attestation verify` з `--source-digest X` проходить, а чужий SHA (`expected SourceRepositoryDigest`), чужий ref і чужий workflow — відмова; trial на свіжому pre прод-БД: схема 46 → 47 за 0,5 с; образ 341 MB |
+| V10 | Ланцюжок §3.3 і юніт §3.2 під Quadlet | `podman container inspect`: `.Image` == ID I з `image inspect`, `.ImageDigest` == D, `.ImageName`/`.Config.Image` == `ghcr.io/…@D`; `systemctl show`: `SourcePath` = наш `.container`, `FragmentPath` = `/run/systemd/generator/<unit>.service`, `UnitFileState=generated`; `quadlet -dryrun` на справжньому шаблоні без помилок |
+| V11 | Сигнали під AppArmor хоста (Ubuntu 24.04, podman 4.9.3, crun 1.14.1, профіль `containers-default-0.57.4-apparmor1`) | Усі процеси контейнера мають мітку `containers-default-…//&crun (mixed)`, і **процес у контейнері не може надіслати сигнал іншому процесу того самого контейнера** (`kill` → EACCES, `apparmor="DENIED" operation="signal"`; і з node, і з `sh`); з `apparmor=unconfined` — може. Сигнали **ззовні** доходять: справжній бот під Quadlet (офлайн, копія БД) на `systemctl stop` пише `shutdown initiated` → `shutdown done`, зупинка 0,2 с, `ExecMainStatus=0`, двічі; відмов ядра при цьому немає |
+| V12 | Записи в дерево коду (звіт preflight `finish`, 12.10) | Після останнього старту бота (18 год, що покривають кожен розклад cron у `src/index.ts`, найрідший — раз на добу) — 0 записів у `/opt/warsaw-beer-bot` і 0 EACCES/EROFS/EPERM/ENOENT із `/opt` у журналі бота |
+| V13 | Старт справжнього бота на копії прод-БД | `api listening` за ~21 с (з них ~18 с — `dedupe-brewery-aliases`); ліміт START/COMPAT 60 с має запас утричі |
 
-Проба V5 ішла з реальним `.env` (без мережі); у робочій схемі compat і trial отримують підставне оточення (§6.3). Не доведено пробою: 24-годинний цикл кронів у read-only контейнері (звіт preflight `finish`, §12 п.1); `podman inspect .Image`/`.ImageDigest` для ланцюжка §3.3 (уточнюється першим кроком плану переходу).
+Проба V5 ішла з реальним `.env` (без мережі); у робочій схемі compat і trial отримують підставне оточення (§6.3). Пункти, що лишалися недоведеними після 11.10, закриті 12.10: цикл кронів — V12, ланцюжок §3.3 — V10. V11 змінив механізм START (§6.3): чинний `start-check` зупиняв бота сигналом зсередини контейнера й на цьому хості не проходив би ніколи.
 
 ## 3. Архітектура
 
@@ -63,7 +68,7 @@ push у main ─► CI: build + test + job image ─► ghcr.io/…/warsaw-beer-
 ### 3.2 Юніт
 
 - `/etc/containers/systemd/warsaw-beer-bot.container` (Quadlet) генерує `warsaw-beer-bot.service`. Його пише лише хелпер (`activate`), з фіксованого шаблону, атомарно, з `Image=ghcr.io/ysilvestrov/warsaw-beer-bot@<D>` — без тегів.
-- Ключі: `ContainerName=warsaw-beer-bot` (інакше Quadlet дає `systemd-warsaw-beer-bot`, а `podman exec` і `inspect` у цій спеці звертаються на ім'я); `Pull=never`; `User=<uid>`, `Group=<gid>` бота **числами**; `ReadOnly=true`; `Tmpfs=/tmp`; `DropCapability=ALL`; `NoNewPrivileges=true`; `Network=host`; `EnvironmentFile=/etc/warsaw-beer-bot/.env`; `Environment=WBB_RELEASE_REQUIRED=true`; `Volume=` за переліком нижче; `[Service] Restart=on-failure`, `TimeoutStopSec=20`; `[Install] WantedBy=multi-user.target` (згенерований юніт не вмикається `systemctl enable` — автозапуск дає саме `[Install]` у Quadlet-файлі).
+- Ключі: `ContainerName=warsaw-beer-bot` (інакше Quadlet дає `systemd-warsaw-beer-bot`, а `podman exec` і `inspect` у цій спеці звертаються на ім'я); `Pull=never`; `User=<uid>`, `Group=<gid>` бота **числами**; `ReadOnly=true`; `Tmpfs=/tmp`; `DropCapability=ALL`; `NoNewPrivileges=true`; `Network=host`; `EnvironmentFile=/etc/warsaw-beer-bot/.env`; `Environment=WBB_RELEASE_REQUIRED=true`; `Volume=` за переліком нижче; `PodmanArgs=--stop-timeout=20` (Quadlet-ключ `StopTimeout=` у 4.9 ще не підтримується, а `ExecStop=podman rm -f`, який генерує Quadlet, чекає власний тайм-аут контейнера — за замовчуванням 10 с — і лише потім SIGKILL, тож без цього `TimeoutStopSec` нічого не давав би); `[Service] Restart=on-failure`, `TimeoutStopSec=20`; `[Install] WantedBy=multi-user.target` (згенерований юніт не вмикається `systemctl enable` — автозапуск дає саме `[Install]` у Quadlet-файлі).
 - Чинний `/etc/systemd/system/warsaw-beer-bot.service` при переході видаляється: юніт у `/etc/systemd/system` перекриває згенерований. Хелпер у `current` і перед кожною активацією перевіряє, що активний юніт згенерований саме з Quadlet-файлу (`systemctl show -p SourcePath,FragmentPath`: `SourcePath` = наш `.container`, `FragmentPath` у `/run/systemd/generator`), інакше `REFUSED` (§8).
 - **Що бот бачить із хоста** (усі абсолютні шляхи-літерали в `src/`, 11.10):
   - `/var/lib/warsaw-beer-bot` — rw (БД, медіа, логи тріажу, OAuth MCP);
@@ -121,7 +126,7 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 | Дія | Що робить | Перевірки |
 |---|---|---|
 | `pull --sha X --digest D` | `podman pull ghcr.io/ysilvestrov/warsaw-beer-bot@D`; друкує `PULLED D I content=<…>` | X — 40 hex, D — `sha256:` + 64 hex; `.Digest == D`, мітка `revision == X`; перед pull — ≥5 GiB вільного |
-| `audit --digest D` | §4.2 | Образ нашого репо |
+| `audit --digest D` | §4.2, у контейнері з `--network=host` (мережа потрібна npm-реєстру; bridge-мережа rootful podman на хості не перевірена, а host — так, V10), read-only, без `.env`, без томів, UID бота | Образ нашого репо |
 | `trial --digest D --previous S --snapshot NAME` | §6.3: TRIAL, START (кандидат), COMPAT (S) на одній копії | NAME — ім'я з каталогу знімків, не шлях; D і S — локальні образи нашого репо; `--network=none --read-only --cap-drop=ALL --user <uid>:<gid> --memory --pids-limit`; підставне оточення, без `.env` |
 | `activate --digest D` | Перевірка юніта (§3.2); атомарний запис Quadlet-файлу з `Image=…@D`; `daemon-reload`; `systemctl restart warsaw-beer-bot` | Образ нашого репо |
 | `current` | `Quadlet-Image=<D> container-image=<I> container-digest=<D'> unit=quadlet|foreign` | — |
@@ -152,8 +157,8 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 `wbb-image trial` на одній копії pre-знімка, у трьох кроках, кожен в окремому контейнері з `--network=none`, read-only кодом і **підставним оточенням** (обов'язкові несекретні ключі з фіксованими значеннями — `TELEGRAM_BOT_TOKEN` формату BotFather, але фальшивий, `OSRM_BASE_URL`, `NOMINATIM_USER_AGENT`, `DATABASE_PATH` на копію, `WBB_RELEASE_REQUIRED=true`; решта необов'язкових ключів відсутні — функції вимкнені; реальний `.env` не монтується):
 
 1. **TRIAL**: D мігрує копію двічі, цілісність (чинний `trial-migrate.cjs`).
-2. **START (D)**: D стартує на копії до рядка `api listening` і завершення стартових backfill-ів, відповідає `/health` зсередини контейнера, зупиняється. Це **позитивний контроль**: середовище здатне стартувати бота — і водночас застосовує до копії стартові перетворення D (§6.1 п.2).
-3. **COMPAT (S)**: S стартує на тій самій копії й відповідає `/health` (`releaseSha == S`) за 60 с.
+2. **START (D)**: D стартує на копії до рядка `api listening` і завершення стартових backfill-ів, відповідає `/health` зсередини контейнера. Це **позитивний контроль**: середовище здатне стартувати бота — і водночас застосовує до копії стартові перетворення D (§6.1 п.2). Бота **не зупиняють сигналом**: процес у контейнері не може сигналити іншому процесу того самого контейнера (V11). `start-check --leave-running` друкує вердикт і виходить; він — PID 1 контейнера, тож його вихід розбирає PID-простір, і ядро вбиває бота (SIGKILL ядра AppArmor не перевіряє). Копія після цього не закрита чисто — для WAL-копії, яку наступний крок відкриває заново, це штатно.
+3. **COMPAT (S)**: S стартує на тій самій копії й відповідає `/health` (`releaseSha == S`) за 60 с — тим самим `start-check --leave-running`, але **з образу S**. Тож S мусить знати `--leave-running`: образи до цієї поправки ціллю відкату бути не можуть. Перший образ-реліз активує людина без compat (§8 п.2), і він уже з поправкою — далі кожен settled її має.
 
 Вердикти:
 - `COMPAT OK` — S стартує після міграцій і стартових перетворень D. Деплой автоматичний, відкат у вікні — лише коду.
@@ -211,7 +216,7 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 
 ## 8. Перехід і старі checkout-и
 
-Окремий план (після рев'ю ядра). Обриси:
+Плани переходу йдуть стадіями (CLAUDE.md): **(а) ядро переходу** — root-хелпер `wbb-image`, його інсталятор і sudoers, `start-check --leave-running`, `--stop-timeout` у шаблоні; нічого не встановлює й не перемикає (`docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md`); **(б)** `autodeploy.sh` і `deploy.sh` під образи зі станом §7 — пишеться після рев'ю (а); **(в)** перемикання хоста, старі checkout-и, прибирання й репетиція — після (б). Обриси:
 1. **Ядро (без hold).** CI job `image` + атестація + smoke (§3.1) + `wbb.content`; лінтер міграцій; правила §6.2 у `CLAUDE.md`; `WBB_OPERATOR_UID`; Node у статусі (§10). Хост не змінюється; образи публікуються, ніхто їх не тягне.
 2. **Хост (`[deploy:hold]`).** `apt install podman`; хелпер `wbb-image` і sudoers; новий `autodeploy.sh`; Quadlet-файл. Перший образ-реліз активує людина при зупиненому таймері, у режимі `manual` (попередній — flat-дерево, відкату на образ немає; ручний fallback — старий юніт і flat-дерево). Після 600 с спостереження він стає першим settled.
 3. **Старі entrypoint-и.** Старий `deploy.sh` після rsync **встановлює `/etc/systemd/system/warsaw-beer-bot.service`, робить `daemon-reload` і `restart`** — це перекрило б Quadlet. Тому:
@@ -251,9 +256,9 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 
 ## 12. Відкриті пункти (до плану переходу)
 
-1. Звіт preflight `finish` (≥24 год від 11.10 14:39 UTC): записи бота й кронів у дерево коду. У контейнері це EROFS — знайдене треба перенести в `/var/lib` до переходу.
-2. Перелік ops-команд, які запускає не людина (агенти на хості, крони), з `/opt/warsaw-beer-bot`.
-3. Проба на хості: `podman inspect .Image/.ImageDigest` після pull за digest (§3.3) і `systemctl show SourcePath/FragmentPath` для Quadlet-юніта (§3.2) — перший крок плану переходу.
+1. ~~Звіт preflight `finish`~~ — закрито 12.10 (V12): записів у дерево коду немає.
+2. Перелік ops-команд, які запускає не людина (агенти на хості, крони), з `/opt/warsaw-beer-bot` — до плану перемикання (етап 3 переходу).
+3. ~~Проба `podman inspect` і `SourcePath`~~ — закрито 12.10 (V10).
 
 ## 13. Розглянуті й відкинуті альтернативи
 
@@ -271,18 +276,20 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 |---|---|---|---|
 | Образ D — збірка CI коміту X з `main` | Байти D зібрав workflow `ci.yml` цього репо на hosted runner з коміту X гілки `main` | `gh attestation verify` з `--source-digest X --source-ref refs/heads/main --signer-workflow …/ci.yml --deny-self-hosted-runners`; негативні випадки V3 | сильний |
 | CI зелений на X | Тести, збірка й образ пройшли саме на X | Exact-SHA гейт + `image=success` у тому самому run-і | сильний |
-| Запущено D (X) | Контейнер бота з образу D, процес стартував з `release.json` X | `podman inspect`: `.ImageDigest == D`, `.Image == I` (I з pull за D); `/health.releaseSha == X`; Quadlet-файл з `Image=…@D` (§3.3) | сильний; ланцюжок `.ImageDigest` підтверджується пробою §12 п.3 |
+| Запущено D (X) | Контейнер бота з образу D, процес стартував з `release.json` X | `podman inspect`: `.ImageDigest == D`, `.Image == I` (I з pull за D); `/health.releaseSha == X`; Quadlet-файл з `Image=…@D` (§3.3) | сильний; поля підтверджені пробою V10 |
 | Активний юніт — наш Quadlet | Ніщо не перекрило згенерований юніт | `SourcePath`/`FragmentPath` перед кожною активацією й у статусі | сильний на момент перевірки |
 | Ціль відкату S запускається без мережі | Локальний образ S стартує з `Pull=never` | V7 | сильний |
 | S працює після міграцій і стартових перетворень D | Старий код стартує й відповідає `/health` на копії, яку D мігрував і на якій D стартував | Compat §6.3, з позитивним контролем START (D) | **середній**: не покриває записів D під час роботи й семантики даних — це правила §6.2, цільові тести, рев'ю; де не доведено — ручний режим §6.4 |
 | `COMPAT FAILED` = несумісність | Не збій середовища | START (D) на тій самій копії пройшов; збої середовища — вихід 75 | сильний |
+| Зупинка бота при деплої чиста | SIGTERM доходить, бот закриває БД і виходить 0 до SIGKILL | V11: `systemctl stop` під Quadlet → `shutdown done` за 0,2 с, `ExecMainStatus=0`; `--stop-timeout=20` у шаблоні | сильний (офлайн-бот; з мережею `shutdown` ще перериває активні прогреси в Telegram — у межах 20 с) |
+| START не залежить від сигналів у контейнері | Вердикт START/COMPAT не ламається від AppArmor хоста | `--leave-running`: жодного `kill` усередині; бота вбиває розбір PID-простору; smoke у CI і репетиція на хості | сильний після репетиції |
 | Лінтер міграцій | Нічого не стверджує про сумісність | — | сигнал для рев'ю, не доказ |
 | Режим вікна переживає reboot | `manual` не стає автоматичним відкатом | `WINDOW_MODE` записується до активації; таблиця §7.2; репетиція §8 п.5 | сильний |
 | Що деплоїться | Різна `wbb.content` ⇔ різний runtime | Тест на 4 випадки §4.1 | сильний для перелічених випадків |
 | Міграція кандидата проходить на production-даних | `migrate()` двічі на копії pre, цілісність | `trial-migrate.cjs` в образі (V4) | сильний |
 | Trial і compat не бачать секретів і мережі | Ізоляція контейнера, підставне оточення | V4; реальний `.env` не монтується | сильний |
 | Аудит на момент деплою | Advisory ≠ «не вдалося перевірити» | `audit-verdict-cli` в образі, smoke на фікстурах | сильний |
-| Код не пишеться під час роботи | Бот і ops не пишуть у `/app` | `ReadOnly=true` (EROFS замість тихої зміни); спостереження за добу — звіт `finish` | сильний як примус; «нічого не зламається» — після `finish` |
+| Код не пишеться під час роботи | Бот і ops не пишуть у `/app` | `ReadOnly=true` (EROFS замість тихої зміни); звіт `finish` (V12): 0 записів за 18 год, що покривають усі розклади cron | сильний |
 | Бот бачить потрібні файли хоста | Кожен шлях-літерал у `src/` має `Volume=` | Перелік §3.2 + smoke у CI | сильний для літералів; шляхи з `.env` — preflight (усі в `/var/lib/warsaw-beer-bot`) |
 | Статус показує Node бота | Версія Node, на якій працює бот | `process.versions.node` у контейнері | сильний |
 | Pre-знімок — стан БД на момент T | `VACUUM INTO` + sha256 | `db-snapshot.sh` | сильний |
