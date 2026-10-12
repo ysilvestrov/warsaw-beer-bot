@@ -1027,7 +1027,7 @@ class Activate(HelperCase):
     def test_a_restore_that_cannot_write_is_tempfail_saying_so(self):
         previous = f'# the one before\nImage={REPO}@{D2}\n'
         self.write_quadlet(previous)
-        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'))
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'), done())
         real = wi._write_atomically
         calls = []
 
@@ -1041,6 +1041,26 @@ class Activate(HelperCase):
             result = self.main(['activate', '--digest', D1], runner)
         self.assertEqual(result, (75, '', 'TEMPFAIL: systemctl daemon-reload exited 1: Access denied; putting the '
                                           f'previous {self.quadlet} back failed too: [Errno 28] No space left on device\n'))
+        # #858 AI review, round 3: systemd is reloaded even then — the restore may have changed the file first.
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, RELOAD])
+
+    def test_a_restore_that_cannot_write_and_a_second_reload_that_fails_say_both(self):
+        self.write_quadlet(f'Image={REPO}@{D2}\n')
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'), done(1, stderr='Still denied\n'))
+        real = wi._write_atomically
+        calls = []
+
+        def write(path, data):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError(28, 'No space left on device')
+            return real(path, data)
+
+        with mock.patch.object(wi, '_write_atomically', write):
+            result = self.main(['activate', '--digest', D1], runner)
+        self.assertEqual(result, (75, '', 'TEMPFAIL: systemctl daemon-reload exited 1: Access denied; putting the '
+                                          f'previous {self.quadlet} back failed too: [Errno 28] No space left on device; '
+                                          'then systemctl daemon-reload (restore) exited 1: Still denied\n'))
 
     def test_a_previous_quadlet_path_that_is_not_a_file_is_refused_before_writing(self):
         os.mkdir(self.quadlet)

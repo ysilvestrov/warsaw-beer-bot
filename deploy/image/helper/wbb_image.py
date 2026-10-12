@@ -716,14 +716,20 @@ def activate(host, digest):
         # watching. The file goes back first; then one more reload, best effort — a client that failed or timed
         # out does not prove systemd did not reload, and it must not keep a unit generated from D. Still 75:
         # nothing was activated, and stage б repeats activate (spec §7.2).
+        # The second reload runs whatever the restore did: it may have replaced the file and failed only after
+        # (the directory fsync), and systemd must see what is on disk now (#858 AI review, round 3). If systemd
+        # fails twice, nothing here can prove more: 75, and stage б repeats activate (spec §7.2).
+        notes = []
         try:
             _restore_file(host, previous)
         except OSError as e:
-            raise TempFail(f'{failed}; putting the previous {host.quadlet_path} back failed too: {e}') from None
+            notes.append(f'putting the previous {host.quadlet_path} back failed too: {e}')
         try:
             _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload (restore)')
         except TempFail as again:
-            raise TempFail(f'{failed}; the previous file is back, {again}') from None
+            notes.append(f'then {again}' if notes else f'the previous file is back, {again}')
+        if notes:
+            raise TempFail('; '.join([str(failed), *notes])) from None
         raise
     after = unit_type(host)
     if after != 'quadlet':
