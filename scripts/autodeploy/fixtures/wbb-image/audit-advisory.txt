@@ -1,0 +1,5 @@
+exit=1
+--- stdout
+AUDIT ADVISORY sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+proxy-addr critical — proxy-addr vulnerable to IP spoofing via IPv4-mapped IPv6 trust subnet https://github.com/advisories/GHSA-jqcg-44mw-7w3h
+--- stderr

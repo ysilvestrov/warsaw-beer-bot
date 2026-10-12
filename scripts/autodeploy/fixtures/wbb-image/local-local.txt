@@ -1,0 +1,4 @@
+exit=0
+--- stdout
+LOCAL sha256:5555555555555555555555555555555555555555555555555555555555555555 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb content=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee revision=2222222222222222222222222222222222222222
+--- stderr

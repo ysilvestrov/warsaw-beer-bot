@@ -519,6 +519,7 @@ SHA, `sha256:` digests and a pre-snapshot NAME, all checked — and works only o
 | Verb | Does | Verdict line |
 |---|---|---|
 | `pull --sha X --digest D` | refuses below 5 GiB free; `podman pull …@D`; checks `.Digest`, `RepoDigests`, `revision == X` | `PULLED <D> <image id> content=<wbb.content> revision=<X>` |
+| `local --digest D` | `podman image inspect …@D` only — no network, no pull, no free-space check (the rollback target is checked before a trial) | `LOCAL <D> <image id> content=<wbb.content> revision=<X>`; or `NOT LOCAL <D>` with exit 3 (not here: the caller pulls it) |
 | `audit --digest D` | `npm audit --omit=dev` → `audit-verdict-cli` inside D (`--network=host`, read-only, no `.env`, no volumes, bot UID) | `AUDIT CLEAN <D>` / `AUDIT ADVISORY <D>` |
 | `trial --digest D --previous S --snapshot NAME` | on one copy of the pre snapshot: TRIAL (D migrates twice), START (D), COMPAT (S); every container `--network=none`, read-only, fake environment, no `.env` | `TRIAL OK`, `START OK`, `COMPAT OK <S>` — or `TRIAL FAILED` / `START FAILED` / `COMPAT FAILED` |
 | `activate --digest D` | writes `/etc/containers/systemd/warsaw-beer-bot.container` from the template (atomic), `daemon-reload`, `restart` — only while the unit is ours (`SourcePath`/`FragmentPath`) or absent | `ACTIVATED <D>` |
@@ -527,7 +528,7 @@ SHA, `sha256:` digests and a pre-snapshot NAME, all checked — and works only o
 
 Exit: 0 done; 1 only with a verdict on the candidate (`TRIAL`/`START`/`COMPAT FAILED`, `AUDIT
 ADVISORY`, `ACTIVATE FAILED` — a restart of D that systemd reports failed); 2 `REFUSED:` (an input or a
-precondition, not a verdict); 64 usage; 70 internal error; 75 could not judge now, retry (podman, a
+precondition, not a verdict); 3 `local` only, `NOT LOCAL <D>` (a normal answer, not an error); 64 usage; 70 internal error; 75 could not judge now, retry (podman, a
 timeout, no registry, `START TIMEOUT` of D, `START KILLED` — the OOM killer, a snapshot whose sha256
 does not match). Exit 1 covers both kinds of verdict the deployer must tell apart — a failed SHA
 (`TRIAL`/`START FAILED`, `ACTIVATE FAILED`) and a hold (`COMPAT FAILED`, `AUDIT ADVISORY`) — so the

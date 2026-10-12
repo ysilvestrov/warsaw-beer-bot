@@ -1,0 +1,8 @@
+exit=2
+--- stdout
+TRIAL OK: schema 46 -> 47
+START OK 1111111111111111111111111111111111111111
+--- stderr
+REFUSED: previous image sha256:5555555555555555555555555555555555555555555555555555555555555555 predates start-check --leave-running
+[compat exited 64]
+usage: start-check.cjs [--timeout <seconds>] [--entry <file>]

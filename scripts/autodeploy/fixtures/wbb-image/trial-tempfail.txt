@@ -1,0 +1,8 @@
+exit=75
+--- stdout
+TRIAL OK: schema 46 -> 47
+--- stderr
+TEMPFAIL: start-check in sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd exited 75: START KILLED: bot killed by SIGKILL (out of memory?)
+[start exited 75]
+START KILLED: bot killed by SIGKILL (out of memory?)
+output tail:

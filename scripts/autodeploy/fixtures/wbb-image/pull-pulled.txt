@@ -1,0 +1,4 @@
+exit=0
+--- stdout
+PULLED sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa content=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc revision=1111111111111111111111111111111111111111
+--- stderr

@@ -1,0 +1,6 @@
+exit=1
+--- stdout
+TRIAL FAILED: no such column: venue_id
+--- stderr
+[trial exited 1]
+TRIAL FAILED: no such column: venue_id

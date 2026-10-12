@@ -1,0 +1,4 @@
+exit=2
+--- stdout
+--- stderr
+REFUSED: ghcr.io/ysilvestrov/warsaw-beer-bot@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd: label org.opencontainers.image.revision is 2222222222222222222222222222222222222222, expected 1111111111111111111111111111111111111111

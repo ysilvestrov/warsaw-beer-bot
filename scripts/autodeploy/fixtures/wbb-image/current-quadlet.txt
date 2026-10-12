@@ -1,0 +1,4 @@
+exit=0
+--- stdout
+CURRENT quadlet=sha256:5555555555555555555555555555555555555555555555555555555555555555 container-image=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb container-digest=sha256:5555555555555555555555555555555555555555555555555555555555555555 unit=quadlet
+--- stderr

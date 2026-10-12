@@ -1,0 +1,4 @@
+exit=0
+--- stdout
+ACTIVATED sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+--- stderr

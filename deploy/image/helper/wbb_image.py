@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Root helper `wbb-image`: the bot's OCI image on the host — pull, trial, audit, activate, inspect, prune.
+"""Root helper `wbb-image`: the bot's OCI image on the host — pull, local, trial, audit, activate, inspect, prune.
 
 Spec: docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md §3.2, §3.3, §5, §9.
-Plan: docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md, "Рішення" п.1–3, 5–9, Tasks 2–3.
+Plan: docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md, "Рішення" п.1–3, 5–9, Tasks 2–3;
+      docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md, "Рішення" п.9–10, Task 0 (`local`).
 
 Meant to be installed root-owned as /usr/local/lib/wbb-image/wbb_image.py and run as root through
 /usr/local/libexec/wbb-image (deploy/image/helper/wbb-image.sh) under fixed sudo rules. The trust boundary is
@@ -12,6 +13,7 @@ Everything that depends on the host (paths, binaries, the bot's ids, free space)
 `main()` takes as a parameter: tests pass a fake one.
 
 Usage: wbb_image.py pull     --sha <40 hex> --digest sha256:<64 hex>
+       wbb_image.py local    --digest D
        wbb_image.py trial    --digest D --previous S --snapshot <YYYYMMDD>T<HHMMSS>Z-<sha>-pre.db
        wbb_image.py audit    --digest D
        wbb_image.py activate --digest D
@@ -19,15 +21,19 @@ Usage: wbb_image.py pull     --sha <40 hex> --digest sha256:<64 hex>
        wbb_image.py prune    --keep sha256:<64 hex> [--keep …]
 D, S: local images of our repository (`inspect_ours`). The snapshot is a NAME in the snapshot root, never a path.
 
-Output: the verdict is the last line on stdout —
+Output on stdout — the only line, except: `trial` prints a line per step and its verdict is the LAST one;
+`audit` prints its verdict FIRST and npm's details after it (plan b-core "Рішення" п.9) —
   `PULLED <D> <image id> content=<wbb.content> revision=<sha>`
+  `LOCAL <D> <image id> content=<wbb.content> revision=<sha>` — D is already here (no network, no pull, no
+  free-space check); or `NOT LOCAL <D>` (exit 3): no local image at D, the caller pulls it
   trial, one line per step: `TRIAL OK: …` (trial-migrate's own line), `START OK <revision of D>`,
   `COMPAT OK <S>`; or, ending it, `TRIAL FAILED: …`, `START FAILED: …` or `COMPAT FAILED: <S's start-check line>`
   (exit 1) — S's `START FAILED: …`, or `START TIMEOUT: …` (S did not answer on the copy D has just started
   on, under the same confinement: spec §6.3). An exit 1 is a verdict only with its FAILED line; START (D)
-  TIMEOUT, START KILLED (OOM) and anything else are 75. The containers' output tails go to stderr. Each step
-  runs in a container of its own on the same private copy of the snapshot, checked against its .sha256:
-  TRIAL migrates it with D, START starts D on it, COMPAT starts S on what D left.
+  TIMEOUT, START KILLED (OOM) and anything else are 75. The containers' output tails go to stderr, after
+  the REFUSED/TEMPFAIL line when there is one. Each step runs in a container of its own on the same private
+  copy of the snapshot, checked against its .sha256: TRIAL migrates it with D, START starts D on it, COMPAT
+  starts S on what D left.
   `AUDIT CLEAN <D>`; or `AUDIT ADVISORY <D>` followed by the verdict's own lines (exit 1)
   `ACTIVATED <D>`; or `ACTIVATE FAILED: restart exited <n>: <stderr tail>` (exit 1: the Quadlet file names D and
   systemd could not start it)
@@ -38,9 +44,12 @@ Exit (as deploy/release/wbb_release.py):
    1  ONLY with a verdict on the candidate on stdout: TRIAL FAILED, START FAILED, COMPAT FAILED, AUDIT ADVISORY,
       ACTIVATE FAILED
    2  refused: an input or a precondition (`REFUSED: …` on stderr) — not a verdict on the candidate
+   3  `local` only: `NOT LOCAL <D>` — a normal state, not an error
   64  usage
   70  internal error (a traceback on stderr); also a module of the helper that fails to import
   75  could not judge now — retry (`TEMPFAIL: …` on stderr): podman failed or timed out, a registry is down
+On 2 and 75 the FIRST line of stderr is the one `REFUSED: …` / `TEMPFAIL: …` line (multi-line reasons are joined);
+anything for a human (container output tails, a container left behind) comes after it.
 """
 import argparse
 import dataclasses
@@ -70,6 +79,7 @@ except Exception:
 
 EX_FAILED = 1
 EX_REFUSED = 2
+EX_NOT_LOCAL = 3
 EX_USAGE = 64
 EX_TEMPFAIL = 75
 
@@ -111,6 +121,10 @@ SNAPSHOT = re.compile(r'[0-9]{8}T[0-9]{6}Z-[0-9a-f]{7,40}-pre\.db')
 
 class Refused(Exception):
     """An input or a precondition: exit 2, never a verdict on the candidate."""
+
+
+class NotLocal(Refused):
+    """No local image at the digest: a refusal everywhere but `local`, where it is the answer (exit 3)."""
 
 
 class TempFail(Exception):
@@ -228,7 +242,7 @@ def inspect_ours(host, digest):
     if r.returncode != 0:
         err = r.stderr or ''
         if 'image not known' in err or 'no such image' in err.lower():
-            raise Refused(f'{ref} is not a local image')
+            raise NotLocal(f'{ref} is not a local image')
         raise TempFail(f'podman image inspect exited {r.returncode}: {_tail(err)}')
     try:
         data = json.loads(r.stdout)
@@ -264,10 +278,27 @@ def pull(host, sha, digest):
     revision = image['Labels'][REVISION_LABEL]
     if revision != sha:
         raise Refused(f'{ref}: label {REVISION_LABEL} is {revision}, expected {sha}')
+    return f'PULLED {digest} {image["Id"]} content={_content(ref, image)} revision={sha}'
+
+
+def _content(ref, image):
     content = image['Labels'].get(CONTENT_LABEL)
     if not (isinstance(content, str) and CONTENT.fullmatch(content)):
         raise Refused(f'{ref}: label {CONTENT_LABEL} is {content!r}, not 64 hex')
-    return f'PULLED {digest} {image["Id"]} content={content} revision={sha}'
+    return content
+
+
+def local(host, digest):
+    """Whether D is here already, by `image inspect` alone: the rollback target is checked without the registry
+    (plan b-core "Рішення" п.10). The same identity as `inspect_ours`: RepoDigests name REPOSITORY@D."""
+    ref = image_ref(digest)
+    try:
+        image = inspect_ours(host, digest)
+    except NotLocal:
+        print(f'NOT LOCAL {digest}')
+        return EX_NOT_LOCAL
+    print(f'LOCAL {digest} {image["Id"]} content={_content(ref, image)} revision={image["Labels"][REVISION_LABEL]}')
+    return 0
 
 
 # --- what runs now (spec §3.2, "Рішення" п.9) ---
@@ -391,11 +422,10 @@ def _in_container(host, action, step, digest, command, timeout, *, network, volu
         try:
             r = host.run([host.podman, 'rm', '-f', '-i', name], timeout=REMOVE_TIMEOUT_S, text=True)
         except subprocess.TimeoutExpired:
-            print(f'wbb-image: podman rm -f -i {name} timed out', file=sys.stderr)
+            _note(f'wbb-image: podman rm -f -i {name} timed out')
         else:
             if r.returncode != 0:
-                print(f'wbb-image: podman rm -f -i {name} exited {r.returncode}: {_one_line(_tail(r.stderr))}',
-                      file=sys.stderr)
+                _note(f'wbb-image: podman rm -f -i {name} exited {r.returncode}: {_one_line(_tail(r.stderr))}')
 
 
 def _first_line(text):
@@ -407,12 +437,21 @@ def _said(first):
     return f': {first}' if first else ''
 
 
+# Lines for a human that go to stderr only after the verdict: a caller reads `REFUSED:` / `TEMPFAIL:` as the FIRST
+# line of stderr (plan b-core "Рішення" п.9), so no container output may come before it. main() empties it.
+_NOTES = []
+
+
+def _note(text):
+    _NOTES.append(text)
+
+
 def _report(step, r):
-    """A step's output tail on stderr, for a human; never parsed."""
-    print(f'[{step} exited {r.returncode}]', file=sys.stderr)
+    """A step's output tail, for a human, after the verdict; never parsed."""
+    _note(f'[{step} exited {r.returncode}]')
     for stream in (r.stdout, r.stderr):
         if _tail(stream):
-            print(_tail(stream), file=sys.stderr)
+            _note(_tail(stream))
 
 
 def _check_scratch_root(host):
@@ -795,7 +834,7 @@ def prune(host, keep):
 def _parser():
     # No -h/--help: argparse would exit 0 on it, the code of "done" (an unknown option is 64 instead).
     ap = argparse.ArgumentParser(prog='wbb-image', add_help=False,
-                                 description='Pull, trial, audit, activate, inspect or prune the bot image on this host.')
+                                 description='Pull, check, trial, audit, activate, inspect or prune the bot image.')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('pull', add_help=False)
     p.add_argument('--sha', required=True)
@@ -804,6 +843,7 @@ def _parser():
     t.add_argument('--digest', required=True)
     t.add_argument('--previous', required=True)
     t.add_argument('--snapshot', required=True)
+    sub.add_parser('local', add_help=False).add_argument('--digest', required=True)
     sub.add_parser('audit', add_help=False).add_argument('--digest', required=True)
     sub.add_parser('activate', add_help=False).add_argument('--digest', required=True)
     sub.add_parser('current', add_help=False)
@@ -816,6 +856,8 @@ def _run(a, host):
         return trial(host, a.digest, a.previous, a.snapshot)
     if a.cmd == 'audit':
         return audit(host, a.digest)
+    if a.cmd == 'local':
+        return local(host, a.digest)
     if a.cmd == 'pull':
         print(pull(host, a.sha, a.digest))
     elif a.cmd == 'activate':
@@ -827,22 +869,32 @@ def _run(a, host):
     return 0
 
 
+def _verdict_line(kind, e):
+    """`REFUSED: …` / `TEMPFAIL: …` as one line: a message may carry podman's multi-line stderr."""
+    return f'{kind}: ' + ' '.join(str(e).splitlines())
+
+
 def main(argv, host=PRODUCTION):
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:
         return EX_USAGE if e.code else 0
+    _NOTES.clear()
     try:
         return _run(a, host)
     except Refused as e:
-        print(f'REFUSED: {e}', file=sys.stderr)
+        print(_verdict_line('REFUSED', e), file=sys.stderr)
         return EX_REFUSED
     except TempFail as e:
-        print(f'TEMPFAIL: {e}', file=sys.stderr)
+        print(_verdict_line('TEMPFAIL', e), file=sys.stderr)
         return EX_TEMPFAIL
     except Exception:
         traceback.print_exc()
         return EX_SOFTWARE
+    finally:
+        for line in _NOTES:
+            print(line, file=sys.stderr)
+        _NOTES.clear()
 
 
 if __name__ == '__main__':

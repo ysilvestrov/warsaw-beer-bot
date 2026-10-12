@@ -1,0 +1,4 @@
+exit=3
+--- stdout
+NOT LOCAL sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+--- stderr

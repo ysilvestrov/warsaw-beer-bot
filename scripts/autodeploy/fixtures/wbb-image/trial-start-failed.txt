@@ -1,0 +1,9 @@
+exit=1
+--- stdout
+TRIAL OK: schema 46 -> 47
+START FAILED: /health answered {"ok":false}
+--- stderr
+[start exited 1]
+START FAILED: /health answered {"ok":false}
+output tail:
+bot launched

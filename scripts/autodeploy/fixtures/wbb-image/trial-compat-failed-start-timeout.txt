@@ -1,0 +1,10 @@
+exit=1
+--- stdout
+TRIAL OK: schema 46 -> 47
+START OK 1111111111111111111111111111111111111111
+COMPAT FAILED: START TIMEOUT: no "api listening" within 90s
+--- stderr
+[compat exited 75]
+START TIMEOUT: no "api listening" within 90s
+output tail:
+bot launched

@@ -1,0 +1,4 @@
+exit=0
+--- stdout
+AUDIT CLEAN sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+--- stderr

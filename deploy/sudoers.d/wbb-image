@@ -14,6 +14,7 @@
 # If the operator user is not `ysi`, change `ysi` below to match.
 
 ysi ALL=(root) NOPASSWD: /usr/local/libexec/wbb-image pull --sha * --digest *, \
+    /usr/local/libexec/wbb-image local --digest *, \
     /usr/local/libexec/wbb-image audit --digest *, \
     /usr/local/libexec/wbb-image trial --digest * --previous * --snapshot *, \
     /usr/local/libexec/wbb-image activate --digest *, \

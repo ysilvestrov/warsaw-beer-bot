@@ -1,0 +1,4 @@
+exit=75
+--- stdout
+--- stderr
+TEMPFAIL: podman pull ghcr.io/ysilvestrov/warsaw-beer-bot@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd exited 125: Error: initializing source docker://ghcr.io/ysilvestrov/warsaw-beer-bot: pinging container registry ghcr.io: connection refused

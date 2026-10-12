@@ -1,0 +1,10 @@
+exit=1
+--- stdout
+TRIAL OK: schema 46 -> 47
+START OK 1111111111111111111111111111111111111111
+COMPAT FAILED: START FAILED: bot exited (code 1) before "api listening"
+--- stderr
+[compat exited 1]
+START FAILED: bot exited (code 1) before "api listening"
+output tail:
+SqliteError: no such column: venue

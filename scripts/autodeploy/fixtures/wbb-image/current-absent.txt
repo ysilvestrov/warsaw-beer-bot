@@ -1,0 +1,4 @@
+exit=0
+--- stdout
+CURRENT quadlet=none container-image=none container-digest=none unit=absent
+--- stderr

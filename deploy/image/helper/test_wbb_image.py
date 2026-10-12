@@ -219,6 +219,12 @@ class Pull(HelperCase):
         code, _, err = self.main(['pull', '--sha', X, '--digest', D1], runner)
         self.assertEqual((code, err), (75, f'TEMPFAIL: podman pull {REPO}@{D1} exited 1: ' + 'x' * 1997 + 'END\n'))
 
+    def test_a_multi_line_reason_stays_one_verdict_line(self):
+        runner = FakeRunner(done(125, stderr='Error: initializing source\nTEMPFAIL: not ours\nREFUSED: neither\n'))
+        self.assertEqual(self.main(['pull', '--sha', X, '--digest', D1], runner),
+                         (75, '', f'TEMPFAIL: podman pull {REPO}@{D1} exited 125: Error: initializing source '
+                                  'TEMPFAIL: not ours REFUSED: neither\n'))
+
     def test_a_pull_that_times_out_is_tempfail(self):
         runner = FakeRunner(subprocess.TimeoutExpired(PULL_ARGV, 600))
         self.assertEqual(self.main(['pull', '--sha', X, '--digest', D1], runner),
@@ -234,6 +240,66 @@ class Pull(HelperCase):
         runner = FakeRunner(done(), done(125, stderr='Error: database is locked\n'))
         self.assertEqual(self.main(['pull', '--sha', X, '--digest', D1], runner),
                          (75, '', 'TEMPFAIL: podman image inspect exited 125: Error: database is locked\n'))
+
+
+class Local(HelperCase):
+    """`local`: is D here already — `image inspect` only, no pull, no free-space check (plan b-core п.10)."""
+
+    def test_an_image_of_ours_that_is_here(self):
+        runner = FakeRunner(done(stdout=image_json()))
+        self.assertEqual(self.main(['local', '--digest', D1], runner),
+                         (0, f'LOCAL {D1} {I1} content={CONTENT} revision={X}\n', ''))
+        self.assertEqual((runner.calls, self.free_asked), ([(INSPECT_ARGV, 60, True)], []))
+
+    def test_the_revision_printed_is_the_images_own_label(self):
+        runner = FakeRunner(done(stdout=image_json(Labels={'org.opencontainers.image.revision': OTHER_SHA,
+                                                           'wbb.content': CONTENT})))
+        self.assertEqual(self.main(['local', '--digest', D1], runner),
+                         (0, f'LOCAL {D1} {I1} content={CONTENT} revision={OTHER_SHA}\n', ''))
+
+    def test_no_image_at_the_digest_is_not_local_exit_3(self):
+        for stderr in (f'Error: {REPO}@{D1}: image not known\n', 'Error: no such image\n'):
+            with self.subTest(stderr=stderr):
+                runner = FakeRunner(done(125, stderr=stderr))
+                self.assertEqual(self.main(['local', '--digest', D1], runner), (3, f'NOT LOCAL {D1}\n', ''))
+                self.assertEqual(self.argvs(runner), [INSPECT_ARGV])
+
+    def test_an_image_that_is_not_ours_is_refused(self):
+        ref = f'{REPO}@{D1}'
+        rev = 'org.opencontainers.image.revision'
+        for name, inspect, message in (
+            ('repo digests', image_json(RepoDigests=[f'ghcr.io/someone/else@{D1}']),
+             f"{ref}: RepoDigests ['ghcr.io/someone/else@{D1}'] do not name it — not an image of {REPO}"),
+            ('no revision', image_json(Labels={'wbb.content': CONTENT}), f'{ref}: label {rev} is None, not a full SHA'),
+            ('no content', image_json(Labels={rev: X}), f'{ref}: label wbb.content is None, not 64 hex'),
+            ('bad id', image_json(Id='zz'), f"{ref}: image Id 'zz' is not 64 hex"),
+            ('not json', 'oops', f"podman image inspect of {ref}: not JSON: 'oops'"),
+        ):
+            with self.subTest(name):
+                runner = FakeRunner(done(stdout=inspect))
+                self.assertEqual(self.main(['local', '--digest', D1], runner), (2, '', f'REFUSED: {message}\n'))
+                self.assertEqual(self.argvs(runner), [INSPECT_ARGV])
+
+    def test_a_failing_inspect_is_tempfail(self):
+        runner = FakeRunner(done(125, stderr='Error: database is locked\n'))
+        self.assertEqual(self.main(['local', '--digest', D1], runner),
+                         (75, '', 'TEMPFAIL: podman image inspect exited 125: Error: database is locked\n'))
+
+    def test_an_inspect_that_times_out_is_tempfail(self):
+        runner = FakeRunner(subprocess.TimeoutExpired('podman', 60))
+        self.assertEqual(self.main(['local', '--digest', D1], runner),
+                         (75, '', 'TEMPFAIL: podman image inspect timed out after 60s\n'))
+
+    def test_an_invalid_digest_is_refused_before_any_call(self):
+        runner = FakeRunner()
+        self.assertEqual(self.main(['local', '--digest', D1.upper()], runner),
+                         (2, '', f'REFUSED: not a sha256:<64 lowercase hex> digest: {D1.upper()!r}\n'))
+        self.assertEqual(runner.calls, [])
+
+    def test_not_local_is_still_a_refusal_for_every_other_action(self):
+        runner = FakeRunner(done(125, stderr='Error: image not known\n'))
+        self.assertEqual(self.main(['audit', '--digest', D1], runner),
+                         (2, '', f'REFUSED: {REPO}@{D1} is not a local image\n'))
 
 
 class InspectOurs(HelperCase):
@@ -457,7 +523,7 @@ class Usage(HelperCase):
         for argv in ([], ['frobnicate'], ['current', 'extra'], ['current', '--sha', X], ['prune'],
                      ['pull', '--sha', X], ['pull', '--digest', D1], ['pull', '--sha', X, '--digest', D1, 'x'],
                      ['prune', '--keep'], ['-h'], ['--help'], ['pull', '-h'], ['current', '--help'],
-                     ['prune', '--keep', D1, '-h']):
+                     ['prune', '--keep', D1, '-h'], ['local'], ['local', '--digest', D1, '--sha', X]):
             with self.subTest(argv=argv):
                 runner = FakeRunner()
                 code, out, _ = self.main(argv, runner)
@@ -599,62 +665,63 @@ class Trial(HelperCase):
 
     def test_every_exit_of_every_step_has_its_verdict(self):
         rows = [
-            # step, the step's answer, exit, what it adds to stdout, stderr
+            # step, the step's answer, exit, what it adds to stdout, stderr (a REFUSED/TEMPFAIL line comes first:
+            # the controller reads it as the first line of stderr; the step's output tail follows it)
             ('migrate', done(1, 'TRIAL FAILED: no such table: x\n', 'at migrate\n'), 1,
              'TRIAL FAILED: no such table: x\n', '[trial exited 1]\nTRIAL FAILED: no such table: x\nat migrate\n'),
             ('migrate', done(0, 'migrated\n'), 2, '',
-             f"[trial exited 0]\nmigrated\nREFUSED: trial-migrate in {D1} exited 0 with 'migrated', not TRIAL OK\n"),
+             f"REFUSED: trial-migrate in {D1} exited 0 with 'migrated', not TRIAL OK\n[trial exited 0]\nmigrated\n"),
             ('migrate', done(64, '', 'usage: trial-migrate <clone_dir> <db_copy>\n'), 75, '',
-             '[trial exited 64]\nusage: trial-migrate <clone_dir> <db_copy>\n'
-             f'TEMPFAIL: trial-migrate in {D1} exited 64\n'),
-            ('migrate', done(137), 75, '', f'[trial exited 137]\nTEMPFAIL: trial-migrate in {D1} exited 137\n'),
+             f'TEMPFAIL: trial-migrate in {D1} exited 64\n'
+             '[trial exited 64]\nusage: trial-migrate <clone_dir> <db_copy>\n'),
+            ('migrate', done(137), 75, '', f'TEMPFAIL: trial-migrate in {D1} exited 137\n[trial exited 137]\n'),
             ('migrate', done(125, '', 'Error: no space left\n'), 75, '',
-             f'[trial exited 125]\nError: no space left\nTEMPFAIL: trial-migrate in {D1} exited 125\n'),
+             f'TEMPFAIL: trial-migrate in {D1} exited 125\n[trial exited 125]\nError: no space left\n'),
             ('start', done(1, 'START FAILED: /health answered 500\noutput tail:\nboom\n'), 1,
              'START FAILED: /health answered 500\n',
              '[start exited 1]\nSTART FAILED: /health answered 500\noutput tail:\nboom\n'),
             ('start', done(0, f'START OK {OTHER_SHA}\n'), 2, '',
-             f'[start exited 0]\nSTART OK {OTHER_SHA}\nREFUSED: start-check in {D1} exited 0 with '
-             f"'START OK {OTHER_SHA}', expected START OK {X}\n"),
+             f"REFUSED: start-check in {D1} exited 0 with 'START OK {OTHER_SHA}', expected START OK {X}\n"
+             f'[start exited 0]\nSTART OK {OTHER_SHA}\n'),
             ('start', done(0, ''), 2, '',
-             f"[start exited 0]\nREFUSED: start-check in {D1} exited 0 with '', expected START OK {X}\n"),
+             f"REFUSED: start-check in {D1} exited 0 with '', expected START OK {X}\n[start exited 0]\n"),
             ('start', done(75, 'START TIMEOUT: no "api listening" within 90s\n'), 75, '',
-             '[start exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'
-             f'TEMPFAIL: start-check in {D1} exited 75: START TIMEOUT: no "api listening" within 90s\n'),
-            ('start', done(137), 75, '', f'[start exited 137]\nTEMPFAIL: start-check in {D1} exited 137\n'),
+             f'TEMPFAIL: start-check in {D1} exited 75: START TIMEOUT: no "api listening" within 90s\n'
+             '[start exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'),
+            ('start', done(137), 75, '', f'TEMPFAIL: start-check in {D1} exited 137\n[start exited 137]\n'),
             ('compat', done(1, 'START FAILED: bot exited (code 1) before "api listening"\n'), 1,
              'COMPAT FAILED: START FAILED: bot exited (code 1) before "api listening"\n',
              '[compat exited 1]\nSTART FAILED: bot exited (code 1) before "api listening"\n'),
             ('compat', done(0, f'START OK {X}\n'), 2, '',
-             f"[compat exited 0]\nSTART OK {X}\nREFUSED: start-check in {D2} exited 0 with 'START OK {X}', "
-             f'expected START OK {OTHER_SHA}\n'),
+             f"REFUSED: start-check in {D2} exited 0 with 'START OK {X}', expected START OK {OTHER_SHA}\n"
+             f'[compat exited 0]\nSTART OK {X}\n'),
             ('compat', done(64, '', 'usage: start-check.cjs [--timeout <seconds>]\n'), 2, '',
-             '[compat exited 64]\nusage: start-check.cjs [--timeout <seconds>]\n'
-             f'REFUSED: previous image {D2} predates start-check --leave-running\n'),
+             f'REFUSED: previous image {D2} predates start-check --leave-running\n'
+             '[compat exited 64]\nusage: start-check.cjs [--timeout <seconds>]\n'),
             # Spec §6.3: S that does not answer on the copy D has just started on is a verdict on the data.
             ('compat', done(75, 'START TIMEOUT: no "api listening" within 90s\n'), 1,
              'COMPAT FAILED: START TIMEOUT: no "api listening" within 90s\n',
              '[compat exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'),
-            ('compat', done(137), 75, '', f'[compat exited 137]\nTEMPFAIL: start-check in {D2} exited 137\n'),
+            ('compat', done(137), 75, '', f'TEMPFAIL: start-check in {D2} exited 137\n[compat exited 137]\n'),
             # The kernel killed the bot (OOM under --memory): could not judge, for either image.
             ('start', done(75, 'START KILLED: bot killed by SIGKILL\n'), 75, '',
-             '[start exited 75]\nSTART KILLED: bot killed by SIGKILL\n'
-             f'TEMPFAIL: start-check in {D1} exited 75: START KILLED: bot killed by SIGKILL\n'),
+             f'TEMPFAIL: start-check in {D1} exited 75: START KILLED: bot killed by SIGKILL\n'
+             '[start exited 75]\nSTART KILLED: bot killed by SIGKILL\n'),
             ('compat', done(75, 'START KILLED: bot killed by SIGKILL\n'), 75, '',
-             '[compat exited 75]\nSTART KILLED: bot killed by SIGKILL\n'
-             f'TEMPFAIL: start-check in {D2} exited 75: START KILLED: bot killed by SIGKILL\n'),
+             f'TEMPFAIL: start-check in {D2} exited 75: START KILLED: bot killed by SIGKILL\n'
+             '[compat exited 75]\nSTART KILLED: bot killed by SIGKILL\n'),
             ('compat', done(75, '', 'Error: OCI runtime error\n'), 75, '',
-             f'[compat exited 75]\nError: OCI runtime error\nTEMPFAIL: start-check in {D2} exited 75\n'),
+             f'TEMPFAIL: start-check in {D2} exited 75\n[compat exited 75]\nError: OCI runtime error\n'),
             # An exit 1 is a verdict only with its own FAILED line (node itself exits 1 on a crash).
             ('migrate', done(1, '', 'node:internal/modules/cjs/loader:1228\n'), 75, '',
-             '[trial exited 1]\nnode:internal/modules/cjs/loader:1228\n'
-             f'TEMPFAIL: trial-migrate in {D1} exited 1\n'),
+             f'TEMPFAIL: trial-migrate in {D1} exited 1\n'
+             '[trial exited 1]\nnode:internal/modules/cjs/loader:1228\n'),
             ('migrate', done(1, 'START FAILED: x\n'), 75, '',
-             f'[trial exited 1]\nSTART FAILED: x\nTEMPFAIL: trial-migrate in {D1} exited 1: START FAILED: x\n'),
+             f'TEMPFAIL: trial-migrate in {D1} exited 1: START FAILED: x\n[trial exited 1]\nSTART FAILED: x\n'),
             ('start', done(1, 'Error: boom\n'), 75, '',
-             f'[start exited 1]\nError: boom\nTEMPFAIL: start-check in {D1} exited 1: Error: boom\n'),
+             f'TEMPFAIL: start-check in {D1} exited 1: Error: boom\n[start exited 1]\nError: boom\n'),
             ('compat', done(1, 'TRIAL FAILED: x\n'), 75, '',
-             f'[compat exited 1]\nTRIAL FAILED: x\nTEMPFAIL: start-check in {D2} exited 1: TRIAL FAILED: x\n'),
+             f'TEMPFAIL: start-check in {D2} exited 1: TRIAL FAILED: x\n[compat exited 1]\nTRIAL FAILED: x\n'),
         ]
         for step, answer, code, printed, err in rows:
             with self.subTest(step=step, code=answer.returncode, stdout=answer.stdout):
@@ -677,8 +744,10 @@ class Trial(HelperCase):
     def test_our_own_candidate_not_knowing_leave_running_is_an_internal_error(self):
         runner = FakeRunner(*self.PREFIX['start'], done(64, '', 'usage: start-check.cjs\n'), done())
         code, out, err = self.main(TRIAL_ARGV, runner)
-        self.assertEqual((code, out, err.splitlines()[-1]),
-                         (70, 'TRIAL OK: schema 46 -> 47\n', f"RuntimeError: start-check in {D1} refused its usage (64): ''"))
+        self.assertEqual((code, out, err.splitlines()[-3:]),
+                         (70, 'TRIAL OK: schema 46 -> 47\n',
+                          [f"RuntimeError: start-check in {D1} refused its usage (64): ''", '[start exited 64]',
+                           'usage: start-check.cjs']))
         self.assertEqual(os.listdir(self.scratch), [])
 
     def test_an_exception_inside_a_step_removes_its_container_and_the_scratch(self):
@@ -889,7 +958,7 @@ class Audit(HelperCase):
             with self.subTest(code=code):
                 runner = FakeRunner(INSPECT_D1, done(code, '', 'npm ERR! network\n'), done())
                 self.assertEqual(self.main(['audit', '--digest', D1], runner),
-                                 (75, '', f'[audit exited {code}]\nnpm ERR! network\nTEMPFAIL: audit in {D1} exited {code}\n'))
+                                 (75, '', f'TEMPFAIL: audit in {D1} exited {code}\n[audit exited {code}]\nnpm ERR! network\n'))
                 self.assertEqual(self.argvs(runner)[-1], removed('audit', 'audit'))
 
     def test_a_timeout_could_not_audit(self):

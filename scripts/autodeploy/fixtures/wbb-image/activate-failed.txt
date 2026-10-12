@@ -1,0 +1,4 @@
+exit=1
+--- stdout
+ACTIVATE FAILED: restart exited 1: Job for warsaw-beer-bot.service failed because the control process exited with error code. See "systemctl status warsaw-beer-bot.service" and "journalctl -xeu warsaw-beer-bot.service" for details.
+--- stderr
