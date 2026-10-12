@@ -14,10 +14,17 @@
 // unhandled rejection still ends the bot and fails the check (#842 AI review). `api listening` is logged after the startup backfills and the
 // bot launch (src/index.ts), so reaching it means the startup transformations ran.
 //
-// Usage: node start-check.cjs [--timeout <seconds>] [--entry <file>]
-//        --timeout  how long to wait for `api listening` (default 60)
-//        --entry    the bot to start (default <app>/dist/index.js, <app> = two levels up)
+// Usage: node start-check.cjs [--timeout <seconds>] [--entry <file>] [--leave-running]
+//        --timeout        how long to wait for `api listening` (default 60)
+//        --entry          the bot to start (default <app>/dist/index.js, <app> = two levels up)
+//        --leave-running  exit right after the verdict without stopping the bot. Only for this
+//                         script as PID 1 of a container (the host's compat check, the CI smoke):
+//                         under the host's AppArmor no process in a container may signal another
+//                         one of it (spec §2 V11: kill → EACCES), and the PID namespace teardown
+//                         that follows PID 1's exit kills the bot instead (a kernel SIGKILL that
+//                         AppArmor does not check). Outside a container the bot would be orphaned.
 // Exit:  0 `START OK <releaseSha>`, 1 `START FAILED: <reason>` then the output tail,
+//        75 `START TIMEOUT: …` then the tail — could not judge, not a verdict on the bot (§6.3),
 //        64 usage. Everything goes to stdout; the verdict is the first line.
 const { spawn } = require('node:child_process');
 const path = require('node:path');
@@ -34,12 +41,18 @@ const UNHANDLED = 'start-check: unhandled rejection:';
 // `api listening` ends it within this time.
 const SETTLE_MS = 1000;
 const TAIL_CHARS = 4000;
+const EX_TEMPFAIL = 75;
 
 function parseArgs(argv) {
-  const opts = { timeoutS: DEFAULT_TIMEOUT_S, entry: path.join(APP, 'dist', 'index.js') };
-  for (let i = 0; i < argv.length; i += 2) {
+  const opts = { timeoutS: DEFAULT_TIMEOUT_S, entry: path.join(APP, 'dist', 'index.js'), leaveRunning: false };
+  for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
+    if (flag === '--leave-running') {
+      opts.leaveRunning = true;
+      continue;
+    }
     const value = argv[i + 1];
+    i += 1;
     if (flag === '--timeout' && /^[1-9][0-9]{0,4}$/.test(value ?? '')) opts.timeoutS = Number(value);
     else if (flag === '--entry' && value) opts.entry = path.resolve(value);
     else return null;
@@ -114,8 +127,8 @@ async function main(argv) {
   const opts = parseArgs(argv);
   const port = apiPort(process.env);
   if (!opts || port === null) {
-    console.error('usage: start-check.cjs [--timeout <seconds>] [--entry <file>]  (API_PORT, if set, a positive integer)');
-    return 64;
+    console.error('usage: start-check.cjs [--timeout <seconds>] [--entry <file>] [--leave-running]  (API_PORT, if set, a positive integer)');
+    return { code: 64, leave: false };
   }
   const bot = startBot(opts.entry);
   let timer;
@@ -138,18 +151,21 @@ async function main(argv) {
   } else if (outcome.kind === 'error') {
     verdict = { ok: false, reason: `bot did not start: ${outcome.message}` };
   } else {
-    verdict = { ok: false, reason: `no "${READY}" within ${opts.timeoutS}s` };
+    verdict = { ok: false, timeout: true, reason: `no "${READY}" within ${opts.timeoutS}s` };
   }
-  await stop(bot.child);
+  if (!opts.leaveRunning) await stop(bot.child);
   if (verdict.ok) {
     console.log(`START OK ${verdict.releaseSha}`);
-    return 0;
+    return { code: 0, leave: opts.leaveRunning };
   }
-  console.log(`START FAILED: ${verdict.reason}`);
+  console.log(`${verdict.timeout ? 'START TIMEOUT' : 'START FAILED'}: ${verdict.reason}`);
   console.log(`output tail:\n${bot.tail()}`);
-  return 1;
+  return { code: verdict.timeout ? EX_TEMPFAIL : 1, leave: opts.leaveRunning };
 }
 
-main(process.argv.slice(2)).then((code) => {
+main(process.argv.slice(2)).then(({ code, leave }) => {
+  // The bot still holds the pipes and keeps the event loop alive: exit now, and the
+  // container's end takes it down. stdout is a pipe or a file, written synchronously on Linux.
+  if (leave) process.exit(code);
   process.exitCode = code;
 });

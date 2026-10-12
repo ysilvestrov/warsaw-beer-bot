@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,8 +13,13 @@ import { join, resolve } from 'node:path';
 const START_CHECK = resolve(__dirname, '..', 'deploy/image/start-check.cjs');
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 const dirs: string[] = [];
+// Bots left running by --leave-running (outside a container nothing else ends them).
+const leftRunning: number[] = [];
 
 afterEach(() => {
+  for (const pid of leftRunning.splice(0)) {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -54,6 +59,7 @@ function servingBot(dir: string, health: { status: number; body: unknown }, onLi
     '});',
     `server.listen(port, '127.0.0.1', () => { ${onListening} });`,
     "process.once('SIGTERM', () => { fs.writeFileSync(process.env.STOP_MARKER, 'stopped by SIGTERM'); process.exit(0); });",
+    "if (process.env.PID_FILE) fs.writeFileSync(process.env.PID_FILE, String(process.pid));",
   ].join('\n'));
   return file;
 }
@@ -125,14 +131,15 @@ describe('start-check', () => {
     });
   });
 
-  test('a bot that never logs api listening is START FAILED at the timeout', async () => {
+  // Spec §6.3: a START that timed out could not be judged — 75, never a verdict on the candidate.
+  test('a bot that never logs api listening is START TIMEOUT, exit 75', async () => {
     const dir = scratch();
     const bot = join(dir, 'silent.cjs');
     writeFileSync(bot, "process.stdout.write('waiting for telegram\\n'); setInterval(() => {}, 1000);");
     const r = run(['--entry', bot, '--timeout', '1'], { API_PORT: String(await freePort()) });
     expect(r).toEqual({
-      status: 1,
-      stdout: 'START FAILED: no "api listening" within 1s\noutput tail:\nwaiting for telegram\n\n',
+      status: 75,
+      stdout: 'START TIMEOUT: no "api listening" within 1s\noutput tail:\nwaiting for telegram\n\n',
       stderr: '',
     });
   });
@@ -161,7 +168,46 @@ describe('start-check', () => {
     expect(r.stdout.split('\n')[0]).toBe('START FAILED: /health answered 200 {"ok":true,"releaseSha":null}');
   });
 
+  // Spec V11: inside a container no process may signal another, so the check leaves the bot to
+  // the PID namespace teardown that follows its own exit.
+  describe('--leave-running', () => {
+    function alive(pid: number): boolean {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    test('a healthy bot is START OK and is neither signalled nor waited for', async () => {
+      const dir = scratch();
+      const bot = servingBot(dir, { status: 200, body: { ok: true, releaseSha: SHA } });
+      const marker = join(dir, 'stopped');
+      const pidFile = join(dir, 'pid');
+      const r = run(['--entry', bot, '--timeout', '10', '--leave-running'],
+        { API_PORT: String(await freePort()), STOP_MARKER: marker, PID_FILE: pidFile });
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      leftRunning.push(pid);
+      expect([r, alive(pid), existsSync(marker)]).toEqual([{ status: 0, stdout: `START OK ${SHA}\n`, stderr: '' }, true, false]);
+    });
+
+    test('a failed /health is START FAILED and the bot is left running too', async () => {
+      const dir = scratch();
+      const bot = servingBot(dir, { status: 200, body: { ok: false, releaseSha: SHA } });
+      const marker = join(dir, 'stopped');
+      const pidFile = join(dir, 'pid');
+      const r = run(['--leave-running', '--entry', bot, '--timeout', '10'],
+        { API_PORT: String(await freePort()), STOP_MARKER: marker, PID_FILE: pidFile });
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      leftRunning.push(pid);
+      expect([r.status, r.stdout.split('\n')[0], alive(pid), existsSync(marker)]).toEqual(
+        [1, `START FAILED: /health answered 200 {"ok":false,"releaseSha":"${SHA}"}`, true, false]);
+    });
+  });
+
   test.each([
+    [['--leave-running', 'x']],
     [['--timeout', '0']],
     [['--timeout', 'soon']],
     [['--timeout']],

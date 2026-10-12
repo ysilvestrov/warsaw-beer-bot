@@ -49,8 +49,9 @@ fail() { # <step> <reason> [output]
   exit 1
 }
 
-# start: the first line is the verdict.
-out=$("$DOCKER" run "${CONFINED[@]}" "${FAKE_ENV[@]}" "$IMAGE" node deploy/image/start-check.cjs 2>&1)
+# start: the first line is the verdict. --leave-running: start-check is PID 1 here, and the
+# container's end stops the bot (spec §6.3, V11 — the host compat check runs it the same way).
+out=$("$DOCKER" run "${CONFINED[@]}" "${FAKE_ENV[@]}" "$IMAGE" node deploy/image/start-check.cjs --leave-running 2>&1)
 code=$?
 first=${out%%$'\n'*}
 [ "$code" -eq 0 ] && [ "$first" = "START OK $SHA" ] \

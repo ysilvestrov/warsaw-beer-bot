@@ -99,7 +99,7 @@ describe('image-smoke.sh', () => {
     expect(start.slice(CONFINED.length)).toEqual([
       '-e', 'TELEGRAM_BOT_TOKEN=123456:abcdefghij', '-e', 'OSRM_BASE_URL=http://x',
       '-e', 'NOMINATIM_USER_AGENT=x', '-e', 'DATABASE_PATH=/tmp/app.db', '-e', 'WBB_RELEASE_REQUIRED=true',
-      '-e', 'API_PORT=3000', 'img:1', 'node', 'deploy/image/start-check.cjs',
+      '-e', 'API_PORT=3000', 'img:1', 'node', 'deploy/image/start-check.cjs', '--leave-running',
     ]);
   });
 

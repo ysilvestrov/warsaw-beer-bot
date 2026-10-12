@@ -75,6 +75,13 @@ describe('image Volume= coverage', () => {
     expect(hostPathLiterals(text)).toEqual(['/var/lib/x/db.sqlite', '/etc/wbb/conf', '/proc/self/fd/${fd}/name']);
   });
 
+  // Spec §3.2: podman's own stop timeout (10 s by default) would cut TimeoutStopSec=20 short.
+  test('the template gives podman the same 20 s stop timeout as systemd', () => {
+    const template = readFileSync(TEMPLATE, 'utf8').split('\n');
+    expect([template.filter((l) => l.startsWith('PodmanArgs=')), template.filter((l) => l.startsWith('TimeoutStopSec='))])
+      .toEqual([['PodmanArgs=--stop-timeout=20'], ['TimeoutStopSec=20']]);
+  });
+
   test('every host path literal in src/ is under a Volume= or needs none', () => {
     const mounted = volumes(readFileSync(TEMPLATE, 'utf8')).map((v) => v.container);
     const covers = [...mounted, ...Object.keys(NO_VOLUME_NEEDED)];

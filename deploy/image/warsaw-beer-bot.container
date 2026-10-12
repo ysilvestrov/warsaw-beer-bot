@@ -21,6 +21,10 @@ ReadOnly=true
 Tmpfs=/tmp
 DropCapability=ALL
 NoNewPrivileges=true
+# The generated ExecStop (`podman rm -f`) waits the container's own stop timeout, 10 s by
+# default, then SIGKILLs: without this TimeoutStopSec=20 below would not reach the bot. Quadlet's
+# StopTimeout= key is not in podman 4.9 (`unsupported key`), hence PodmanArgs (spec §3.2).
+PodmanArgs=--stop-timeout=20
 Network=host
 EnvironmentFile=/etc/warsaw-beer-bot/.env
 Environment=WBB_RELEASE_REQUIRED=true
