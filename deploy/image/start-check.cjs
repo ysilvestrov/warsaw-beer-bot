@@ -141,11 +141,14 @@ async function main(argv) {
   let verdict;
   if (outcome.kind === 'ready') {
     const h = await health(port);
-    if (h.ok) await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    // Settled also after a failed /health: a bot the kernel killed while /health was asked fails the
+    // request first, and its exit is seen only a moment later (#858 AI review).
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
     if (bot.tail().includes(UNHANDLED)) {
       verdict = { ok: false, reason: 'an unhandled rejection other than the offline Telegram launch ended the bot' };
+    } else if (bot.child.signalCode === 'SIGKILL') {
+      verdict = { ok: false, killed: true, reason: `the bot was killed (SIGKILL) after "${READY}"` };
     } else if (!h.ok) verdict = { ok: false, reason: h.reason };
-    else if (bot.child.signalCode === 'SIGKILL') verdict = { ok: false, killed: true, reason: 'the bot was killed (SIGKILL) after a healthy /health' };
     else if (!running(bot.child)) verdict = { ok: false, reason: 'the bot exited after a healthy /health' };
     else verdict = { ok: true, releaseSha: h.releaseSha };
   } else if (outcome.kind === 'exit' && outcome.signal === 'SIGKILL') {
@@ -171,8 +174,9 @@ async function main(argv) {
 }
 
 main(process.argv.slice(2)).then(({ code, leave }) => {
-  // The bot still holds the pipes and keeps the event loop alive: exit now, and the
-  // container's end takes it down. stdout is a pipe or a file, written synchronously on Linux.
-  if (leave) process.exit(code);
   process.exitCode = code;
+  // The bot still holds the pipes and keeps the event loop alive: exit once stdout has taken the
+  // verdict (a pipe is written synchronously on Linux; the callback makes it so anywhere, #858 AI
+  // review), and the container's end takes the bot down.
+  if (leave) process.stdout.write('', () => process.exit(code));
 });

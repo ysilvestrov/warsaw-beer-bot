@@ -693,6 +693,14 @@ class Trial(HelperCase):
                          (1, 'TRIAL FAILED: x\n', 'wbb-image: podman rm -f -i wbb-image-trial-4242-migrate timed out\n'
                                                   '[trial exited 1]\nTRIAL FAILED: x\n'))
 
+    # #858 AI review: a container left behind is said on stderr, never hidden; the verdict stands.
+    def test_a_container_removal_that_fails_is_reported_and_does_not_hide_the_verdict(self):
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2, done(1, 'TRIAL FAILED: x\n'),
+                            done(125, stderr='Error: database is locked\n'))
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (1, 'TRIAL FAILED: x\n', 'wbb-image: podman rm -f -i wbb-image-trial-4242-migrate exited 125: '
+                                                  'Error: database is locked\n[trial exited 1]\nTRIAL FAILED: x\n'))
+
     def test_a_verdict_line_is_cut_to_1000_characters(self):
         runner = FakeRunner(INSPECT_D1, INSPECT_D2, done(1, 'TRIAL FAILED: ' + 'x' * 5000 + '\n'), done())
         code, out, _ = self.main(TRIAL_ARGV, runner)
@@ -986,6 +994,22 @@ class Activate(HelperCase):
                             done(1, stderr='Access denied\n'))
         self.assertEqual(self.main(['activate', '--digest', D1], runner),
                          (75, '', 'TEMPFAIL: systemctl daemon-reload (restore) exited 1: Access denied\n'))
+        self.assertEqual(os.path.lexists(self.quadlet), False)
+
+    # #858 AI review: a reload that fails must not leave D on disk for a later reload or a reboot to start.
+    def test_a_failing_first_reload_puts_the_previous_file_back_and_is_tempfail(self):
+        previous = f'# the one before\nImage={REPO}@{D2}\n'
+        self.write_quadlet(previous)
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (75, '', 'TEMPFAIL: systemctl daemon-reload exited 1: Access denied\n'))
+        self.assertEqual((self.argvs(runner), self.read_quadlet(), os.path.lexists(self.quadlet + '.tmp')),
+                         ([INSPECT_ARGV, SHOW_ARGV, RELOAD], (previous, 0o644), False))
+
+    def test_a_timed_out_first_reload_removes_a_file_there_was_none_of(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), subprocess.TimeoutExpired('systemctl', 60))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (75, '', 'TEMPFAIL: systemctl daemon-reload timed out after 60s\n'))
         self.assertEqual(os.path.lexists(self.quadlet), False)
 
     def test_a_previous_quadlet_path_that_is_not_a_file_is_refused_before_writing(self):

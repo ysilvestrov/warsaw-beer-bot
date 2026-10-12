@@ -386,10 +386,16 @@ def _in_container(host, action, step, digest, command, timeout, *, network, volu
     try:
         return _call(host, argv, timeout, f'{step} in {digest}')
     finally:
+        # The verdict stands either way (the step itself ran); a container left behind is said, not hidden
+        # (#858 AI review): the next run uses another name, and a human sees it in the tick's log.
         try:
-            host.run([host.podman, 'rm', '-f', '-i', name], timeout=REMOVE_TIMEOUT_S, text=True)
+            r = host.run([host.podman, 'rm', '-f', '-i', name], timeout=REMOVE_TIMEOUT_S, text=True)
         except subprocess.TimeoutExpired:
             print(f'wbb-image: podman rm -f -i {name} timed out', file=sys.stderr)
+        else:
+            if r.returncode != 0:
+                print(f'wbb-image: podman rm -f -i {name} exited {r.returncode}: {_one_line(_tail(r.stderr))}',
+                      file=sys.stderr)
 
 
 def _first_line(text):
@@ -672,8 +678,8 @@ def _read_previous(host):
         return f.read(1 << 20)
 
 
-def _restore(host, previous):
-    """Put back what the Quadlet file held before this activate (or no file), and let systemd see it."""
+def _restore_file(host, previous):
+    """Put back what the Quadlet file held before this activate (or no file)."""
     if previous is None:
         try:
             os.unlink(host.quadlet_path)
@@ -682,6 +688,11 @@ def _restore(host, previous):
         _fsync_dir(os.path.dirname(host.quadlet_path))
     else:
         _write_atomically(host.quadlet_path, previous)
+
+
+def _restore(host, previous):
+    """_restore_file, and let systemd see it."""
+    _restore_file(host, previous)
     _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload (restore)')
 
 
@@ -698,7 +709,13 @@ def activate(host, digest):
     previous = _read_previous(host)
     uid, gid = host.bot_ids()
     _write_atomically(host.quadlet_path, render_template(lines, digest, uid, gid).encode('utf-8'))
-    _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload')
+    try:
+        _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload')
+    except TempFail:
+        # Not left naming D on disk (#858 AI review): a later reload or a reboot would start it with nobody
+        # watching. systemd did not reload, so it still holds the previous unit; only the file goes back.
+        _restore_file(host, previous)
+        raise
     after = unit_type(host)
     if after != 'quadlet':
         _restore(host, previous)

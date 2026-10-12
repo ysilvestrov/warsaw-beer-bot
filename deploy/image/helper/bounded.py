@@ -1,6 +1,7 @@
 """subprocess.run with a ceiling on what is kept from stdout and stderr, and on how long it waits.
 
-A verbatim copy of deploy/release/bounded.py for the root helper wbb-image: deploy/release/ is removed in
+A copy of deploy/release/bounded.py for the root helper wbb-image (plus a lock between the reader thread and
+value(), #858 AI review: a descendant still writing after the join grace mutated the deque under value()): deploy/release/ is removed in
 stage «в» of the image transition (plan 2026-10-12-wbb-image-transition-core, "Рішення" п.5), so the helper
 imports nothing from there.
 
@@ -40,6 +41,7 @@ class _Drain:
         self.end = collections.deque()
         self.end_len = 0
         self.dropped = False
+        self.lock = threading.Lock()
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self):
@@ -50,19 +52,24 @@ class _Drain:
                 chunk = self.pipe.read1(64 * 1024)
                 if not chunk:
                     break
-                room = self.cap - len(self.head)
-                if room > 0:
-                    self.head += chunk[:room]
-                    chunk = chunk[room:]
-                if chunk:
-                    self.end.append(chunk)
-                    self.end_len += len(chunk)
-                    while self.end_len - len(self.end[0]) >= self.tail:
-                        self.end_len -= len(self.end.popleft())
-                        self.dropped = True
+                with self.lock:
+                    self._keep(chunk)
         except (OSError, ValueError):
             # A read that failed part-way leaves the capture incomplete: say so (#817 AI review).
-            self.dropped = True
+            with self.lock:
+                self.dropped = True
+
+    def _keep(self, chunk):
+        room = self.cap - len(self.head)
+        if room > 0:
+            self.head += chunk[:room]
+            chunk = chunk[room:]
+        if chunk:
+            self.end.append(chunk)
+            self.end_len += len(chunk)
+            while self.end_len - len(self.end[0]) >= self.tail:
+                self.end_len -= len(self.end.popleft())
+                self.dropped = True
 
     def close(self):
         """Close our end once the reader is done; one still reading (a descendant holds the pipe) keeps it.
@@ -74,11 +81,13 @@ class _Drain:
             self.pipe.close()
 
     def value(self):
-        end = b''.join(self.end)
-        if len(end) > self.tail:
-            end = end[-self.tail:]
-            self.dropped = True
-        return bytes(self.head) + (MARK + end if self.dropped else end)
+        # The reader may still be running (a descendant holds the pipe past the join grace): read under its lock.
+        with self.lock:
+            end = b''.join(self.end)
+            if len(end) > self.tail:
+                end = end[-self.tail:]
+                self.dropped = True
+            return bytes(self.head) + (MARK + end if self.dropped else end)
 
 
 def _terminate(proc, term_grace):

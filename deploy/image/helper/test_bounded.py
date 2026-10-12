@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -237,6 +238,24 @@ class Bounded(unittest.TestCase):
         r = bounded.run(py('import os; print(os.environ["X"], os.getcwd())'), timeout=30, text=True,
                         env={'X': 'y'}, cwd='/')
         self.assertEqual(r.stdout, 'y /\n')
+
+class DrainLock(unittest.TestCase):
+    """#858 AI review: value() reads under the reader's lock, so a reader still running (a descendant holds the
+    pipe past the join grace) cannot mutate the deque under it."""
+
+    def test_value_waits_for_the_readers_lock(self):
+        r, w = os.pipe()
+        os.close(w)
+        drain = bounded._Drain(os.fdopen(r, 'rb'), 10, 10)
+        got = []
+        with drain.lock:
+            t = threading.Thread(target=lambda: got.append(drain.value()))
+            t.start()
+            t.join(0.3)
+            held = (t.is_alive(), list(got))
+        t.join(5)
+        drain.pipe.close()
+        self.assertEqual((held, t.is_alive(), got), ((True, []), False, [b'']))
 
 
 if __name__ == '__main__':

@@ -137,7 +137,22 @@ describe('start-check', () => {
     const bot = servingBot(dir, { status: 200, body: { ok: true, releaseSha: SHA } },
       `${LOG_READY} setTimeout(() => process.kill(process.pid, 'SIGKILL'), 300);`);
     const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()), STOP_MARKER: join(dir, 'm') });
-    expect([r.status, r.stdout.split('\n')[0]]).toEqual([75, 'START KILLED: the bot was killed (SIGKILL) after a healthy /health']);
+    expect([r.status, r.stdout.split('\n')[0]]).toEqual([75, 'START KILLED: the bot was killed (SIGKILL) after "api listening"']);
+  });
+
+  // #858 AI review: killed while /health is asked — the request fails before the exit is seen.
+  test('a bot killed by SIGKILL while /health is asked is START KILLED, not START FAILED', async () => {
+    const dir = scratch();
+    const bot = join(dir, 'oom-on-health.cjs');
+    writeFileSync(bot, [
+      "const http = require('node:http');",
+      'const port = Number(process.env.API_PORT);',
+      "http.createServer(() => process.kill(process.pid, 'SIGKILL')).listen(port, '127.0.0.1', () => {",
+      `  ${LOG_READY}`,
+      '});',
+    ].join('\n'));
+    const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()) });
+    expect([r.status, r.stdout.split('\n')[0]]).toEqual([75, 'START KILLED: the bot was killed (SIGKILL) after "api listening"']);
   });
 
   test('a bot that dies before api listening is START FAILED with its output tail', async () => {
