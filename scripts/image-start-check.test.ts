@@ -35,7 +35,8 @@ async function freePort(): Promise<number> {
 const LOG_READY = "process.stdout.write('{\"level\":30,\"port\":' + port + ',\"msg\":\"api listening\"}\\n');";
 const LOG_READY_SPLIT = "process.stdout.write('{\"msg\":\"api lis'); setTimeout(() => process.stdout.write('tening\"}\\n'), 200);";
 // Like bot.launch() without network: a promise nobody awaits rejects right after startup.
-const REJECT_UNAWAITED = "Promise.reject(new Error('getaddrinfo EAI_AGAIN api.telegram.org'));";
+// The shape node-fetch gives Telegraf 4's getMe without network (node_modules/node-fetch FetchError).
+const REJECT_UNAWAITED = "Promise.reject(Object.assign(new Error('request to https://api.telegram.org/bot123456:abcdefghij/getMe failed, reason: getaddrinfo EAI_AGAIN api.telegram.org'), { name: 'FetchError' }));";
 
 /**
  * A fake bot that serves `health` (status + JSON), then runs `onListening` (by default the
@@ -98,6 +99,17 @@ describe('start-check', () => {
     const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()), STOP_MARKER: join(dir, 'm') });
     expect([r.status, r.stdout.split('\n')[0], r.stdout.includes('start-check: unhandled rejection: SqliteError: no such column: x')]).toEqual([
       1, 'START FAILED: an unhandled rejection other than the offline Telegram launch ended the bot', true]);
+  });
+
+  // #842 AI review: mentioning Telegram is not enough; only the offline getMe FetchError is tolerated.
+  test.each([
+    ['a plain Error naming api.telegram.org', "Promise.reject(new Error('database init failed while handling api.telegram.org'));"],
+    ['a FetchError for another Telegram method', "Promise.reject(Object.assign(new Error('request to https://api.telegram.org/botX/sendMessage failed, reason: x'), { name: 'FetchError' }));"],
+  ])('%s is not the tolerated rejection', async (_name, reject) => {
+    const dir = scratch();
+    const bot = servingBot(dir, { status: 200, body: { ok: true, releaseSha: SHA } }, LOG_READY + reject);
+    const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()), STOP_MARKER: join(dir, 'm') });
+    expect([r.status, r.stdout.split('\n')[0]]).toEqual([1, 'START FAILED: an unhandled rejection other than the offline Telegram launch ended the bot']);
   });
 
   test('a bot that dies before api listening is START FAILED with its output tail', async () => {

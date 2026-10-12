@@ -56,6 +56,9 @@ ARG SOURCE_SHA
 LABEL org.opencontainers.image.revision="${SOURCE_SHA}" \
       org.opencontainers.image.source="https://github.com/ysilvestrov/warsaw-beer-bot"
 COPY --from=build /tmp/app/ /app/
+# COPY creates /app itself 0755; its contents keep the build stage's modes. Only the directory's own
+# inode changes here, so this layer is tiny (the image smoke checks every mode under /app).
+RUN chmod a-w /app
 WORKDIR /app
 ENV NODE_ENV=production HOME=/tmp
 # No USER: the Quadlet unit gives the bot's numeric UID/GID (§3.2).

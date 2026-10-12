@@ -18,7 +18,7 @@ printf '%s\\0' "$@" >> "$FAKE_DIR/calls"; printf '\\x1e' >> "$FAKE_DIR/calls"
 args=" $* "
 case $args in
   *' touch /app/x '*) echo "\${FAKE_TOUCH_MSG-touch: cannot touch '/app/x': Read-only file system}"; exit "\${FAKE_TOUCH:-1}" ;;
-  *' touch /app/package.json '*) echo "\${FAKE_AW_MSG-touch: cannot touch '/app/package.json': Permission denied}"; exit "\${FAKE_AW:-1}" ;;
+  *' find /app ! -type l -perm /222 '*) printf '%s' "\${FAKE_AW_OUT-}"; exit "\${FAKE_AW_CODE:-0}" ;;
   *start-check.cjs*) echo "START OK \${FAKE_START_SHA}"; echo 'bot output'; exit 0 ;;
   *trial-migrate.cjs*) echo "\${FAKE_TRIAL:-TRIAL OK: schema 47 -> 47}"; exit "\${FAKE_TRIAL_CODE:-0}" ;;
   *' cat /app/package.json '*) cat "$FAKE_PACKAGE_JSON" ;;
@@ -86,12 +86,12 @@ describe('image-smoke.sh', () => {
     ].join('\n'));
   });
 
-  it('runs every container read-only, offline, with a tmpfs /tmp and a non-root UID — but the a-w check, which drops only --read-only', () => {
+  it('runs every container read-only, offline, with a tmpfs /tmp and a non-root UID', () => {
     const r = smoke(['img:1', SHA]);
-    // start, trial, package.json, four probes, four audits, touch on the read-only mount; then touch without it.
-    const readOnly = r.calls.slice(0, 12);
-    expect(readOnly.map((c) => c.slice(0, CONFINED.length))).toEqual(readOnly.map(() => CONFINED));
-    expect(r.calls.slice(12)).toEqual([['run', '--rm', '--network=none', '--tmpfs', '/tmp', '--user', '999:999', 'img:1', 'touch', '/app/package.json']]);
+    // start, trial, package.json, four probes, four audits, touch, find.
+    expect(r.calls.length).toBe(13);
+    expect(r.calls.map((c) => c.slice(0, CONFINED.length))).toEqual(r.calls.map(() => CONFINED));
+    expect(r.calls[12].slice(CONFINED.length)).toEqual(['img:1', 'find', '/app', '!', '-type', 'l', '-perm', '/222', '-print']);
   });
 
   it('starts the bot with the substitute environment of the compat check and no real .env', () => {
@@ -168,19 +168,17 @@ describe('image-smoke.sh', () => {
       'docker: Error response from daemon: OCI runtime create failed', '']);
   });
 
-  it('fails when the files are writable without the read-only mount (not a-w)', () => {
-    const r = smoke(['img:1', SHA], { FAKE_AW: '0', FAKE_AW_MSG: '' });
+  // #842 AI review: a-w is the mode of every file, not one touch by one UID.
+  it('fails when a file under /app carries a write bit', () => {
+    const r = smoke(['img:1', SHA], { FAKE_AW_OUT: '/app/dist/index.js' });
     expect(r.status).toBe(1);
-    expect(r.stdout.split('\n').slice(-2)).toEqual([
-      'SMOKE FAILED readonly: touch /app/package.json succeeded without --read-only (files are not a-w)', '']);
+    expect(r.stdout.split('\n').slice(-3)).toEqual(['SMOKE FAILED readonly: files under /app carry a write bit (not a-w)', '/app/dist/index.js', '']);
   });
 
-  it('fails when the a-w touch fails for another reason', () => {
-    const r = smoke(['img:1', SHA], { FAKE_AW_MSG: 'touch: cannot touch: No space left on device' });
+  it('fails when the mode scan itself fails', () => {
+    const r = smoke(['img:1', SHA], { FAKE_AW_CODE: '1', FAKE_AW_OUT: 'find: boom' });
     expect(r.status).toBe(1);
-    expect(r.stdout.split('\n').slice(-3)).toEqual([
-      'SMOKE FAILED readonly: touch /app/package.json failed, but not with Permission denied',
-      'touch: cannot touch: No space left on device', '']);
+    expect(r.stdout.split('\n').slice(-3)).toEqual(['SMOKE FAILED readonly: find /app ! -type l -perm /222 failed (exit 1)', 'find: boom', '']);
   });
 
   it.each([

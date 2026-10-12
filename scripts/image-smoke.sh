@@ -99,12 +99,16 @@ for case in clean.json:0 advisory.json:10 enolock.json:2 registry-down.json:2; d
 done
 
 # readonly: the code cannot be changed from inside.
-# Two facts, each by its own error (#842 AI review: any failure of touch proved nothing):
-# the mount is read-only, and without the mount the files themselves are not writable (a-w).
+# Two facts (#842 AI review: any failure of touch proved nothing): the mount is read-only — by its own
+# error — and the files themselves carry no write bit.
 out=$("$DOCKER" run "${CONFINED[@]}" "$IMAGE" touch /app/x 2>&1) && fail readonly 'touch /app/x succeeded' "$out"
 case "$out" in *'Read-only file system'*) ;; *) fail readonly 'touch /app/x failed, but not as a read-only file system' "$out" ;; esac
-out=$("$DOCKER" run --rm --network=none --tmpfs /tmp --user 999:999 "$IMAGE" touch /app/package.json 2>&1) && fail readonly 'touch /app/package.json succeeded without --read-only (files are not a-w)' "$out"
-case "$out" in *'Permission denied'*) ;; *) fail readonly 'touch /app/package.json failed, but not with Permission denied' "$out" ;; esac
+# a-w: no file or directory under /app carries any write bit (owner included) — the mode itself, not one
+# touch by one UID (#842 AI review). Symlinks are skipped: their mode is always 0777 and means nothing.
+out=$("$DOCKER" run "${CONFINED[@]}" "$IMAGE" find /app ! -type l -perm /222 -print 2>&1)
+code=$?
+[ "$code" -eq 0 ] || fail readonly "find /app ! -type l -perm /222 failed (exit $code)" "$out"
+[ -z "$out" ] || fail readonly 'files under /app carry a write bit (not a-w)' "$out"
 echo 'SMOKE OK readonly: read-only mount and a-w files'
 
 echo "SMOKE OK $IMAGE"
