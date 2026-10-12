@@ -58,6 +58,9 @@ class FakeRunner:
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
+        if callable(response):
+            # A step that looks at the host while "running" (the scratch copy), then answers.
+            return response(argv)
         return response
 
 
@@ -68,15 +71,21 @@ class HelperCase(unittest.TestCase):
         self.quadlet = os.path.join(self.dir, 'warsaw-beer-bot.container')
         self.free_asked = []
         self.free = 100 * GIB
+        self.template = os.path.join(self.dir, 'template')
+        self.snapshots = os.path.join(self.dir, 'snap')
+        self.scratch = os.path.join(self.dir, 'scratch')
+        os.mkdir(self.snapshots)
+        os.mkdir(self.scratch)
+        self.chowns = []
 
     def host(self, runner):
         def free_bytes(path):
             self.free_asked.append(path)
             return self.free
         return wi.Host(podman=PODMAN, systemctl=SYSTEMCTL, run=runner, quadlet_path=self.quadlet,
-                       template_path=os.path.join(self.dir, 'template'), snapshot_root=os.path.join(self.dir, 'snap'),
-                       scratch_root=os.path.join(self.dir, 'scratch'), containers_root='/fake/containers',
-                       free_bytes=free_bytes, bot_ids=lambda: (1001, 1002))
+                       template_path=self.template, snapshot_root=self.snapshots, scratch_root=self.scratch,
+                       containers_root='/fake/containers', free_bytes=free_bytes, bot_ids=lambda: (1001, 1002),
+                       chown=lambda path, uid, gid: self.chowns.append((path, uid, gid)), pid=lambda: 4242)
 
     def main(self, argv, runner):
         out, err = io.StringIO(), io.StringIO()
@@ -434,15 +443,402 @@ class Production(unittest.TestCase):
     def test_the_production_host(self):
         p = wi.PRODUCTION
         self.assertEqual((p.podman, p.systemctl, p.quadlet_path, p.template_path, p.snapshot_root, p.scratch_root,
-                          p.containers_root, p.run),
+                          p.containers_root, p.run, p.chown, p.pid),
                          ('/usr/bin/podman', '/usr/bin/systemctl', '/etc/containers/systemd/warsaw-beer-bot.container',
                           '/usr/local/lib/wbb-image/warsaw-beer-bot.container',
                           '/var/lib/warsaw-beer-bot/deploy-snapshots', '/var/lib/wbb-image', '/var/lib/containers',
-                          wi.bounded.run))
+                          wi.bounded.run, os.chown, os.getpid))
 
     def test_the_host_is_frozen(self):
         with self.assertRaises(AttributeError):
             wi.PRODUCTION.podman = '/tmp/podman'
+
+
+# --- Task 3: trial, audit, activate ---
+
+REV = 'org.opencontainers.image.revision'
+SNAP = '20261012T101500Z-0123456-pre.db'
+SNAP_BYTES = b'SQLite format 3\x00 a pre snapshot'
+INSPECT_D1 = done(stdout=image_json())
+INSPECT_D2 = done(stdout=image_json(Id=I2, Digest=D2, RepoDigests=[f'{REPO}@{D2}'],
+                                    Labels={REV: OTHER_SHA, 'wbb.content': CONTENT}))
+INSPECT_D2_ARGV = [PODMAN, 'image', 'inspect', f'{REPO}@{D2}', '--format', 'json']
+TRIAL_OK = done(stdout='TRIAL OK: schema 46 -> 47\n')
+START_OK = done(stdout=f'START OK {X}\noutput tail:\n')
+COMPAT_OK = done(stdout=f'START OK {OTHER_SHA}\n')
+TRIAL_ARGV = ['trial', '--digest', D1, '--previous', D2, '--snapshot', SNAP]
+
+
+def removed(step, action='trial'):
+    return [PODMAN, 'rm', '-f', '-i', f'wbb-image-{action}-4242-{step}']
+
+
+def isolated(name, scratch):
+    """The confinement of a trial step ("Рішення" п.8), written out: it is the security boundary."""
+    return [PODMAN, 'run', '--name', name, '--rm', '--pull=never', '--network=none', '--read-only',
+            '--tmpfs', '/tmp', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--user', '1001:1002',
+            '--memory=1g', '--pids-limit=256', '-v', f'{scratch}:/data',
+            '-e', 'TELEGRAM_BOT_TOKEN=123456:abcdefghij', '-e', 'OSRM_BASE_URL=http://x',
+            '-e', 'NOMINATIM_USER_AGENT=x', '-e', 'DATABASE_PATH=/data/app.db', '-e', 'WBB_RELEASE_REQUIRED=true',
+            '-e', 'API_PORT=3000']
+
+
+class Trial(HelperCase):
+    def setUp(self):
+        super().setUp()
+        with open(os.path.join(self.snapshots, SNAP), 'wb') as f:
+            f.write(SNAP_BYTES)
+        self.seen = []
+
+    def look(self, response):
+        """While the first step runs: what the scratch directory holds."""
+        def step(argv):
+            scratch = argv[argv.index('-v') + 1].removesuffix(':/data')
+            db = os.path.join(scratch, 'app.db')
+            with open(db, 'rb') as f:
+                self.seen.append((os.path.dirname(scratch), stat.S_IMODE(os.stat(scratch).st_mode),
+                                  stat.S_IMODE(os.stat(db).st_mode), f.read(), list(self.chowns)))
+            return response
+        return step
+
+    def scratch_of(self, runner):
+        argv = runner.calls[2][0]
+        return argv[argv.index('-v') + 1].removesuffix(':/data')
+
+    def test_migrates_starts_and_starts_the_previous_image_on_one_private_copy(self):
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2, self.look(TRIAL_OK), done(), START_OK, done(), COMPAT_OK, done())
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (0, f'TRIAL OK: schema 46 -> 47\nSTART OK {X}\nCOMPAT OK {D2}\n', ''))
+        scratch = self.scratch_of(runner)
+        start = ['node', 'deploy/image/start-check.cjs', '--leave-running', '--timeout', '90']
+        self.assertEqual(runner.calls, [
+            (INSPECT_ARGV, 60, True),
+            (INSPECT_D2_ARGV, 60, True),
+            (isolated('wbb-image-trial-4242-migrate', scratch)
+             + [f'{REPO}@{D1}', 'node', 'deploy/trial-migrate.cjs', '/app', '/data/app.db'], 180, True),
+            (removed('migrate'), 60, True),
+            (isolated('wbb-image-trial-4242-start', scratch) + [f'{REPO}@{D1}', *start], 150, True),
+            (removed('start'), 60, True),
+            (isolated('wbb-image-trial-4242-compat', scratch) + [f'{REPO}@{D2}', *start], 150, True),
+            (removed('compat'), 60, True),
+        ])
+        db = os.path.join(scratch, 'app.db')
+        self.assertEqual(self.seen, [(self.scratch, 0o700, 0o600, SNAP_BYTES,
+                                      [(scratch, 1001, 1002), (db, 1001, 1002)])])
+        self.assertEqual(os.listdir(self.scratch), [])
+
+    def test_the_previous_image_may_be_the_candidate_itself(self):
+        runner = FakeRunner(INSPECT_D1, INSPECT_D1, TRIAL_OK, done(), START_OK, done(), START_OK, done())
+        self.assertEqual(self.main(['trial', '--digest', D1, '--previous', D1, '--snapshot', SNAP], runner),
+                         (0, f'TRIAL OK: schema 46 -> 47\nSTART OK {X}\nCOMPAT OK {D1}\n', ''))
+
+    PREFIX = {
+        'migrate': [INSPECT_D1, INSPECT_D2],
+        'start': [INSPECT_D1, INSPECT_D2, TRIAL_OK, done()],
+        'compat': [INSPECT_D1, INSPECT_D2, TRIAL_OK, done(), START_OK, done()],
+    }
+    PRINTED = {
+        'migrate': '',
+        'start': 'TRIAL OK: schema 46 -> 47\n',
+        'compat': f'TRIAL OK: schema 46 -> 47\nSTART OK {X}\n',
+    }
+    STARTED = {
+        'migrate': ['migrate'],
+        'start': ['migrate', 'start'],
+        'compat': ['migrate', 'start', 'compat'],
+    }
+
+    def test_every_exit_of_every_step_has_its_verdict(self):
+        rows = [
+            # step, the step's answer, exit, what it adds to stdout, stderr
+            ('migrate', done(1, 'TRIAL FAILED: no such table: x\n', 'at migrate\n'), 1,
+             'TRIAL FAILED: no such table: x\n', '[trial exited 1]\nTRIAL FAILED: no such table: x\nat migrate\n'),
+            ('migrate', done(0, 'migrated\n'), 2, '',
+             f"[trial exited 0]\nmigrated\nREFUSED: trial-migrate in {D1} exited 0 with 'migrated', not TRIAL OK\n"),
+            ('migrate', done(64, '', 'usage: trial-migrate <clone_dir> <db_copy>\n'), 75, '',
+             '[trial exited 64]\nusage: trial-migrate <clone_dir> <db_copy>\n'
+             f'TEMPFAIL: trial-migrate in {D1} exited 64\n'),
+            ('migrate', done(137), 75, '', f'[trial exited 137]\nTEMPFAIL: trial-migrate in {D1} exited 137\n'),
+            ('migrate', done(125, '', 'Error: no space left\n'), 75, '',
+             f'[trial exited 125]\nError: no space left\nTEMPFAIL: trial-migrate in {D1} exited 125\n'),
+            ('start', done(1, 'START FAILED: /health answered 500\noutput tail:\nboom\n'), 1,
+             'START FAILED: /health answered 500\n',
+             '[start exited 1]\nSTART FAILED: /health answered 500\noutput tail:\nboom\n'),
+            ('start', done(0, f'START OK {OTHER_SHA}\n'), 2, '',
+             f'[start exited 0]\nSTART OK {OTHER_SHA}\nREFUSED: start-check in {D1} exited 0 with '
+             f"'START OK {OTHER_SHA}', expected START OK {X}\n"),
+            ('start', done(0, ''), 2, '',
+             f"[start exited 0]\nREFUSED: start-check in {D1} exited 0 with '', expected START OK {X}\n"),
+            ('start', done(75, 'START TIMEOUT: no "api listening" within 90s\n'), 75, '',
+             '[start exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'
+             f'TEMPFAIL: start-check in {D1} exited 75: START TIMEOUT: no "api listening" within 90s\n'),
+            ('start', done(137), 75, '', f'[start exited 137]\nTEMPFAIL: start-check in {D1} exited 137\n'),
+            ('compat', done(1, 'START FAILED: bot exited (code 1) before "api listening"\n'), 1,
+             'COMPAT FAILED: START FAILED: bot exited (code 1) before "api listening"\n',
+             '[compat exited 1]\nSTART FAILED: bot exited (code 1) before "api listening"\n'),
+            ('compat', done(0, f'START OK {X}\n'), 2, '',
+             f"[compat exited 0]\nSTART OK {X}\nREFUSED: start-check in {D2} exited 0 with 'START OK {X}', "
+             f'expected START OK {OTHER_SHA}\n'),
+            ('compat', done(64, '', 'usage: start-check.cjs [--timeout <seconds>]\n'), 2, '',
+             '[compat exited 64]\nusage: start-check.cjs [--timeout <seconds>]\n'
+             f'REFUSED: previous image {D2} predates start-check --leave-running\n'),
+            ('compat', done(75, 'START TIMEOUT: no "api listening" within 90s\n'), 75, '',
+             '[compat exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'
+             f'TEMPFAIL: start-check in {D2} exited 75: START TIMEOUT: no "api listening" within 90s\n'),
+            ('compat', done(137), 75, '', f'[compat exited 137]\nTEMPFAIL: start-check in {D2} exited 137\n'),
+        ]
+        for step, answer, code, printed, err in rows:
+            with self.subTest(step=step, code=answer.returncode, stdout=answer.stdout):
+                runner = FakeRunner(*self.PREFIX[step], answer, done())
+                self.assertEqual(self.main(TRIAL_ARGV, runner), (code, self.PRINTED[step] + printed, err))
+                self.assertEqual([a for a in self.argvs(runner) if a[1] == 'rm'],
+                                 [removed(s) for s in self.STARTED[step]])
+                self.assertEqual(os.listdir(self.scratch), [])
+
+    def test_a_step_that_times_out_is_tempfail_and_its_container_is_removed(self):
+        for step, digest, timeout in (('migrate', D1, 180), ('start', D1, 150), ('compat', D2, 150)):
+            with self.subTest(step=step):
+                runner = FakeRunner(*self.PREFIX[step], subprocess.TimeoutExpired('podman', timeout), done())
+                self.assertEqual(self.main(TRIAL_ARGV, runner),
+                                 (75, self.PRINTED[step], f'TEMPFAIL: {step} in {digest} timed out after {timeout}s\n'))
+                self.assertEqual([a for a in self.argvs(runner) if a[1] == 'rm'],
+                                 [removed(s) for s in self.STARTED[step]])
+                self.assertEqual(os.listdir(self.scratch), [])
+
+    def test_our_own_candidate_not_knowing_leave_running_is_an_internal_error(self):
+        runner = FakeRunner(*self.PREFIX['start'], done(64, '', 'usage: start-check.cjs\n'), done())
+        code, out, err = self.main(TRIAL_ARGV, runner)
+        self.assertEqual((code, out, err.splitlines()[-1]),
+                         (70, 'TRIAL OK: schema 46 -> 47\n', f"RuntimeError: start-check in {D1} refused its usage (64): ''"))
+        self.assertEqual(os.listdir(self.scratch), [])
+
+    def test_an_exception_inside_a_step_removes_its_container_and_the_scratch(self):
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2, RuntimeError('boom'), done())
+        code, _, err = self.main(TRIAL_ARGV, runner)
+        self.assertEqual((code, err.splitlines()[-1]), (70, 'RuntimeError: boom'))
+        self.assertEqual(self.argvs(runner)[-1], removed('migrate'))
+        self.assertEqual(os.listdir(self.scratch), [])
+
+    def test_a_container_removal_that_times_out_does_not_hide_the_verdict(self):
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2, done(1, 'TRIAL FAILED: x\n'), subprocess.TimeoutExpired('rm', 60))
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (1, 'TRIAL FAILED: x\n', 'wbb-image: podman rm -f -i wbb-image-trial-4242-migrate timed out\n'
+                                                  '[trial exited 1]\nTRIAL FAILED: x\n'))
+
+    def test_a_verdict_line_is_cut_to_1000_characters(self):
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2, done(1, 'TRIAL FAILED: ' + 'x' * 5000 + '\n'), done())
+        code, out, _ = self.main(TRIAL_ARGV, runner)
+        self.assertEqual((code, out), (1, 'TRIAL FAILED: ' + 'x' * 986 + '\n'))
+
+    def test_invalid_arguments_are_refused_before_any_call(self):
+        for argv in (['trial', '--digest', D1[:-1], '--previous', D2, '--snapshot', SNAP],
+                     ['trial', '--digest', D1, '--previous', 'latest', '--snapshot', SNAP],
+                     ['trial', '--digest', D1, '--previous', D2, '--snapshot', f'../{SNAP}'],
+                     ['trial', '--digest', D1, '--previous', D2, '--snapshot', os.path.join(self.snapshots, SNAP)]):
+            with self.subTest(argv=argv):
+                runner = FakeRunner()
+                self.assertEqual(self.main(argv, runner)[0], 2)
+                self.assertEqual(runner.calls, [])
+
+    def test_an_image_not_of_our_repository_is_refused_before_any_container(self):
+        for answers, message in (
+            ([done(stdout=image_json(RepoDigests=[f'ghcr.io/x/y@{D1}']))],
+             f"{REPO}@{D1}: RepoDigests ['ghcr.io/x/y@{D1}'] do not name it — not an image of {REPO}"),
+            ([INSPECT_D1, done(125, stderr=f'Error: {REPO}@{D2}: image not known\n')], f'{REPO}@{D2} is not a local image'),
+        ):
+            with self.subTest(message=message):
+                runner = FakeRunner(*answers)
+                self.assertEqual(self.main(TRIAL_ARGV, runner), (2, '', f'REFUSED: {message}\n'))
+                self.assertEqual((len(runner.calls), self.chowns, os.listdir(self.scratch)), (len(answers), [], []))
+
+    def test_no_snapshot_is_tempfail(self):
+        os.unlink(os.path.join(self.snapshots, SNAP))
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner), (75, '', f'TEMPFAIL: no snapshot {SNAP} in {self.snapshots}\n'))
+        self.assertEqual((len(runner.calls), os.listdir(self.scratch)), (2, []))
+
+    def test_a_snapshot_that_is_a_symlink_or_not_a_file_is_refused(self):
+        path = os.path.join(self.snapshots, SNAP)
+        os.unlink(path)
+        secret = os.path.join(self.dir, 'secret')
+        with open(secret, 'w', encoding='utf-8') as f:
+            f.write('root only')
+        os.symlink(secret, path)
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner), (2, '', f'REFUSED: {path}: Too many levels of symbolic links\n'))
+        os.unlink(path)
+        os.mkdir(path)
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner), (2, '', f'REFUSED: {path}: not a regular file\n'))
+        self.assertEqual((self.chowns, os.listdir(self.scratch)), ([], []))
+
+
+AUDIT_ARGV = [PODMAN, 'run', '--name', 'wbb-image-audit-4242-audit', '--rm', '--pull=never', '--network=host',
+              '--read-only', '--tmpfs', '/tmp', '--cap-drop=ALL', '--security-opt=no-new-privileges',
+              '--user', '1001:1002', '--memory=1g', '--pids-limit=256',
+              '-e', 'TELEGRAM_BOT_TOKEN=123456:abcdefghij', '-e', 'OSRM_BASE_URL=http://x',
+              '-e', 'NOMINATIM_USER_AGENT=x', '-e', 'WBB_RELEASE_REQUIRED=true', '-e', 'API_PORT=3000',
+              f'{REPO}@{D1}', 'sh', '-c',
+              'cd /app && npm audit --omit=dev --json | node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts']
+
+
+class Audit(HelperCase):
+    def test_clean(self):
+        runner = FakeRunner(INSPECT_D1, done(0, 'clean\n'), done())
+        self.assertEqual(self.main(['audit', '--digest', D1], runner), (0, f'AUDIT CLEAN {D1}\n', ''))
+        self.assertEqual(runner.calls, [(INSPECT_ARGV, 60, True), (AUDIT_ARGV, 300, True),
+                                        (removed('audit', 'audit'), 60, True)])
+
+    def test_an_advisory_is_a_verdict_with_its_details(self):
+        runner = FakeRunner(INSPECT_D1, done(10, 'high: x (via y)\ncritical: z\n'), done())
+        self.assertEqual(self.main(['audit', '--digest', D1], runner),
+                         (1, f'AUDIT ADVISORY {D1}\nhigh: x (via y)\ncritical: z\n', ''))
+
+    def test_any_other_exit_could_not_audit(self):
+        for code in (1, 2, 125, 137):
+            with self.subTest(code=code):
+                runner = FakeRunner(INSPECT_D1, done(code, '', 'npm ERR! network\n'), done())
+                self.assertEqual(self.main(['audit', '--digest', D1], runner),
+                                 (75, '', f'[audit exited {code}]\nnpm ERR! network\nTEMPFAIL: audit in {D1} exited {code}\n'))
+                self.assertEqual(self.argvs(runner)[-1], removed('audit', 'audit'))
+
+    def test_a_timeout_could_not_audit(self):
+        runner = FakeRunner(INSPECT_D1, subprocess.TimeoutExpired('podman', 300), done())
+        self.assertEqual(self.main(['audit', '--digest', D1], runner),
+                         (75, '', f'TEMPFAIL: audit in {D1} timed out after 300s\n'))
+        self.assertEqual(self.argvs(runner)[-1], removed('audit', 'audit'))
+
+    def test_an_image_not_of_our_repository_is_refused_without_a_container(self):
+        runner = FakeRunner(done(stdout=image_json(Labels=None)))
+        self.assertEqual(self.main(['audit', '--digest', D1], runner),
+                         (2, '', f'REFUSED: {REPO}@{D1}: label {REV} is None, not a full SHA\n'))
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV])
+
+
+TEMPLATE = (f'# activate fills in @@DIGEST@@, @@UID@@ and @@GID@@\n[Container]\nImage={REPO}@@@DIGEST@@\n'
+            '  ; @@UID@@ is numeric\nUser=@@UID@@\nGroup=@@GID@@\n')
+WRITTEN = (f'# activate fills in @@DIGEST@@, @@UID@@ and @@GID@@\n[Container]\nImage={REPO}@{D1}\n'
+           '  ; @@UID@@ is numeric\nUser=1001\nGroup=1002\n')
+RELOAD = [SYSTEMCTL, 'daemon-reload']
+RESTART = [SYSTEMCTL, 'restart', 'warsaw-beer-bot.service']
+
+
+class Activate(HelperCase):
+    def setUp(self):
+        super().setUp()
+        with open(self.template, 'w', encoding='utf-8') as f:
+            f.write(TEMPLATE)
+
+    def ours(self):
+        return show('loaded', self.quadlet, '/run/systemd/generator/warsaw-beer-bot.service')
+
+    def read_quadlet(self):
+        with open(self.quadlet, encoding='utf-8') as f:
+            return f.read(), stat.S_IMODE(os.stat(self.quadlet).st_mode)
+
+    def test_first_activation_writes_the_template_reloads_checks_and_restarts(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        self.assertEqual(self.main(['activate', '--digest', D1], runner), (0, f'ACTIVATED {D1}\n', ''))
+        self.assertEqual(runner.calls, [(INSPECT_ARGV, 60, True), (SHOW_ARGV, 30, True), (RELOAD, 60, True),
+                                        (SHOW_ARGV, 30, True), (RESTART, 180, True)])
+        self.assertEqual((self.read_quadlet(), sorted(os.listdir(self.dir))),
+                         ((WRITTEN, 0o644), ['scratch', 'snap', 'template', 'warsaw-beer-bot.container']))
+
+    def test_replaces_the_file_of_a_quadlet_unit(self):
+        self.write_quadlet(f'Image={REPO}@{D2}\n')
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(), self.ours(), done())
+        self.assertEqual(self.main(['activate', '--digest', D1], runner), (0, f'ACTIVATED {D1}\n', ''))
+        self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
+
+    def test_creates_the_quadlet_directory_when_there_is_none(self):
+        self.quadlet = os.path.join(self.dir, 'containers', 'systemd', 'warsaw-beer-bot.container')
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
+        self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
+
+    def test_a_stale_temp_file_that_is_a_symlink_is_replaced_not_followed(self):
+        target = os.path.join(self.dir, 'target')
+        with open(target, 'w', encoding='utf-8') as f:
+            f.write('untouched')
+        os.symlink(target, self.quadlet + '.tmp')
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
+        with open(target, encoding='utf-8') as f:
+            self.assertEqual(f.read(), 'untouched')
+        self.assertEqual((self.read_quadlet(), os.path.lexists(self.quadlet + '.tmp')), ((WRITTEN, 0o644), False))
+
+    def test_a_foreign_unit_is_refused_with_no_write_and_no_reload(self):
+        self.write_quadlet(f'Image={REPO}@{D2}\n')
+        runner = FakeRunner(INSPECT_D1, show('loaded', '', '/etc/systemd/system/warsaw-beer-bot.service'))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (2, '', f'REFUSED: warsaw-beer-bot.service is not generated from {self.quadlet} '
+                                 '(a unit elsewhere shadows it?)\n'))
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV])
+        self.assertEqual((self.read_quadlet()[0], os.path.lexists(self.quadlet + '.tmp')),
+                         (f'Image={REPO}@{D2}\n', False))
+
+    def test_not_quadlet_after_the_reload_is_refused_without_a_restart(self):
+        for after, kind in ((show('loaded', '', '/etc/systemd/system/warsaw-beer-bot.service'), 'foreign'),
+                            (show('not-found', '', ''), 'absent')):
+            with self.subTest(kind=kind):
+                runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), after)
+                self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                                 (2, '', f'REFUSED: after daemon-reload warsaw-beer-bot.service is {kind}, not generated '
+                                         f'from {self.quadlet}; not restarted\n'))
+                self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV])
+                self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
+
+    def test_a_template_without_each_placeholder_exactly_once_is_refused_before_any_write(self):
+        for text, counts in (
+            (TEMPLATE.replace('@@GID@@', '0'), "{'@@DIGEST@@': 1, '@@UID@@': 1, '@@GID@@': 0}"),
+            (TEMPLATE + 'Environment=X=@@UID@@\n', "{'@@DIGEST@@': 1, '@@UID@@': 2, '@@GID@@': 1}"),
+            ('', "{'@@DIGEST@@': 0, '@@UID@@': 0, '@@GID@@': 0}"),
+            ('# @@DIGEST@@ @@UID@@ @@GID@@\n', "{'@@DIGEST@@': 0, '@@UID@@': 0, '@@GID@@': 0}"),
+        ):
+            with self.subTest(counts=counts):
+                with open(self.template, 'w', encoding='utf-8') as f:
+                    f.write(text)
+                runner = FakeRunner(INSPECT_D1, show('not-found', '', ''))
+                self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                                 (2, '', f'REFUSED: {self.template}: each placeholder must occur exactly once '
+                                         f'outside comments, found {counts}\n'))
+                self.assertEqual((self.argvs(runner), os.path.lexists(self.quadlet)),
+                                 ([INSPECT_ARGV, SHOW_ARGV], False))
+
+    def test_a_missing_template_is_refused(self):
+        os.unlink(self.template)
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (2, '', f'REFUSED: {self.template}: No such file or directory '
+                                 '(sudo bash deploy/install-image.sh)\n'))
+
+    def test_a_failing_reload_or_restart_is_tempfail(self):
+        for answers, message in (
+            ([done(1, stderr='Access denied\n')], 'systemctl daemon-reload exited 1: Access denied'),
+            ([subprocess.TimeoutExpired('systemctl', 60)], 'systemctl daemon-reload timed out after 60s'),
+            ([done(), self.ours(), done(1, stderr='Job failed\n')],
+             'systemctl restart warsaw-beer-bot.service exited 1: Job failed'),
+            ([done(), self.ours(), subprocess.TimeoutExpired('systemctl', 180)],
+             'systemctl restart warsaw-beer-bot.service timed out after 180s'),
+        ):
+            with self.subTest(message=message):
+                runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), *answers)
+                self.assertEqual(self.main(['activate', '--digest', D1], runner), (75, '', f'TEMPFAIL: {message}\n'))
+
+    def test_an_image_not_of_our_repository_is_refused_before_systemctl(self):
+        runner = FakeRunner(done(125, stderr='Error: image not known\n'))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (2, '', f'REFUSED: {REPO}@{D1} is not a local image\n'))
+        self.assertEqual((self.argvs(runner), os.path.lexists(self.quadlet)), ([INSPECT_ARGV], False))
+
+    def test_the_real_template_activates_into_a_file_current_reads_back(self):
+        self.template = os.path.join(os.path.dirname(HERE), 'warsaw-beer-bot.container')
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
+        lines = self.read_quadlet()[0].splitlines()
+        self.assertEqual(([line for line in lines if line.startswith(('Image=', 'User=', 'Group='))],
+                          wi.quadlet_digest(self.host(FakeRunner()))),
+                         ([f'Image={REPO}@{D1}', 'User=1001', 'Group=1002'], D1))
 
 
 LIB = '/usr/local/lib/wbb-image'
