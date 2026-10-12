@@ -99,7 +99,12 @@ for case in clean.json:0 advisory.json:10 enolock.json:2 registry-down.json:2; d
 done
 
 # readonly: the code cannot be changed from inside.
+# Two facts, each by its own error (#842 AI review: any failure of touch proved nothing):
+# the mount is read-only, and without the mount the files themselves are not writable (a-w).
 out=$("$DOCKER" run "${CONFINED[@]}" "$IMAGE" touch /app/x 2>&1) && fail readonly 'touch /app/x succeeded' "$out"
-echo 'SMOKE OK readonly: touch /app/x refused'
+case "$out" in *'Read-only file system'*) ;; *) fail readonly 'touch /app/x failed, but not as a read-only file system' "$out" ;; esac
+out=$("$DOCKER" run --rm --network=none --tmpfs /tmp --user 999:999 "$IMAGE" touch /app/package.json 2>&1) && fail readonly 'touch /app/package.json succeeded without --read-only (files are not a-w)' "$out"
+case "$out" in *'Permission denied'*) ;; *) fail readonly 'touch /app/package.json failed, but not with Permission denied' "$out" ;; esac
+echo 'SMOKE OK readonly: read-only mount and a-w files'
 
 echo "SMOKE OK $IMAGE"

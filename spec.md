@@ -2891,7 +2891,7 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   `release.json` разом із digest-ом runtime-бази: однакова мітка означає той самий runtime
   (майбутній noop на хості). Smoke у CI, усе з `--read-only --network=none` і підставним оточенням:
   старт до `api listening` і `/health` з правильним `releaseSha` (`start-check` запускає бота з
-  `--unhandled-rejections=warn`: без мережі `bot.launch()` відхиляється й інакше вбиває процес),
+  передзавантаженим `offline-telegram.cjs`: без мережі `bot.launch()` відхиляється й інакше вбиває процес; терпиться лише ця відмова, будь-яка інша необроблена — провал перевірки),
   trial на свіжій БД, проби payload-у (SQLite, міграція, assets, ops), вердикти аудиту на фікстурах,
   відмова запису в `/app`. На push у `main` образ іде в
   `ghcr.io/ysilvestrov/warsaw-beer-bot:<sha>` з атестацією `attest-build-provenance`; рядок

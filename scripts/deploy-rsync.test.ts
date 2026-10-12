@@ -102,6 +102,7 @@ describe('deploy rsync payload', () => {
       'deploy/db-snapshot.sh',
       'deploy/deploy.sh',
       'deploy/image/Dockerfile',
+      'deploy/image/offline-telegram.cjs',
       'deploy/image/start-check.cjs',
       'deploy/image/warsaw-beer-bot.container',
       'deploy/install-autodeploy.sh',

@@ -90,6 +90,16 @@ describe('start-check', () => {
     expect(r).toEqual({ status: 0, stdout: `START OK ${SHA}\n`, stderr: '' });
   });
 
+  // #842 AI review: only the offline Telegram launch is tolerated; any other startup rejection fails.
+  test('an unhandled rejection that is not the Telegram launch is START FAILED, whatever /health managed', async () => {
+    const dir = scratch();
+    const other = "Promise.reject(new Error('SqliteError: no such column: x'));";
+    const bot = servingBot(dir, { status: 200, body: { ok: true, releaseSha: SHA } }, LOG_READY + other);
+    const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()), STOP_MARKER: join(dir, 'm') });
+    expect([r.status, r.stdout.split('\n')[0], r.stdout.includes('start-check: unhandled rejection: SqliteError: no such column: x')]).toEqual([
+      1, 'START FAILED: an unhandled rejection other than the offline Telegram launch ended the bot', true]);
+  });
+
   test('a bot that dies before api listening is START FAILED with its output tail', async () => {
     const dir = scratch();
     const bot = join(dir, 'crash.cjs');

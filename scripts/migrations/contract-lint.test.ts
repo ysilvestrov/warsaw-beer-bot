@@ -87,6 +87,15 @@ describe('contractKeywords', () => {
     expect(contractKeywords(`INSERT INTO a (x, "update") VALUES ('drop; select; it''s delete');`)).toEqual([]);
   });
 
+  // #842 AI review: SQLite also quotes identifiers with backticks and brackets.
+  it('a keyword inside a backtick- or bracket-quoted identifier is data', () => {
+    expect(contractKeywords('CREATE TABLE t ([update] TEXT, `delete` TEXT, [drop it] INTEGER);')).toEqual([]);
+  });
+
+  it('a statement after a bracket- or backtick-quoted identifier is still seen', () => {
+    expect(contractKeywords('CREATE TABLE t ([a] TEXT); DROP TABLE `old`;')).toEqual(['DROP']);
+  });
+
   it('a trigger whose body updates rows is flagged — FK actions and trigger events are exempt', () => {
     expect(contractKeywords('CREATE TRIGGER tr AFTER INSERT ON a BEGIN UPDATE b SET n = n + 1; END;')).toEqual(['UPDATE']);
   });

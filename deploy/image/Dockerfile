@@ -41,7 +41,7 @@ RUN python3 deploy/release/package_runtime.py --repo . --dist /tmp/dist --module
  && mkdir -p /tmp/app/deploy/image \
  && cp -a /tmp/release/payload/. /tmp/app/ \
  && cp deploy/trial-migrate.cjs /tmp/app/deploy/trial-migrate.cjs \
- && cp deploy/image/start-check.cjs /tmp/app/deploy/image/start-check.cjs \
+ && cp deploy/image/start-check.cjs deploy/image/offline-telegram.cjs /tmp/app/deploy/image/ \
  && cp /tmp/release/content-digest /tmp/app/.content-digest \
  && chmod -R a+rX,a-w /tmp/app
 

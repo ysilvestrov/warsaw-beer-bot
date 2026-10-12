@@ -7,11 +7,11 @@
 // answers /health from inside the container, and is stopped.
 //
 // The bot runs as a child with this process's environment, from this process's
-// working directory, under --unhandled-rejections=warn: the check runs without network
+// working directory, with offline-telegram.cjs preloaded: the check runs without network
 // (§6.3), so Telegraf's bot.launch() always rejects at getMe right after startup, and
 // under Node's default (throw) that kills the bot within milliseconds of `api listening`
-// (seen on the image 2026-10-11). The rejection still shows in the output; the bot stays
-// up to answer /health. `api listening` is logged after the startup backfills and the
+// (seen on the image 2026-10-11). The preload tolerates only that rejection; any other
+// unhandled rejection still ends the bot and fails the check (#842 AI review). `api listening` is logged after the startup backfills and the
 // bot launch (src/index.ts), so reaching it means the startup transformations ran.
 //
 // Usage: node start-check.cjs [--timeout <seconds>] [--entry <file>]
@@ -28,6 +28,11 @@ const DEFAULT_TIMEOUT_S = 60;
 const HEALTH_TIMEOUT_MS = 10_000;
 // The unit's TimeoutStopSec (spec §3.2): a bot that outlives it is killed.
 const STOP_GRACE_MS = 20_000;
+const PRELOAD = path.join(__dirname, 'offline-telegram.cjs');
+const UNHANDLED = 'start-check: unhandled rejection:';
+// After a healthy /health, how long the bot must stay up: a rejection that lands right after
+// `api listening` ends it within this time.
+const SETTLE_MS = 1000;
 const TAIL_CHARS = 4000;
 
 function parseArgs(argv) {
@@ -49,7 +54,7 @@ function apiPort(env) {
 }
 
 function startBot(entry) {
-  const child = spawn(process.execPath, ['--unhandled-rejections=warn', entry], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--require', PRELOAD, entry], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let tail = '';
   let carry = '';
   let onReady = () => {};
@@ -122,7 +127,12 @@ async function main(argv) {
   let verdict;
   if (outcome.kind === 'ready') {
     const h = await health(port);
-    verdict = h.ok ? { ok: true, releaseSha: h.releaseSha } : { ok: false, reason: h.reason };
+    if (h.ok) await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+    if (bot.tail().includes(UNHANDLED)) {
+      verdict = { ok: false, reason: 'an unhandled rejection other than the offline Telegram launch ended the bot' };
+    } else if (!h.ok) verdict = { ok: false, reason: h.reason };
+    else if (!running(bot.child)) verdict = { ok: false, reason: 'the bot exited after a healthy /health' };
+    else verdict = { ok: true, releaseSha: h.releaseSha };
   } else if (outcome.kind === 'exit') {
     verdict = { ok: false, reason: `bot exited (${outcome.signal ?? `code ${outcome.code}`}) before "${READY}"` };
   } else if (outcome.kind === 'error') {

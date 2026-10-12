@@ -27,7 +27,7 @@ type Migration = { version: number; sql: string };
 
 /**
  * One pass over the SQL: comments become a single space; string literals ('…', with ''
- * escapes) and quoted identifiers ("…") are kept, or blanked when `maskQuoted` — a keyword
+ * escapes) and quoted identifiers ("…", `…`, […]) are kept, or blanked when `maskQuoted` — a keyword
  * inside them is data, and a comment opener inside them is not a comment.
  */
 function scan(sql: string, maskQuoted: boolean): string {
@@ -43,15 +43,18 @@ function scan(sql: string, maskQuoted: boolean): string {
       const end = sql.indexOf('*/', i + 2);
       out += ' ';
       i = end === -1 ? sql.length : end + 2;
-    } else if (c === "'" || c === '"') {
+    } else if (c === "'" || c === '"' || c === '`' || c === '[') {
+      // SQLite also quotes identifiers with `…` and […] (#842 AI review); `]` closes `[`, and
+      // […] has no doubled-quote escape.
+      const close = c === '[' ? ']' : c;
       let j = i + 1;
       while (j < sql.length) {
-        if (sql[j] === c && sql[j + 1] === c) j += 2;
-        else if (sql[j] === c) break;
+        if (c !== '[' && sql[j] === close && sql[j + 1] === close) j += 2;
+        else if (sql[j] === close) break;
         else j += 1;
       }
       const body = sql.slice(i + 1, j);
-      out += c + (maskQuoted ? ' '.repeat(body.length) : body) + (j < sql.length ? c : '');
+      out += c + (maskQuoted ? ' '.repeat(body.length) : body) + (j < sql.length ? close : '');
       i = j + 1;
     } else {
       out += c;
