@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +34,9 @@ I3 = 'c' * 64
 I4 = 'd' * 64
 CONTENT = 'e' * 64
 GIB = 1024 ** 3
+# The bot's ids in tests are the test's own: the snapshot must belong to the bot, and only root could chown it.
+UID = os.getuid()
+GID = os.getgid()
 PODMAN = '/fake/bin/podman'
 SYSTEMCTL = '/fake/bin/systemctl'
 
@@ -75,8 +79,11 @@ class HelperCase(unittest.TestCase):
         self.snapshots = os.path.join(self.dir, 'snap')
         self.scratch = os.path.join(self.dir, 'scratch')
         os.mkdir(self.snapshots)
-        os.mkdir(self.scratch)
+        os.mkdir(self.scratch, 0o700)
+        os.chmod(self.scratch, 0o700)
         self.chowns = []
+        self.scratch_owner = UID
+        self.bot = (UID, GID)
 
     def host(self, runner):
         def free_bytes(path):
@@ -84,8 +91,9 @@ class HelperCase(unittest.TestCase):
             return self.free
         return wi.Host(podman=PODMAN, systemctl=SYSTEMCTL, run=runner, quadlet_path=self.quadlet,
                        template_path=self.template, snapshot_root=self.snapshots, scratch_root=self.scratch,
-                       containers_root='/fake/containers', free_bytes=free_bytes, bot_ids=lambda: (1001, 1002),
-                       chown=lambda path, uid, gid: self.chowns.append((path, uid, gid)), pid=lambda: 4242)
+                       containers_root='/fake/containers', free_bytes=free_bytes, bot_ids=lambda: self.bot,
+                       fchown=lambda fd, uid, gid: self.chowns.append((os.readlink(f'/proc/self/fd/{fd}'), uid, gid)),
+                       scratch_owner=self.scratch_owner, pid=lambda: 4242)
 
     def main(self, argv, runner):
         out, err = io.StringIO(), io.StringIO()
@@ -336,53 +344,87 @@ class Current(HelperCase):
         self.assertEqual(self.main(['current'], FakeRunner()), (2, '', f'REFUSED: {self.quadlet}: not a regular file\n'))
 
 
-IMAGES_ARGV = [PODMAN, 'images', '--filter', f'reference={REPO}', '--format', '{{.Id}} {{.Digest}}']
+IMAGES_ARGV = [PODMAN, 'images', '--filter', f'reference={REPO}', '--format', 'json']
 
 
 def rmi(image_id):
     return [PODMAN, 'rmi', image_id]
 
 
+def listed(*images):
+    """`podman images --format json`: one entry per image, its names under RepoDigests."""
+    return done(stdout=json.dumps([{'Id': image_id, 'Digest': digest, 'RepoDigests': names, 'Names': [f'{REPO}']}
+                                   for image_id, digest, names in images]))
+
+
+def at(*digests):
+    return [f'{REPO}@{d}' for d in digests]
+
+
 class Prune(HelperCase):
     def test_removes_what_is_neither_kept_nor_pinned_and_counts_a_failed_rmi_as_skipped(self):
         self.write_quadlet(f'Image={REPO}@{D2}\n')
-        listing = f'{I1} {D1}\n{I2} {D2}\n{I3} {D3}\n{I4} {D4}\n'
-        runner = FakeRunner(done(stdout=listing), done(), done(2, stderr='Error: image is in use by a container\n'))
+        runner = FakeRunner(listed((I1, D1, at(D1)), (I2, D2, at(D2)), (I3, D3, at(D3)), (I4, D4, at(D4))),
+                            done(), done(2, stderr='Error: image is in use by a container\n'))
         self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 1 skipped 1 kept {D1} {D2}\n', ''))
         self.assertEqual(runner.calls, [(IMAGES_ARGV, 60, True), (rmi(I3), 120, True), (rmi(I4), 120, True)])
 
     def test_never_removes_the_quadlet_files_image_even_without_keep(self):
         self.write_quadlet(f'[Container]\nImage={REPO}@{D2}\n')
-        runner = FakeRunner(done(stdout=f'{I2} {D2}\n'))
+        runner = FakeRunner(listed((I2, D2, at(D2))))
         self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 0 skipped 0 kept {D1} {D2}\n', ''))
         self.assertEqual(self.argvs(runner), [IMAGES_ARGV])
 
     def test_several_keeps_and_no_quadlet_file(self):
-        runner = FakeRunner(done(stdout=f'{I1} {D1}\n{I2} {D2}\n{I3} {D3}\n'), done())
+        runner = FakeRunner(listed((I1, D1, at(D1)), (I2, D2, at(D2)), (I3, D3, at(D3))), done())
         self.assertEqual(self.main(['prune', '--keep', D2, '--keep', D1], runner),
                          (0, f'PRUNED 1 skipped 0 kept {D1} {D2}\n', ''))
         self.assertEqual(self.argvs(runner), [IMAGES_ARGV, rmi(I3)])
 
-    def test_an_image_listed_under_a_kept_digest_is_kept_under_any_other(self):
-        runner = FakeRunner(done(stdout=f'{I1} {D3}\n{I1} {D1}\n'))
+    def test_an_image_is_kept_when_any_of_its_repo_digests_is_kept(self):
+        # Its own Digest is D3, but it is also known as D1 (pulled twice, or a manifest list): rmi takes the image.
+        runner = FakeRunner(listed((I1, D3, at(D3, D1))))
         self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 0 skipped 0 kept {D1}\n', ''))
         self.assertEqual(self.argvs(runner), [IMAGES_ARGV])
 
+    def test_an_image_is_kept_when_its_digest_is_pinned_though_no_repo_digest_says_so(self):
+        self.write_quadlet(f'Image={REPO}@{D2}\n')
+        runner = FakeRunner(listed((I2, D2, [])))
+        self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 0 skipped 0 kept {D1} {D2}\n', ''))
+        self.assertEqual(self.argvs(runner), [IMAGES_ARGV])
+
     def test_an_image_listed_twice_is_removed_once(self):
-        runner = FakeRunner(done(stdout=f'{I3} {D3}\n{I3} {D4}\n'), done())
+        runner = FakeRunner(listed((I3, D3, at(D3)), (I3, D3, at(D3))), done())
+        self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 1 skipped 0 kept {D1}\n', ''))
+        self.assertEqual(self.argvs(runner), [IMAGES_ARGV, rmi(I3)])
+
+    def test_null_repo_digests_are_no_names(self):
+        runner = FakeRunner(done(stdout=json.dumps([{'Id': I3, 'Digest': D3, 'RepoDigests': None}])), done())
         self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 1 skipped 0 kept {D1}\n', ''))
         self.assertEqual(self.argvs(runner), [IMAGES_ARGV, rmi(I3)])
 
     def test_nothing_listed(self):
-        runner = FakeRunner(done(stdout=''))
+        runner = FakeRunner(done(stdout='[]'))
         self.assertEqual(self.main(['prune', '--keep', D1], runner), (0, f'PRUNED 0 skipped 0 kept {D1}\n', ''))
 
-    def test_a_listing_line_it_cannot_read_removes_nothing(self):
-        for line in (f'{I3} <none>', f'{I3}', f'{I3} {D3} extra', f'sha256:{I3} {D3}'):
-            with self.subTest(line=line):
-                runner = FakeRunner(done(stdout=f'{I4} {D4}\n{line}\n'))
-                self.assertEqual(self.main(['prune', '--keep', D1], runner),
-                                 (2, '', f'REFUSED: podman images: unexpected line {line!r}\n'))
+    def test_a_listing_it_cannot_read_removes_nothing(self):
+        good = {'Id': I4, 'Digest': D4, 'RepoDigests': at(D4)}
+        for name, stdout in (
+            ('not json', 'oops'),
+            ('an object', json.dumps({'Id': I3})),
+            ('an entry that is a string', json.dumps([good, I3])),
+            ('a short id', json.dumps([good, {'Id': I3[:12], 'Digest': D3, 'RepoDigests': at(D3)}])),
+            ('a prefixed id', json.dumps([good, {'Id': f'sha256:{I3}', 'Digest': D3, 'RepoDigests': at(D3)}])),
+            ('no digest', json.dumps([good, {'Id': I3, 'RepoDigests': at(D3)}])),
+            ('a bad digest', json.dumps([good, {'Id': I3, 'Digest': '<none>', 'RepoDigests': at(D3)}])),
+            ('a repo digest without @', json.dumps([good, {'Id': I3, 'Digest': D3, 'RepoDigests': [REPO]}])),
+            ('a repo digest with a tag', json.dumps([good, {'Id': I3, 'Digest': D3, 'RepoDigests': [f'{REPO}:x']}])),
+            ('repo digests not a list', json.dumps([good, {'Id': I3, 'Digest': D3, 'RepoDigests': f'{REPO}@{D3}'}])),
+        ):
+            with self.subTest(name):
+                runner = FakeRunner(done(stdout=stdout))
+                code, out, err = self.main(['prune', '--keep', D1], runner)
+                self.assertEqual((code, out, err.startswith('REFUSED: podman images: ')), (2, '', True))
                 self.assertEqual(self.argvs(runner), [IMAGES_ARGV])
 
     def test_a_failing_listing_is_tempfail(self):
@@ -391,7 +433,7 @@ class Prune(HelperCase):
                          (75, '', 'TEMPFAIL: podman images exited 125: Error: boom\n'))
 
     def test_a_timed_out_rmi_is_tempfail(self):
-        runner = FakeRunner(done(stdout=f'{I3} {D3}\n'), subprocess.TimeoutExpired(rmi(I3), 120))
+        runner = FakeRunner(listed((I3, D3, at(D3))), subprocess.TimeoutExpired(rmi(I3), 120))
         self.assertEqual(self.main(['prune', '--keep', D1], runner),
                          (75, '', f'TEMPFAIL: podman rmi {I3} timed out after 120s\n'))
 
@@ -413,7 +455,8 @@ class Usage(HelperCase):
     def test_usage_errors_exit_64_and_call_nothing(self):
         for argv in ([], ['frobnicate'], ['current', 'extra'], ['current', '--sha', X], ['prune'],
                      ['pull', '--sha', X], ['pull', '--digest', D1], ['pull', '--sha', X, '--digest', D1, 'x'],
-                     ['prune', '--keep']):
+                     ['prune', '--keep'], ['-h'], ['--help'], ['pull', '-h'], ['current', '--help'],
+                     ['prune', '--keep', D1, '-h']):
             with self.subTest(argv=argv):
                 runner = FakeRunner()
                 code, out, _ = self.main(argv, runner)
@@ -443,11 +486,11 @@ class Production(unittest.TestCase):
     def test_the_production_host(self):
         p = wi.PRODUCTION
         self.assertEqual((p.podman, p.systemctl, p.quadlet_path, p.template_path, p.snapshot_root, p.scratch_root,
-                          p.containers_root, p.run, p.chown, p.pid),
+                          p.containers_root, p.run, p.fchown, p.scratch_owner, p.pid),
                          ('/usr/bin/podman', '/usr/bin/systemctl', '/etc/containers/systemd/warsaw-beer-bot.container',
                           '/usr/local/lib/wbb-image/warsaw-beer-bot.container',
                           '/var/lib/warsaw-beer-bot/deploy-snapshots', '/var/lib/wbb-image', '/var/lib/containers',
-                          wi.bounded.run, os.chown, os.getpid))
+                          wi.bounded.run, os.fchown, 0, os.getpid))
 
     def test_the_host_is_frozen(self):
         with self.assertRaises(AttributeError):
@@ -459,6 +502,8 @@ class Production(unittest.TestCase):
 REV = 'org.opencontainers.image.revision'
 SNAP = '20261012T101500Z-0123456-pre.db'
 SNAP_BYTES = b'SQLite format 3\x00 a pre snapshot'
+# sha256sum of SNAP_BYTES, as db-snapshot.sh writes it into <snapshot>.sha256.
+SNAP_SHA256 = '8302bd00edad6b83049b588aeb8e7e72a0b712adbad091a47612801404fb12e0'
 INSPECT_D1 = done(stdout=image_json())
 INSPECT_D2 = done(stdout=image_json(Id=I2, Digest=D2, RepoDigests=[f'{REPO}@{D2}'],
                                     Labels={REV: OTHER_SHA, 'wbb.content': CONTENT}))
@@ -476,7 +521,7 @@ def removed(step, action='trial'):
 def isolated(name, scratch):
     """The confinement of a trial step ("Рішення" п.8), written out: it is the security boundary."""
     return [PODMAN, 'run', '--name', name, '--rm', '--pull=never', '--network=none', '--read-only',
-            '--tmpfs', '/tmp', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--user', '1001:1002',
+            '--tmpfs', '/tmp', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--user', f'{UID}:{GID}',
             '--memory=1g', '--pids-limit=256', '-v', f'{scratch}:/data',
             '-e', 'TELEGRAM_BOT_TOKEN=123456:abcdefghij', '-e', 'OSRM_BASE_URL=http://x',
             '-e', 'NOMINATIM_USER_AGENT=x', '-e', 'DATABASE_PATH=/data/app.db', '-e', 'WBB_RELEASE_REQUIRED=true',
@@ -486,8 +531,11 @@ def isolated(name, scratch):
 class Trial(HelperCase):
     def setUp(self):
         super().setUp()
-        with open(os.path.join(self.snapshots, SNAP), 'wb') as f:
+        self.snap = os.path.join(self.snapshots, SNAP)
+        with open(self.snap, 'wb') as f:
             f.write(SNAP_BYTES)
+        with open(self.snap + '.sha256', 'w', encoding='ascii') as f:
+            f.write(SNAP_SHA256 + '\n')
         self.seen = []
 
     def look(self, response):
@@ -524,7 +572,7 @@ class Trial(HelperCase):
         ])
         db = os.path.join(scratch, 'app.db')
         self.assertEqual(self.seen, [(self.scratch, 0o700, 0o600, SNAP_BYTES,
-                                      [(scratch, 1001, 1002), (db, 1001, 1002)])])
+                                      [(db, UID, GID), (scratch, UID, GID)])])
         self.assertEqual(os.listdir(self.scratch), [])
 
     def test_the_previous_image_may_be_the_candidate_itself(self):
@@ -582,10 +630,30 @@ class Trial(HelperCase):
             ('compat', done(64, '', 'usage: start-check.cjs [--timeout <seconds>]\n'), 2, '',
              '[compat exited 64]\nusage: start-check.cjs [--timeout <seconds>]\n'
              f'REFUSED: previous image {D2} predates start-check --leave-running\n'),
-            ('compat', done(75, 'START TIMEOUT: no "api listening" within 90s\n'), 75, '',
-             '[compat exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'
-             f'TEMPFAIL: start-check in {D2} exited 75: START TIMEOUT: no "api listening" within 90s\n'),
+            # Spec §6.3: S that does not answer on the copy D has just started on is a verdict on the data.
+            ('compat', done(75, 'START TIMEOUT: no "api listening" within 90s\n'), 1,
+             'COMPAT FAILED: START TIMEOUT: no "api listening" within 90s\n',
+             '[compat exited 75]\nSTART TIMEOUT: no "api listening" within 90s\n'),
             ('compat', done(137), 75, '', f'[compat exited 137]\nTEMPFAIL: start-check in {D2} exited 137\n'),
+            # The kernel killed the bot (OOM under --memory): could not judge, for either image.
+            ('start', done(75, 'START KILLED: bot killed by SIGKILL\n'), 75, '',
+             '[start exited 75]\nSTART KILLED: bot killed by SIGKILL\n'
+             f'TEMPFAIL: start-check in {D1} exited 75: START KILLED: bot killed by SIGKILL\n'),
+            ('compat', done(75, 'START KILLED: bot killed by SIGKILL\n'), 75, '',
+             '[compat exited 75]\nSTART KILLED: bot killed by SIGKILL\n'
+             f'TEMPFAIL: start-check in {D2} exited 75: START KILLED: bot killed by SIGKILL\n'),
+            ('compat', done(75, '', 'Error: OCI runtime error\n'), 75, '',
+             f'[compat exited 75]\nError: OCI runtime error\nTEMPFAIL: start-check in {D2} exited 75\n'),
+            # An exit 1 is a verdict only with its own FAILED line (node itself exits 1 on a crash).
+            ('migrate', done(1, '', 'node:internal/modules/cjs/loader:1228\n'), 75, '',
+             '[trial exited 1]\nnode:internal/modules/cjs/loader:1228\n'
+             f'TEMPFAIL: trial-migrate in {D1} exited 1\n'),
+            ('migrate', done(1, 'START FAILED: x\n'), 75, '',
+             f'[trial exited 1]\nSTART FAILED: x\nTEMPFAIL: trial-migrate in {D1} exited 1: START FAILED: x\n'),
+            ('start', done(1, 'Error: boom\n'), 75, '',
+             f'[start exited 1]\nError: boom\nTEMPFAIL: start-check in {D1} exited 1: Error: boom\n'),
+            ('compat', done(1, 'TRIAL FAILED: x\n'), 75, '',
+             f'[compat exited 1]\nTRIAL FAILED: x\nTEMPFAIL: start-check in {D2} exited 1: TRIAL FAILED: x\n'),
         ]
         for step, answer, code, printed, err in rows:
             with self.subTest(step=step, code=answer.returncode, stdout=answer.stdout):
@@ -673,9 +741,122 @@ class Trial(HelperCase):
         self.assertEqual((self.chowns, os.listdir(self.scratch)), ([], []))
 
 
+    # --- the scratch root, the snapshot and its checksum (review: items 3, 6, 8) ---
+
+    def test_the_scratch_root_must_have_mode_0700(self):
+        for mode in (0o750, 0o777, 0o500):
+            with self.subTest(mode=oct(mode)):
+                os.chmod(self.scratch, mode)
+                runner = FakeRunner()
+                self.assertEqual(self.main(TRIAL_ARGV, runner),
+                                 (2, '', f'REFUSED: {self.scratch}: must be a directory owned by uid {UID} with mode '
+                                         f'0700, is uid {UID} mode {mode:04o}\n'))
+                self.assertEqual(runner.calls, [])
+
+    def test_a_scratch_root_that_is_a_symlink_to_a_directory_is_refused(self):
+        os.rmdir(self.scratch)
+        os.symlink(self.snapshots, self.scratch)
+        runner = FakeRunner()
+        code, out, err = self.main(TRIAL_ARGV, runner)
+        self.assertEqual((code, out, err.endswith(' (not a directory)\n'), runner.calls), (2, '', True, []))
+
+    def test_the_scratch_root_must_belong_to_the_expected_owner(self):
+        self.scratch_owner = UID + 1
+        runner = FakeRunner()
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (2, '', f'REFUSED: {self.scratch}: must be a directory owned by uid {UID + 1} with mode 0700, '
+                                 f'is uid {UID} mode 0700\n'))
+        self.assertEqual(runner.calls, [])
+
+    def test_a_missing_scratch_root_is_refused(self):
+        os.rmdir(self.scratch)
+        runner = FakeRunner()
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (2, '', f'REFUSED: {self.scratch}: missing (sudo bash deploy/install-image.sh)\n'))
+
+    def test_a_snapshot_not_owned_by_the_bot_is_refused(self):
+        self.bot = (UID + 1, GID)
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (2, '', f'REFUSED: {self.snap}: owned by uid {UID} with 1 link(s), expected uid {UID + 1} and 1\n'))
+        self.assertEqual((len(runner.calls), self.chowns, os.listdir(self.scratch)), (2, [], []))
+
+    def test_a_snapshot_with_a_second_link_is_refused(self):
+        os.link(self.snap, os.path.join(self.dir, 'hardlink'))
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (2, '', f'REFUSED: {self.snap}: owned by uid {UID} with 2 link(s), expected uid {UID} and 1\n'))
+
+    def run_in_thread(self, runner):
+        """main() in a thread with a deadline: an open that blocked (a FIFO without O_NONBLOCK) leaves it alive."""
+        result = []
+        thread = threading.Thread(target=lambda: result.append(self.main(TRIAL_ARGV, runner)), daemon=True)
+        thread.start()
+        thread.join(10)
+        return thread.is_alive(), result
+
+    def test_a_snapshot_that_is_a_fifo_is_refused_without_hanging(self):
+        os.unlink(self.snap)
+        os.mkfifo(self.snap)
+        self.assertEqual(self.run_in_thread(FakeRunner(INSPECT_D1, INSPECT_D2)),
+                         (False, [(2, '', f'REFUSED: {self.snap}: not a regular file\n')]))
+
+    def test_a_checksum_that_is_a_fifo_is_refused_without_hanging(self):
+        os.unlink(self.snap + '.sha256')
+        os.mkfifo(self.snap + '.sha256')
+        self.assertEqual(self.run_in_thread(FakeRunner(INSPECT_D1, INSPECT_D2)),
+                         (False, [(2, '', f'REFUSED: {self.snap}.sha256: not a regular file\n')]))
+
+    def test_a_checksum_that_is_a_symlink_is_refused(self):
+        os.unlink(self.snap + '.sha256')
+        os.symlink(os.path.join(self.dir, 'elsewhere'), self.snap + '.sha256')
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (2, '', f'REFUSED: {self.snap}.sha256: Too many levels of symbolic links\n'))
+
+    def test_no_checksum_is_tempfail(self):
+        os.unlink(self.snap + '.sha256')
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (75, '', f'TEMPFAIL: no checksum {SNAP}.sha256 in {self.snapshots}\n'))
+        self.assertEqual((len(runner.calls), os.listdir(self.scratch)), (2, []))
+
+    def test_a_checksum_that_is_not_a_sha256_is_tempfail(self):
+        for text, shown in (('', "''"), (SNAP_SHA256[:63] + '\n', repr(SNAP_SHA256[:63])),
+                            (SNAP_SHA256.upper() + '\n', repr(SNAP_SHA256.upper()[:80]))):
+            with self.subTest(text=text):
+                with open(self.snap + '.sha256', 'w', encoding='ascii') as f:
+                    f.write(text)
+                runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+                self.assertEqual(self.main(TRIAL_ARGV, runner),
+                                 (75, '', f'TEMPFAIL: {self.snap}.sha256: not a sha256: {shown}\n'))
+
+    def test_a_copy_that_does_not_match_its_checksum_is_tempfail_and_runs_nothing(self):
+        other = 'f' * 64
+        with open(self.snap + '.sha256', 'w', encoding='ascii') as f:
+            f.write(other + '\n')
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (75, '', f'TEMPFAIL: snapshot copy has sha256 {SNAP_SHA256}, its .sha256 says {other}\n'))
+        self.assertEqual((len(runner.calls), os.listdir(self.scratch)), (2, []))
+
+    def test_twice_the_snapshot_free_in_the_scratch_root_is_enough(self):
+        self.free = 2 * len(SNAP_BYTES)
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2, TRIAL_OK, done(), START_OK, done(), COMPAT_OK, done())
+        self.assertEqual(self.main(TRIAL_ARGV, runner)[0], 0)
+        self.assertEqual(self.free_asked, [self.scratch])
+
+    def test_less_than_twice_the_snapshot_free_is_tempfail_before_any_copy(self):
+        self.free = 2 * len(SNAP_BYTES) - 1
+        runner = FakeRunner(INSPECT_D1, INSPECT_D2)
+        self.assertEqual(self.main(TRIAL_ARGV, runner),
+                         (75, '', f'TEMPFAIL: {2 * len(SNAP_BYTES) - 1} bytes free on {self.scratch}, a trial of a '
+                                  f'{len(SNAP_BYTES)}-byte snapshot needs {2 * len(SNAP_BYTES)}\n'))
+        self.assertEqual((len(runner.calls), self.chowns, os.listdir(self.scratch)), (2, [], []))
+
 AUDIT_ARGV = [PODMAN, 'run', '--name', 'wbb-image-audit-4242-audit', '--rm', '--pull=never', '--network=host',
               '--read-only', '--tmpfs', '/tmp', '--cap-drop=ALL', '--security-opt=no-new-privileges',
-              '--user', '1001:1002', '--memory=1g', '--pids-limit=256',
+              '--user', f'{UID}:{GID}', '--memory=1g', '--pids-limit=256',
               '-e', 'TELEGRAM_BOT_TOKEN=123456:abcdefghij', '-e', 'OSRM_BASE_URL=http://x',
               '-e', 'NOMINATIM_USER_AGENT=x', '-e', 'WBB_RELEASE_REQUIRED=true', '-e', 'API_PORT=3000',
               f'{REPO}@{D1}', 'sh', '-c',
@@ -718,7 +899,7 @@ class Audit(HelperCase):
 TEMPLATE = (f'# activate fills in @@DIGEST@@, @@UID@@ and @@GID@@\n[Container]\nImage={REPO}@@@DIGEST@@\n'
             '  ; @@UID@@ is numeric\nUser=@@UID@@\nGroup=@@GID@@\n')
 WRITTEN = (f'# activate fills in @@DIGEST@@, @@UID@@ and @@GID@@\n[Container]\nImage={REPO}@{D1}\n'
-           '  ; @@UID@@ is numeric\nUser=1001\nGroup=1002\n')
+           f'  ; @@UID@@ is numeric\nUser={UID}\nGroup={GID}\n')
 RELOAD = [SYSTEMCTL, 'daemon-reload']
 RESTART = [SYSTEMCTL, 'restart', 'warsaw-beer-bot.service']
 
@@ -777,16 +958,42 @@ class Activate(HelperCase):
         self.assertEqual((self.read_quadlet()[0], os.path.lexists(self.quadlet + '.tmp')),
                          (f'Image={REPO}@{D2}\n', False))
 
-    def test_not_quadlet_after_the_reload_is_refused_without_a_restart(self):
+    def refused_after_reload(self, kind):
+        return (2, '', f'REFUSED: after daemon-reload warsaw-beer-bot.service was {kind}, not generated from '
+                       f'{self.quadlet}; the previous file is back, not restarted\n')
+
+    def test_not_quadlet_after_the_reload_puts_the_previous_file_back_and_does_not_restart(self):
+        previous = f'# the one before\nImage={REPO}@{D2}\n'
         for after, kind in ((show('loaded', '', '/etc/systemd/system/warsaw-beer-bot.service'), 'foreign'),
                             (show('not-found', '', ''), 'absent')):
             with self.subTest(kind=kind):
-                runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), after)
-                self.assertEqual(self.main(['activate', '--digest', D1], runner),
-                                 (2, '', f'REFUSED: after daemon-reload warsaw-beer-bot.service is {kind}, not generated '
-                                         f'from {self.quadlet}; not restarted\n'))
-                self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV])
-                self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
+                self.write_quadlet(previous)
+                runner = FakeRunner(INSPECT_D1, self.ours(), done(), after, done())
+                self.assertEqual(self.main(['activate', '--digest', D1], runner), self.refused_after_reload(kind))
+                self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV, RELOAD])
+                self.assertEqual((self.read_quadlet(), os.path.lexists(self.quadlet + '.tmp')),
+                                 ((previous, 0o644), False))
+
+    def test_not_quadlet_after_the_reload_removes_a_file_there_was_none_of(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(),
+                            show('loaded', '', '/etc/systemd/system/warsaw-beer-bot.service'), done())
+        self.assertEqual(self.main(['activate', '--digest', D1], runner), self.refused_after_reload('foreign'))
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV, RELOAD])
+        self.assertEqual((os.path.lexists(self.quadlet), os.path.lexists(self.quadlet + '.tmp')), (False, False))
+
+    def test_a_failing_reload_after_putting_the_file_back_is_tempfail(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), show('not-found', '', ''),
+                            done(1, stderr='Access denied\n'))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (75, '', 'TEMPFAIL: systemctl daemon-reload (restore) exited 1: Access denied\n'))
+        self.assertEqual(os.path.lexists(self.quadlet), False)
+
+    def test_a_previous_quadlet_path_that_is_not_a_file_is_refused_before_writing(self):
+        os.mkdir(self.quadlet)
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (2, '', f'REFUSED: {self.quadlet}: not a regular file\n'))
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV])
 
     def test_a_template_without_each_placeholder_exactly_once_is_refused_before_any_write(self):
         for text, counts in (
@@ -812,12 +1019,19 @@ class Activate(HelperCase):
                          (2, '', f'REFUSED: {self.template}: No such file or directory '
                                  '(sudo bash deploy/install-image.sh)\n'))
 
-    def test_a_failing_reload_or_restart_is_tempfail(self):
+    def test_a_restart_that_fails_is_a_verdict_on_the_activated_image(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(),
+                            done(1, stderr='Job for warsaw-beer-bot.service failed.\nSee "journalctl -xeu".\n'))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (1, 'ACTIVATE FAILED: restart exited 1: Job for warsaw-beer-bot.service failed. '
+                             'See "journalctl -xeu".\n', ''))
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV, RESTART])
+        self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
+
+    def test_a_failing_reload_or_a_restart_timeout_is_tempfail(self):
         for answers, message in (
             ([done(1, stderr='Access denied\n')], 'systemctl daemon-reload exited 1: Access denied'),
             ([subprocess.TimeoutExpired('systemctl', 60)], 'systemctl daemon-reload timed out after 60s'),
-            ([done(), self.ours(), done(1, stderr='Job failed\n')],
-             'systemctl restart warsaw-beer-bot.service exited 1: Job failed'),
             ([done(), self.ours(), subprocess.TimeoutExpired('systemctl', 180)],
              'systemctl restart warsaw-beer-bot.service timed out after 180s'),
         ):
@@ -838,7 +1052,7 @@ class Activate(HelperCase):
         lines = self.read_quadlet()[0].splitlines()
         self.assertEqual(([line for line in lines if line.startswith(('Image=', 'User=', 'Group='))],
                           wi.quadlet_digest(self.host(FakeRunner()))),
-                         ([f'Image={REPO}@{D1}', 'User=1001', 'Group=1002'], D1))
+                         ([f'Image={REPO}@{D1}', f'User={UID}', f'Group={GID}'], D1))
 
 
 LIB = '/usr/local/lib/wbb-image'

@@ -23,15 +23,20 @@ Output: the verdict is the last line on stdout —
   `PULLED <D> <image id> content=<wbb.content> revision=<sha>`
   trial, one line per step: `TRIAL OK: …` (trial-migrate's own line), `START OK <revision of D>`,
   `COMPAT OK <S>`; or, ending it, `TRIAL FAILED: …`, `START FAILED: …` or `COMPAT FAILED: <S's start-check line>`
-  (exit 1). The containers' output tails go to stderr. Each step runs in a container of its own on the same
-  private copy of the snapshot: TRIAL migrates it with D, START starts D on it, COMPAT starts S on what D left.
+  (exit 1) — S's `START FAILED: …`, or `START TIMEOUT: …` (S did not answer on the copy D has just started
+  on, under the same confinement: spec §6.3). An exit 1 is a verdict only with its FAILED line; START (D)
+  TIMEOUT, START KILLED (OOM) and anything else are 75. The containers' output tails go to stderr. Each step
+  runs in a container of its own on the same private copy of the snapshot, checked against its .sha256:
+  TRIAL migrates it with D, START starts D on it, COMPAT starts S on what D left.
   `AUDIT CLEAN <D>`; or `AUDIT ADVISORY <D>` followed by the verdict's own lines (exit 1)
-  `ACTIVATED <D>`
+  `ACTIVATED <D>`; or `ACTIVATE FAILED: restart exited <n>: <stderr tail>` (exit 1: the Quadlet file names D and
+  systemd could not start it)
   `CURRENT quadlet=<D|none> container-image=<id|none> container-digest=<D|none> unit=quadlet|foreign|absent`
   `PRUNED <n> skipped <m> kept <digest …>`
 Exit (as deploy/release/wbb_release.py):
    0  done
-   1  ONLY with a verdict on the candidate on stdout: TRIAL FAILED, START FAILED, COMPAT FAILED, AUDIT ADVISORY
+   1  ONLY with a verdict on the candidate on stdout: TRIAL FAILED, START FAILED, COMPAT FAILED, AUDIT ADVISORY,
+      ACTIVATE FAILED
    2  refused: an input or a precondition (`REFUSED: …` on stderr) — not a verdict on the candidate
   64  usage
   70  internal error (a traceback on stderr); also a module of the helper that fails to import
@@ -39,6 +44,7 @@ Exit (as deploy/release/wbb_release.py):
 """
 import argparse
 import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -89,6 +95,8 @@ START_TIMEOUT_S = 150
 AUDIT_TIMEOUT_S = 300
 # The first line of a container's stdout that becomes a verdict line is cut to this.
 LINE_CHARS = 1000
+# The .sha256 sidecar db-snapshot.sh writes: 64 hex and a newline.
+CHECKSUM_CAP = 256
 PLACEHOLDERS = ('@@DIGEST@@', '@@UID@@', '@@GID@@')
 # How much of a failing command's stderr a TEMPFAIL line carries.
 TAIL_CHARS = 2000
@@ -124,8 +132,10 @@ class Host:
     free_bytes: Callable[[str], int]
     # (uid, gid) of the bot's user.
     bot_ids: Callable[[], tuple]
-    # os.chown's signature; a test running unprivileged records the call instead.
-    chown: Callable
+    # os.fchown's signature; a test running unprivileged records the call instead.
+    fchown: Callable
+    # Who must own scratch_root (root in production; the test's own uid in tests).
+    scratch_owner: int
     # Part of the trial/audit container names: this process's pid.
     pid: Callable[[], int]
 
@@ -151,7 +161,8 @@ PRODUCTION = Host(
     containers_root='/var/lib/containers',
     free_bytes=_free_bytes,
     bot_ids=_bot_ids,
-    chown=os.chown,
+    fchown=os.fchown,
+    scratch_owner=0,
     pid=os.getpid,
 )
 
@@ -398,32 +409,87 @@ def _report(step, r):
             print(_tail(stream), file=sys.stderr)
 
 
-def _open_snapshot(host, name):
-    """A descriptor of the pre snapshot `name` in the snapshot root: a regular file, never through a symlink."""
-    check_snapshot_name(name)
-    path = os.path.join(host.snapshot_root, name)
+def _check_scratch_root(host):
+    """The parent of the trial copies: a directory only its owner (root) can enter."""
+    try:
+        st = os.lstat(host.scratch_root)
+    except FileNotFoundError:
+        raise Refused(f'{host.scratch_root}: missing (sudo bash deploy/install-image.sh)') from None
+    if not (stat.S_ISDIR(st.st_mode) and st.st_uid == host.scratch_owner and stat.S_IMODE(st.st_mode) == 0o700):
+        raise Refused(f'{host.scratch_root}: must be a directory owned by uid {host.scratch_owner} with mode 0700, '
+                      f'is uid {st.st_uid} mode {stat.S_IMODE(st.st_mode):04o}'
+                      f'{"" if stat.S_ISDIR(st.st_mode) else " (not a directory)"}')
+
+
+def _open_regular(path, missing):
+    """A descriptor and fstat of a regular file at `path`, never through a symlink; O_NONBLOCK, so a FIFO put in
+    its place is refused instead of hanging the open. A missing file raises `missing`."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
     except FileNotFoundError:
-        raise TempFail(f'no snapshot {name} in {host.snapshot_root}') from None
+        raise missing from None
     except OSError as e:
         raise Refused(f'{path}: {e.strerror}') from None
-    if not stat.S_ISREG(os.fstat(fd).st_mode):
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode):
         os.close(fd)
         raise Refused(f'{path}: not a regular file')
-    return fd
+    return fd, st
 
 
-def _copy_snapshot(host, fd, scratch):
+def _open_snapshot(host, name):
+    """The pre snapshot `name`: a descriptor, its fstat and the sha256 its sidecar records.
+
+    db-snapshot.sh runs as the bot and writes `<name>.sha256` next to the snapshot; a snapshot of another owner or
+    with another link to it is not one it made. A missing or unreadable sidecar is TEMPFAIL: the next tick takes a
+    fresh pre.
+    """
+    check_snapshot_name(name)
+    path = os.path.join(host.snapshot_root, name)
+    fd, st = _open_regular(path, TempFail(f'no snapshot {name} in {host.snapshot_root}'))
+    try:
+        uid, _ = host.bot_ids()
+        if st.st_uid != uid or st.st_nlink != 1:
+            raise Refused(f'{path}: owned by uid {st.st_uid} with {st.st_nlink} link(s), expected uid {uid} and 1')
+        sfd, _ = _open_regular(path + '.sha256', TempFail(f'no checksum {name}.sha256 in {host.snapshot_root}'))
+        with os.fdopen(sfd, 'rb') as f:
+            recorded = f.read(CHECKSUM_CAP).decode('ascii', 'replace').strip()
+        if not IMAGE_ID.fullmatch(recorded):
+            raise TempFail(f'{path}.sha256: not a sha256: {recorded[:80]!r}')
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, st, recorded
+
+
+def _copy_snapshot(host, fd, recorded, scratch):
+    """<scratch>/app.db: the snapshot's bytes, hashed as they are read from the same descriptor and compared with
+    its sidecar; the copy and then (complete and closed) the scratch directory go to the bot."""
     uid, gid = host.bot_ids()
-    host.chown(scratch, uid, gid)
-    os.chmod(scratch, 0o700)
     db = os.path.join(scratch, 'app.db')
+    h = hashlib.sha256()
     out = os.open(db, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(out, 'wb') as dst, os.fdopen(os.dup(fd), 'rb') as src:
-        shutil.copyfileobj(src, dst, 1 << 20)
-    host.chown(db, uid, gid)
-    os.chmod(db, 0o600)
+    try:
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            h.update(chunk)
+            view = memoryview(chunk)
+            while view:
+                view = view[os.write(out, view):]
+        host.fchown(out, uid, gid)
+        os.fchmod(out, 0o600)
+    finally:
+        os.close(out)
+    if h.hexdigest() != recorded:
+        raise TempFail(f'snapshot copy has sha256 {h.hexdigest()}, its .sha256 says {recorded}')
+    dfd = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        host.fchown(dfd, uid, gid)
+        os.fchmod(dfd, 0o700)
+    finally:
+        os.close(dfd)
 
 
 def _start_check(host, step, digest, scratch):
@@ -438,23 +504,23 @@ def _trial_steps(host, digest, previous, revision, previous_revision, scratch):
     first = _first_line(r.stdout)
     if r.returncode == 0 and first.startswith('TRIAL OK'):
         print(first)
-    elif r.returncode == 1:
-        print(f'TRIAL FAILED: {first.removeprefix("TRIAL FAILED: ")}')
+    elif r.returncode == 1 and first.startswith('TRIAL FAILED:'):
+        print(first)
         _report('trial', r)
         return EX_FAILED
     else:
         _report('trial', r)
         if r.returncode == 0:
             raise Refused(f'trial-migrate in {digest} exited 0 with {first!r}, not TRIAL OK')
-        raise TempFail(f'trial-migrate in {digest} exited {r.returncode}')
+        raise TempFail(f'trial-migrate in {digest} exited {r.returncode}' + _said(first))
 
     # START (D): the candidate starts on the migrated copy.
     r = _start_check(host, 'start', digest, scratch)
     first = _first_line(r.stdout)
     if r.returncode == 0 and first == f'START OK {revision}':
         print(first)
-    elif r.returncode == 1:
-        print(f'START FAILED: {first.removeprefix("START FAILED: ")}')
+    elif r.returncode == 1 and first.startswith('START FAILED:'):
+        print(first)
         _report('start', r)
         return EX_FAILED
     else:
@@ -472,7 +538,9 @@ def _trial_steps(host, digest, previous, revision, previous_revision, scratch):
     if r.returncode == 0 and first == f'START OK {previous_revision}':
         print(f'COMPAT OK {previous}')
         return 0
-    if r.returncode == 1:
+    # Spec §6.3: S that fails or does not answer on the copy D has just started on, under the same confinement.
+    if (r.returncode == 1 and first.startswith('START FAILED:')) or \
+            (r.returncode == EX_TEMPFAIL and first.startswith('START TIMEOUT')):
         print(f'COMPAT FAILED: {first}')
         _report('compat', r)
         return EX_FAILED
@@ -489,13 +557,18 @@ def trial(host, digest, previous, snapshot):
     check_digest(digest)
     check_digest(previous)
     check_snapshot_name(snapshot)
+    _check_scratch_root(host)
     revision = inspect_ours(host, digest)['Labels'][REVISION_LABEL]
     previous_revision = inspect_ours(host, previous)['Labels'][REVISION_LABEL]
-    fd = _open_snapshot(host, snapshot)
+    fd, st, recorded = _open_snapshot(host, snapshot)
     scratch = None
     try:
+        free = host.free_bytes(host.scratch_root)
+        if free < 2 * st.st_size:
+            raise TempFail(f'{free} bytes free on {host.scratch_root}, a trial of a {st.st_size}-byte snapshot '
+                           f'needs {2 * st.st_size}')
         scratch = tempfile.mkdtemp(prefix='trial-', dir=host.scratch_root)
-        _copy_snapshot(host, fd, scratch)
+        _copy_snapshot(host, fd, recorded, scratch)
         os.close(fd)
         fd = None
         return _trial_steps(host, digest, previous, revision, previous_revision, scratch)
@@ -554,9 +627,17 @@ def render_template(lines, digest, uid, gid):
                    for line in lines)
 
 
-def _write_atomically(path, text):
-    """`path` holds `text` or what it held before, never a part: a 0644 temp file in the same directory, fsync,
-    rename over it, fsync of the directory."""
+def _fsync_dir(directory):
+    dfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+def _write_atomically(path, data):
+    """`path` holds `data` (bytes) or what it held before, never a part: a 0644 temp file in the same directory,
+    fsync, rename over it, fsync of the directory."""
     directory = os.path.dirname(path)
     os.makedirs(directory, mode=0o755, exist_ok=True)
     tmp = path + '.tmp'
@@ -568,7 +649,7 @@ def _write_atomically(path, text):
     try:
         os.fchmod(fd, 0o644)
         with os.fdopen(fd, 'wb') as f:
-            f.write(text.encode('utf-8'))
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -578,11 +659,34 @@ def _write_atomically(path, text):
         except FileNotFoundError:
             pass
         raise
-    dfd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    _fsync_dir(directory)
+
+
+def _read_previous(host):
+    """The Quadlet file's bytes before activate writes it, or None when there is none."""
     try:
-        os.fsync(dfd)
-    finally:
-        os.close(dfd)
+        fd, _ = _open_regular(host.quadlet_path, FileNotFoundError())
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, 'rb') as f:
+        return f.read(1 << 20)
+
+
+def _restore(host, previous):
+    """Put back what the Quadlet file held before this activate (or no file), and let systemd see it."""
+    if previous is None:
+        try:
+            os.unlink(host.quadlet_path)
+        except FileNotFoundError:
+            pass
+        _fsync_dir(os.path.dirname(host.quadlet_path))
+    else:
+        _write_atomically(host.quadlet_path, previous)
+    _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload (restore)')
+
+
+def _one_line(text):
+    return ' '.join((text or '').split())[-LINE_CHARS:]
 
 
 def activate(host, digest):
@@ -591,38 +695,60 @@ def activate(host, digest):
     if before == 'foreign':
         raise Refused(f'{UNIT} is not generated from {host.quadlet_path} (a unit elsewhere shadows it?)')
     lines = _read_template(host)
+    previous = _read_previous(host)
     uid, gid = host.bot_ids()
-    _write_atomically(host.quadlet_path, render_template(lines, digest, uid, gid))
+    _write_atomically(host.quadlet_path, render_template(lines, digest, uid, gid).encode('utf-8'))
     _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload')
     after = unit_type(host)
     if after != 'quadlet':
-        raise Refused(f'after daemon-reload {UNIT} is {after}, not generated from {host.quadlet_path}; not restarted')
-    _must(host, [host.systemctl, 'restart', UNIT], RESTART_TIMEOUT_S, f'systemctl restart {UNIT}')
-    return f'ACTIVATED {digest}'
+        _restore(host, previous)
+        raise Refused(f'after daemon-reload {UNIT} was {after}, not generated from {host.quadlet_path}; '
+                      'the previous file is back, not restarted')
+    r = _call(host, [host.systemctl, 'restart', UNIT], RESTART_TIMEOUT_S, f'systemctl restart {UNIT}')
+    if r.returncode != 0:
+        # The file names D and systemd could not start it: a verdict on D in production (stage б rolls back).
+        print(f'ACTIVATE FAILED: restart exited {r.returncode}: {_one_line(_tail(r.stderr))}')
+        return EX_FAILED
+    print(f'ACTIVATED {digest}')
+    return 0
 
 
 # --- retention (spec §9) ---
+
+def _listed_images(stdout):
+    """(id, digests) of each image in `podman images --format json`; anything else refuses the prune."""
+    try:
+        data = json.loads(stdout or '[]')
+    except ValueError:
+        raise Refused(f'podman images: not JSON: {_tail(stdout)[:200]!r}') from None
+    if not isinstance(data, list):
+        raise Refused(f'podman images: not a list: {_tail(stdout)[:200]!r}')
+    images = []
+    for entry in data:
+        image_id = entry.get('Id') if isinstance(entry, dict) else None
+        repo_digests = entry.get('RepoDigests') if isinstance(entry, dict) else None
+        digest = entry.get('Digest') if isinstance(entry, dict) else None
+        names = repo_digests if repo_digests is not None else []
+        if not (isinstance(image_id, str) and IMAGE_ID.fullmatch(image_id) and isinstance(names, list)
+                and all(isinstance(n, str) and '@' in n and DIGEST.fullmatch(n.rsplit('@', 1)[1]) for n in names)
+                and isinstance(digest, str) and DIGEST.fullmatch(digest)):
+            raise Refused(f'podman images: unexpected entry {json.dumps(entry)[:300]}')
+        images.append((image_id, {n.rsplit('@', 1)[1] for n in names} | {digest}))
+    return images
+
 
 def prune(host, keep):
     keep = {check_digest(d) for d in keep}
     pinned = quadlet_digest(host)
     if pinned is not None:
         keep.add(pinned)
-    r = _must(host, [host.podman, 'images', '--filter', f'reference={REPOSITORY}', '--format', '{{.Id}} {{.Digest}}'],
+    r = _must(host, [host.podman, 'images', '--filter', f'reference={REPOSITORY}', '--format', 'json'],
               INSPECT_TIMEOUT_S, 'podman images')
-    rows = []
-    for line in r.stdout.splitlines():
-        if not line.strip():
-            continue
-        fields = line.split()
-        if not (len(fields) == 2 and IMAGE_ID.fullmatch(fields[0]) and DIGEST.fullmatch(fields[1])):
-            # Nothing is removed on a listing this helper cannot read.
-            raise Refused(f'podman images: unexpected line {line!r}')
-        rows.append((fields[0], fields[1]))
-    # An image listed under a kept digest is kept under every other name too: rmi takes the image, not a name.
-    kept_ids = {image_id for image_id, d in rows if d in keep}
+    images = _listed_images(r.stdout)
+    # An image with any kept digest among its names is kept: rmi takes the image, not a name.
+    kept_ids = {image_id for image_id, digests in images if digests & keep}
     removed = skipped = 0
-    for image_id in dict.fromkeys(image_id for image_id, _ in rows if image_id not in kept_ids):
+    for image_id in dict.fromkeys(image_id for image_id, _ in images if image_id not in kept_ids):
         rr = _call(host, [host.podman, 'rmi', image_id], RMI_TIMEOUT_S, f'podman rmi {image_id}')
         if rr.returncode == 0:
             removed += 1
@@ -635,19 +761,21 @@ def prune(host, keep):
 # --- entry point ---
 
 def _parser():
-    ap = argparse.ArgumentParser(prog='wbb-image', description='Pull, trial, audit, activate, inspect or prune the bot image on this host.')
+    # No -h/--help: argparse would exit 0 on it, the code of "done" (an unknown option is 64 instead).
+    ap = argparse.ArgumentParser(prog='wbb-image', add_help=False,
+                                 description='Pull, trial, audit, activate, inspect or prune the bot image on this host.')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    p = sub.add_parser('pull')
+    p = sub.add_parser('pull', add_help=False)
     p.add_argument('--sha', required=True)
     p.add_argument('--digest', required=True)
-    t = sub.add_parser('trial')
+    t = sub.add_parser('trial', add_help=False)
     t.add_argument('--digest', required=True)
     t.add_argument('--previous', required=True)
     t.add_argument('--snapshot', required=True)
-    sub.add_parser('audit').add_argument('--digest', required=True)
-    sub.add_parser('activate').add_argument('--digest', required=True)
-    sub.add_parser('current')
-    sub.add_parser('prune').add_argument('--keep', action='append', required=True)
+    sub.add_parser('audit', add_help=False).add_argument('--digest', required=True)
+    sub.add_parser('activate', add_help=False).add_argument('--digest', required=True)
+    sub.add_parser('current', add_help=False)
+    sub.add_parser('prune', add_help=False).add_argument('--keep', action='append', required=True)
     return ap
 
 
@@ -659,7 +787,7 @@ def _run(a, host):
     if a.cmd == 'pull':
         print(pull(host, a.sha, a.digest))
     elif a.cmd == 'activate':
-        print(activate(host, a.digest))
+        return activate(host, a.digest)
     elif a.cmd == 'current':
         print(current(host))
     else:
