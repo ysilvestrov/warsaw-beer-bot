@@ -157,8 +157,8 @@ jobs:
           echo "$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
-      # Spec §4.2: the production tree as it ships, audited from the image exactly as the host's
-      # deploy-time audit runs it. npm's exit code cannot tell an advisory from a failure to audit;
+      # Spec §4.2: the production tree as it ships, audited from the image with the host's
+      # deploy-time command (the host adds its confinement: --read-only --cap-drop=ALL --network=host). npm's exit code cannot tell an advisory from a failure to audit;
       # the verdict CLI decides (0 clean, 10 advisory, anything else could not run) and any
       # non-zero is red. The pipeline's status is the CLI's.
       # Last, so on a main push publication (push, attest, record) does not depend on when an

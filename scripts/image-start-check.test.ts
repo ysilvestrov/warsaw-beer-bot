@@ -118,6 +118,28 @@ describe('start-check', () => {
     expect([r.status, r.stdout.split('\n')[0]]).toEqual([1, 'START FAILED: an unhandled rejection other than the offline Telegram launch ended the bot']);
   });
 
+  // Spec §5: an OOM is "could not judge", never a verdict on the candidate; in the container
+  // only the kernel can SIGKILL the bot (V11).
+  test('a bot killed by SIGKILL before api listening is START KILLED, exit 75', async () => {
+    const dir = scratch();
+    const bot = join(dir, 'oom.cjs');
+    writeFileSync(bot, "process.stdout.write('loading catalog\\n'); process.kill(process.pid, 'SIGKILL');");
+    const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()) });
+    expect(r).toEqual({
+      status: 75,
+      stdout: 'START KILLED: the bot was killed (SIGKILL) before "api listening"\noutput tail:\nloading catalog\n\n',
+      stderr: '',
+    });
+  });
+
+  test('a bot killed by SIGKILL right after a healthy /health is START KILLED, exit 75', async () => {
+    const dir = scratch();
+    const bot = servingBot(dir, { status: 200, body: { ok: true, releaseSha: SHA } },
+      `${LOG_READY} setTimeout(() => process.kill(process.pid, 'SIGKILL'), 300);`);
+    const r = run(['--entry', bot, '--timeout', '10'], { API_PORT: String(await freePort()), STOP_MARKER: join(dir, 'm') });
+    expect([r.status, r.stdout.split('\n')[0]]).toEqual([75, 'START KILLED: the bot was killed (SIGKILL) after a healthy /health']);
+  });
+
   test('a bot that dies before api listening is START FAILED with its output tail', async () => {
     const dir = scratch();
     const bot = join(dir, 'crash.cjs');

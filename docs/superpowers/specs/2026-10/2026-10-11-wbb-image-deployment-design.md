@@ -36,7 +36,7 @@
 | V10 | Ланцюжок §3.3 і юніт §3.2 під Quadlet | `podman container inspect`: `.Image` == ID I з `image inspect`, `.ImageDigest` == D, `.ImageName`/`.Config.Image` == `ghcr.io/…@D`; `systemctl show`: `SourcePath` = наш `.container`, `FragmentPath` = `/run/systemd/generator/<unit>.service`, `UnitFileState=generated`; `quadlet -dryrun` на справжньому шаблоні без помилок |
 | V11 | Сигнали під AppArmor хоста (Ubuntu 24.04, podman 4.9.3, crun 1.14.1, профіль `containers-default-0.57.4-apparmor1`) | Усі процеси контейнера мають мітку `containers-default-…//&crun (mixed)`, і **процес у контейнері не може надіслати сигнал іншому процесу того самого контейнера** (`kill` → EACCES, `apparmor="DENIED" operation="signal"`; і з node, і з `sh`); з `apparmor=unconfined` — може. Сигнали **ззовні** доходять: справжній бот під Quadlet (офлайн, копія БД) на `systemctl stop` пише `shutdown initiated` → `shutdown done`, зупинка 0,2 с, `ExecMainStatus=0`, двічі; відмов ядра при цьому немає |
 | V12 | Записи в дерево коду (звіт preflight `finish`, 12.10) | Після останнього старту бота (18 год, що покривають кожен розклад cron у `src/index.ts`, найрідший — раз на добу) — 0 записів у `/opt/warsaw-beer-bot` і 0 EACCES/EROFS/EPERM/ENOENT із `/opt` у журналі бота |
-| V13 | Старт справжнього бота на копії прод-БД | `api listening` за ~21 с (з них ~18 с — `dedupe-brewery-aliases`); ліміт START/COMPAT 60 с має запас утричі |
+| V13 | Старт справжнього бота на копії прод-БД | `api listening` за ~21 с (з них ~18 с — `dedupe-brewery-aliases`); ліміт START/COMPAT 90 с має запас учетверо |
 
 Проба V5 ішла з реальним `.env` (без мережі); у робочій схемі compat і trial отримують підставне оточення (§6.3). Пункти, що лишалися недоведеними після 11.10, закриті 12.10: цикл кронів — V12, ланцюжок §3.3 — V10. V11 змінив механізм START (§6.3): чинний `start-check` зупиняв бота сигналом зсередини контейнера й на цьому хості не проходив би ніколи.
 
@@ -128,11 +128,11 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 | `pull --sha X --digest D` | `podman pull ghcr.io/ysilvestrov/warsaw-beer-bot@D`; друкує `PULLED D I content=<…>` | X — 40 hex, D — `sha256:` + 64 hex; `.Digest == D`, мітка `revision == X`; перед pull — ≥5 GiB вільного |
 | `audit --digest D` | §4.2, у контейнері з `--network=host` (мережа потрібна npm-реєстру; bridge-мережа rootful podman на хості не перевірена, а host — так, V10), read-only, без `.env`, без томів, UID бота | Образ нашого репо |
 | `trial --digest D --previous S --snapshot NAME` | §6.3: TRIAL, START (кандидат), COMPAT (S) на одній копії | NAME — ім'я з каталогу знімків, не шлях; D і S — локальні образи нашого репо; `--network=none --read-only --cap-drop=ALL --user <uid>:<gid> --memory --pids-limit`; підставне оточення, без `.env` |
-| `activate --digest D` | Перевірка юніта (§3.2); атомарний запис Quadlet-файлу з `Image=…@D`; `daemon-reload`; `systemctl restart warsaw-beer-bot` | Образ нашого репо |
-| `current` | `Quadlet-Image=<D> container-image=<I> container-digest=<D'> unit=quadlet|foreign` | — |
+| `activate --digest D` | Перевірка юніта (§3.2); атомарний запис Quadlet-файлу з `Image=…@D`; `daemon-reload`; юніт після нього не наш → попередній файл відновлюється, `REFUSED`; `systemctl restart warsaw-beer-bot`: ненульовий вихід — `ACTIVATE FAILED` (вихід 1: вердикт про D у production, вікно вважає це провалом), тайм-аут — 75 | Образ нашого репо |
+| `current` | `CURRENT quadlet=<D> container-image=<I> container-digest=<D'> unit=quadlet|foreign|absent` (`absent` — юніта нема: перша активація після видалення старого) | — |
 | `prune --keep D…` | Видаляє інші образи нашого репо | Ніколи — образ із Quadlet-файлу й `--keep` |
 
-Вихід — один рядок вердикту; коди як у `wbb_release.py`: 0; 1 лише разом із вердиктом про кандидата (`TRIAL FAILED`, `COMPAT FAILED`, `AUDIT ADVISORY`); 2 `REFUSED:` (вхід чи передумова); 64; 70 (виняток); **75 — не вдалося перевірити** (podman/OOM/таймаут/нема реєстру). `autodeploy.sh` розрізняє «поганий кандидат», «відмова» і «повторити».
+Вихід — один рядок вердикту; коди як у `wbb_release.py`: 0; 1 лише разом із вердиктом про кандидата (`TRIAL FAILED`, `START FAILED`, `COMPAT FAILED`, `AUDIT ADVISORY`, `ACTIVATE FAILED` — `autodeploy.sh` розгалужується за рядком, не за кодом: failed-SHA і hold обидва мають 1); 2 `REFUSED:` (вхід чи передумова); 64; 70 (виняток); **75 — не вдалося перевірити** (podman/OOM/таймаут/нема реєстру). `autodeploy.sh` розрізняє «поганий кандидат», «відмова» і «повторити».
 
 «Образ нашого репо» = локальний образ, у якого `RepoDigests` містить `ghcr.io/ysilvestrov/warsaw-beer-bot@…` і є мітка `revision`.
 
@@ -158,12 +158,12 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 
 1. **TRIAL**: D мігрує копію двічі, цілісність (чинний `trial-migrate.cjs`).
 2. **START (D)**: D стартує на копії до рядка `api listening` і завершення стартових backfill-ів, відповідає `/health` зсередини контейнера. Це **позитивний контроль**: середовище здатне стартувати бота — і водночас застосовує до копії стартові перетворення D (§6.1 п.2). Бота **не зупиняють сигналом**: процес у контейнері не може сигналити іншому процесу того самого контейнера (V11). `start-check --leave-running` друкує вердикт і виходить; він — PID 1 контейнера, тож його вихід розбирає PID-простір, і ядро вбиває бота (SIGKILL ядра AppArmor не перевіряє). Копія після цього не закрита чисто — для WAL-копії, яку наступний крок відкриває заново, це штатно.
-3. **COMPAT (S)**: S стартує на тій самій копії й відповідає `/health` (`releaseSha == S`) за 60 с — тим самим `start-check --leave-running`, але **з образу S**. Тож S мусить знати `--leave-running`: образи до цієї поправки ціллю відкату бути не можуть. Перший образ-реліз активує людина без compat (§8 п.2), і він уже з поправкою — далі кожен settled її має.
+3. **COMPAT (S)**: S стартує на тій самій копії й відповідає `/health` (`releaseSha == S`) за 90 с — тим самим `start-check --leave-running`, але **з образу S**. Тож S мусить знати `--leave-running`: образи до цієї поправки ціллю відкату бути не можуть. Перший образ-реліз активує людина без compat (§8 п.2), і він уже з поправкою — далі кожен settled її має.
 
 Вердикти:
 - `COMPAT OK` — S стартує після міграцій і стартових перетворень D. Деплой автоматичний, відкат у вікні — лише коду.
 - `COMPAT FAILED` — **доведена несумісність**: START (D) пройшов, а S на тій самій копії вийшов із помилкою або не відповів. Кандидат не деплоїться автоматично (як hold, не failed-SHA); повідомлення з причиною й хвостом логу S; людина може задеплоїти вручну (§6.4).
-- Не вдалося перевірити (вихід 75: podman, OOM, таймаут START (D), нема знімка) — повтор на наступному tick-у; `--ack-incompatible` **не** пропонується.
+- Не вдалося перевірити (вихід 75: podman, OOM — `START KILLED`, бо в контейнері SIGKILL боту шле лише ядро, V11; таймаут START (D); нема знімка чи його sha256 не збігся) — повтор на наступному tick-у; `--ack-incompatible` **не** пропонується. Таймаут S — це «не відповів», тобто `COMPAT FAILED`: D щойно стартував на тій самій копії в тій самій ізоляції.
 
 Чого автоматика не перевіряє: записів D під час роботи (§6.1 п.3) і семантики даних, яку старий код прочитає без помилки, але неправильно (клас v22). Це закривають правила §6.2, цільові тести й рев'ю.
 

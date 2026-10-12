@@ -61,6 +61,7 @@ function setup(stub: { visudoExit?: number; quadletExit?: number; quadletStderr?
     log,
     env: {
       PATH: `${bin}:${process.env.PATH ?? ''}`,
+      ...GIT_ENV,
       WBB_IMAGE_DESTDIR: dest,
       STUB_LOG: log,
       VISUDO_EXIT: String(stub.visudoExit ?? 0),
@@ -75,17 +76,28 @@ function run(s: Setup, args: string[] = []) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
+// The local gate runs as another user than the checkout's owner, where git refuses the repo
+// (safe.directory); CI owns its checkout. Command-line config via the environment, for git only.
+const GIT_ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: ROOT };
+
+/** HEAD's bytes of a repo file: what the installer installs, whatever the worktree holds. */
+function head(path: string): Buffer {
+  return spawnSync('git', ['show', `HEAD:${path}`], { cwd: ROOT, env: { ...process.env, ...GIT_ENV }, maxBuffer: 16 << 20 }).stdout;
+}
+
+const HEAD_SHORT = spawnSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: ROOT, env: { ...process.env, ...GIT_ENV }, encoding: 'utf8' }).stdout.trim();
+
 function mode(path: string): string {
   return (statSync(path).mode & 0o777).toString(8);
 }
 
 describe('install-image.sh', () => {
-  test('installs every file as a byte copy with its mode, and the scratch directory 0700', () => {
+  test('installs HEAD\'s bytes of every file with its mode, and the scratch directory 0700', () => {
     const s = setup();
     const r = run(s);
     expect(r.status, r.stderr).toBe(0);
     expect(INSTALLED.map(([src, target]) => [
-      target, mode(join(s.dest, target)), readFileSync(join(s.dest, target)).equals(readFileSync(join(ROOT, src))),
+      target, mode(join(s.dest, target)), readFileSync(join(s.dest, target)).equals(head(src)),
     ])).toEqual(INSTALLED.map(([, target, m]) => [target, m, true]));
     expect(mode(join(s.dest, '/var/lib/wbb-image'))).toBe('700');
   });
@@ -94,8 +106,8 @@ describe('install-image.sh', () => {
     const s = setup();
     run(s);
     const log = readFileSync(s.log, 'utf8').split('\n');
-    const template = readFileSync(join(ROOT, 'deploy/image/warsaw-beer-bot.container'), 'utf8').split('\n');
-    expect(log[0]).toBe('visudo -cf deploy/sudoers.d/wbb-image');
+    const template = head('deploy/image/warsaw-beer-bot.container').toString('utf8').split('\n');
+    expect(log[0]).toMatch(/^visudo -cf \/\S+\/deploy\/sudoers\.d\/wbb-image$/);
     expect(log[1]).toBe('quadlet -dryrun');
     const rendered = log.slice(2, 2 + template.length);
     expect([
@@ -109,7 +121,7 @@ describe('install-image.sh', () => {
     const s = setup();
     run(s);
     const r = run(s, ['--check']);
-    expect([r.status, r.stdout.startsWith('wbb-image: every installed copy matches ')]).toEqual([0, true]);
+    expect([r.status, r.stdout]).toEqual([0, `wbb-image: every installed copy matches HEAD ${HEAD_SHORT}\n`]);
   });
 
   test('--check names a changed copy and a wrong mode, and exits 1', () => {
@@ -126,17 +138,17 @@ describe('install-image.sh', () => {
     ].join('\n')]);
   });
 
-  test('--check on a host where nothing is installed lists everything and writes nothing', () => {
+  test('--check on a host where nothing is installed lists every file and both directories, and writes nothing', () => {
     const s = setup();
     const r = run(s, ['--check']);
     expect([r.status, r.stdout.split('\n').length - 2, existsSync(join(s.dest, 'usr')), readFileSync(s.log, 'utf8')])
-      .toEqual([1, INSTALLED.length + 1, false, '']);
+      .toEqual([1, INSTALLED.length + 2, false, '']);
   });
 
   test('sudoers rules that visudo rejects install nothing', () => {
     const s = setup({ visudoExit: 1 });
     const r = run(s);
-    expect([r.status === 0, existsSync(join(s.dest, 'usr')), existsSync(join(s.dest, 'etc'))]).toEqual([false, false, false]);
+    expect([r.status, existsSync(join(s.dest, 'usr')), existsSync(join(s.dest, 'etc'))]).toEqual([1, false, false]);
   });
 
   test.each([

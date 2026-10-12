@@ -13,11 +13,16 @@
 # helper that is not there yet. Never enables, starts or stops a unit and never touches
 # /etc/containers/systemd: only `wbb-image activate` writes the Quadlet file.
 #
-# --check writes nothing: exit 0 when every installed copy matches this checkout (content, mode, root:root),
-# 1 with the differences listed.
+# What is installed are the bytes of HEAD (git objects), never the worktree, and the checkout must be clean
+# (`git status --porcelain`): what the human sees in the checkout is what root installs, and a symlinked or edited
+# worktree file is not followed (as deploy/release/installer.py, e2e review of the transition core). git runs as
+# root in the operator's checkout, so it writes nothing there: --no-optional-locks, no fsmonitor, no hooks.
 #
-# WBB_IMAGE_DESTDIR (tests only): prefix of every target path; then no root, no -o root, and `visudo` and
-# `quadlet` come from PATH.
+# --check writes nothing: exit 0 when every installed copy matches HEAD (content, mode, root:root), 1 with the
+# differences listed.
+#
+# WBB_IMAGE_DESTDIR (tests only): prefix of every target path; then no root, no -o root, no clean-checkout
+# requirement (the bytes still come from HEAD), and `visudo` and `quadlet` come from PATH.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -35,6 +40,13 @@ if [ -z "$DEST" ] && [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+GIT=(git --no-optional-locks -c core.fsmonitor=false -c core.hooksPath=/dev/null)
+if [ -z "$DEST" ] && [ -n "$("${GIT[@]}" status --porcelain)" ]; then
+  echo "ERROR: the checkout is not clean (git status --porcelain); install from a clean checkout of main" >&2
+  exit 1
+fi
+head=$("${GIT[@]}" rev-parse --verify 'HEAD^{commit}')
+
 LIB=/usr/local/lib/wbb-image
 SCRATCH=/var/lib/wbb-image
 # source  target  mode — in install order: the library and the template, the wrapper, the sudoers rules last.
@@ -46,6 +58,21 @@ FILES=(
   "deploy/sudoers.d/wbb-image                /etc/sudoers.d/wbb-image         0440"
 )
 
+# HEAD's bytes of each source, staged in a private directory: a regular file in git (100644/100755), never a
+# symlink (120000) or a submodule.
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+for entry in "${FILES[@]}"; do
+  read -r src _ _ <<<"$entry"
+  kind=$("${GIT[@]}" ls-tree "$head" -- "$src" | cut -d' ' -f1-2)
+  if [ "$kind" != "100644 blob" ] && [ "$kind" != "100755 blob" ]; then
+    echo "ERROR: HEAD ${head:0:7} does not track $src as a regular file ('$kind')" >&2
+    exit 1
+  fi
+  mkdir -p "$stage/$(dirname "$src")"
+  "${GIT[@]}" cat-file blob "$head:$src" > "$stage/$src"
+done
+
 if [ "$CHECK" -eq 1 ]; then
   diffs=0
   report() { echo "DIFFERS: $1"; diffs=$((diffs + 1)); }
@@ -53,16 +80,23 @@ if [ "$CHECK" -eq 1 ]; then
     read -r src target mode <<<"$entry"
     t="$DEST$target"
     if [ ! -f "$t" ] || [ -L "$t" ]; then report "$target (not installed)"; continue; fi
-    cmp -s "$src" "$t" || report "$target (content)"
+    cmp -s "$stage/$src" "$t" || report "$target (content)"
     [ "$(stat -c %a "$t")" = "${mode#0}" ] || report "$target (mode $(stat -c %a "$t"), want ${mode#0})"
     if [ -z "$DEST" ] && [ "$(stat -c %U:%G "$t")" != root:root ]; then report "$target (owner $(stat -c %U:%G "$t"))"; fi
   done
-  if [ ! -d "$DEST$SCRATCH" ] || [ "$(stat -c %a "$DEST$SCRATCH")" != 700 ]; then report "$SCRATCH (missing or not 0700)"; fi
+  for d in "$LIB 755" "$SCRATCH 700"; do
+    read -r dir want <<<"$d"
+    if [ ! -d "$DEST$dir" ] || [ -L "$DEST$dir" ] || [ "$(stat -c %a "$DEST$dir")" != "$want" ]; then
+      report "$dir (missing or not 0$want)"
+    elif [ -z "$DEST" ] && [ "$(stat -c %U:%G "$DEST$dir")" != root:root ]; then
+      report "$dir (owner $(stat -c %U:%G "$DEST$dir"))"
+    fi
+  done
   if [ "$diffs" -gt 0 ]; then
     echo "$diffs difference(s): sudo bash deploy/install-image.sh"
     exit 1
   fi
-  echo "wbb-image: every installed copy matches $(git log --oneline -1 2>/dev/null || echo 'this checkout')"
+  echo "wbb-image: every installed copy matches HEAD ${head:0:7}"
   exit 0
 fi
 
@@ -77,7 +111,7 @@ else
 fi
 
 # 1. The sudoers rules parse.
-"$VISUDO" -cf deploy/sudoers.d/wbb-image
+"$VISUDO" -cf "$stage/deploy/sudoers.d/wbb-image"
 
 # 2. This podman's Quadlet accepts the template as activate will fill it.
 if ! uid=$(id -u warsaw-beer-bot 2>/dev/null) || ! gid=$(id -g warsaw-beer-bot 2>/dev/null); then
@@ -87,11 +121,10 @@ if ! uid=$(id -u warsaw-beer-bot 2>/dev/null) || ! gid=$(id -g warsaw-beer-bot 2
   fi
   uid=999 gid=988
 fi
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-mkdir "$work/units"
+work=$stage/work
+mkdir -p "$work/units"
 sed -e "s|@@DIGEST@@|sha256:$(printf '0%.0s' {1..64})|" -e "s|@@UID@@|$uid|" -e "s|@@GID@@|$gid|" \
-  deploy/image/warsaw-beer-bot.container > "$work/units/warsaw-beer-bot.container"
+  "$stage/deploy/image/warsaw-beer-bot.container" > "$work/units/warsaw-beer-bot.container"
 if grep -q '@@' "$work/units/warsaw-beer-bot.container"; then
   echo "ERROR: the template has a placeholder besides @@DIGEST@@, @@UID@@ and @@GID@@" >&2
   exit 1
@@ -103,12 +136,14 @@ if ! QUADLET_UNIT_DIRS="$work/units" "$QUADLET" -dryrun > "$work/out" 2> "$work/
   exit 1
 fi
 
-# 3. Install.
-install -d -m 0755 "${OWNER[@]}" "$DEST$LIB" "$DEST/usr/local/libexec" "$DEST/etc/sudoers.d"
+# 3. Install. Only our own directories are created with a mode: /usr/local/libexec and /etc/sudoers.d are the
+# system's and keep theirs (install -d would re-mode an existing one).
+install -d -m 0755 "${OWNER[@]}" "$DEST$LIB"
 install -d -m 0700 "${OWNER[@]}" "$DEST$SCRATCH"
+if [ -n "$DEST" ]; then mkdir -p "$DEST/usr/local/libexec" "$DEST/etc/sudoers.d"; fi
 for entry in "${FILES[@]}"; do
   read -r src target mode <<<"$entry"
-  install -m "$mode" "${OWNER[@]}" "$src" "$DEST$target"
+  install -m "$mode" "${OWNER[@]}" "$stage/$src" "$DEST$target"
 done
 
 echo "installed:"

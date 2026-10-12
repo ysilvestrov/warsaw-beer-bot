@@ -526,8 +526,13 @@ SHA, `sha256:` digests and a pre-snapshot NAME, all checked — and works only o
 | `prune --keep D…` | removes our other images; never the Quadlet file's | `PRUNED <n> skipped <m> kept …` |
 
 Exit: 0 done; 1 only with a verdict on the candidate (`TRIAL`/`START`/`COMPAT FAILED`, `AUDIT
-ADVISORY`); 2 `REFUSED:` (an input or a precondition, not a verdict); 64 usage; 70 internal error;
-75 could not judge now, retry (podman, a timeout, no registry, `START TIMEOUT`).
+ADVISORY`, `ACTIVATE FAILED` — a restart of D that systemd reports failed); 2 `REFUSED:` (an input or a
+precondition, not a verdict); 64 usage; 70 internal error; 75 could not judge now, retry (podman, a
+timeout, no registry, `START TIMEOUT` of D, `START KILLED` — the OOM killer, a snapshot whose sha256
+does not match). Exit 1 covers both kinds of verdict the deployer must tell apart — a failed SHA
+(`TRIAL`/`START FAILED`, `ACTIVATE FAILED`) and a hold (`COMPAT FAILED`, `AUDIT ADVISORY`) — so the
+caller branches on the verdict line, never on the code alone. S that does not answer in time is
+`COMPAT FAILED: START TIMEOUT …`: D has just started on the same copy under the same confinement.
 
 START and COMPAT run `start-check --leave-running`: under this host's AppArmor no process in a
 container may signal another one (spec §2 V11), so the check exits after its verdict and the end of

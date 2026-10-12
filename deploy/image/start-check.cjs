@@ -24,7 +24,8 @@
 //                         that follows PID 1's exit kills the bot instead (a kernel SIGKILL that
 //                         AppArmor does not check). Outside a container the bot would be orphaned.
 // Exit:  0 `START OK <releaseSha>`, 1 `START FAILED: <reason>` then the output tail,
-//        75 `START TIMEOUT: …` then the tail — could not judge, not a verdict on the bot (§6.3),
+//        75 `START TIMEOUT: …` or `START KILLED: …` (the bot died of SIGKILL — in the container only
+//           the kernel's OOM killer sends it) then the tail — could not judge, not a verdict on the bot,
 //        64 usage. Everything goes to stdout; the verdict is the first line.
 const { spawn } = require('node:child_process');
 const path = require('node:path');
@@ -144,8 +145,11 @@ async function main(argv) {
     if (bot.tail().includes(UNHANDLED)) {
       verdict = { ok: false, reason: 'an unhandled rejection other than the offline Telegram launch ended the bot' };
     } else if (!h.ok) verdict = { ok: false, reason: h.reason };
+    else if (bot.child.signalCode === 'SIGKILL') verdict = { ok: false, killed: true, reason: 'the bot was killed (SIGKILL) after a healthy /health' };
     else if (!running(bot.child)) verdict = { ok: false, reason: 'the bot exited after a healthy /health' };
     else verdict = { ok: true, releaseSha: h.releaseSha };
+  } else if (outcome.kind === 'exit' && outcome.signal === 'SIGKILL') {
+    verdict = { ok: false, killed: true, reason: `the bot was killed (SIGKILL) before "${READY}"` };
   } else if (outcome.kind === 'exit') {
     verdict = { ok: false, reason: `bot exited (${outcome.signal ?? `code ${outcome.code}`}) before "${READY}"` };
   } else if (outcome.kind === 'error') {
@@ -158,9 +162,12 @@ async function main(argv) {
     console.log(`START OK ${verdict.releaseSha}`);
     return { code: 0, leave: opts.leaveRunning };
   }
-  console.log(`${verdict.timeout ? 'START TIMEOUT' : 'START FAILED'}: ${verdict.reason}`);
+  // A SIGKILL is not the bot's doing: in the container nobody may signal it (V11), so it is the
+  // kernel — the OOM killer under the check's --memory. Like a timeout, it judges nothing (§5: 75).
+  const label = verdict.timeout ? 'START TIMEOUT' : verdict.killed ? 'START KILLED' : 'START FAILED';
+  console.log(`${label}: ${verdict.reason}`);
   console.log(`output tail:\n${bot.tail()}`);
-  return { code: verdict.timeout ? EX_TEMPFAIL : 1, leave: opts.leaveRunning };
+  return { code: verdict.timeout || verdict.killed ? EX_TEMPFAIL : 1, leave: opts.leaveRunning };
 }
 
 main(process.argv.slice(2)).then(({ code, leave }) => {
