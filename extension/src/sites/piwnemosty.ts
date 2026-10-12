@@ -106,7 +106,11 @@ function classifyCard(title: string, meta: ItemMeta | undefined): 'beer' | 'nonB
     .filter(Boolean);
   if (categories.length === 0) return 'unknown';
   if (categories.some((c) => NON_BEER_CATEGORY_RE.test(c))) return 'nonBeer';
-  return categories.some((c) => c.includes('piwo') || c.includes('napoje')) ? 'beer' : 'nonBeer';
+  if (categories.some((c) => c.includes('piwo') || c.includes('napoje'))) return 'beer';
+  if (categories.some((c) => c.includes('kategoria tymczasowa'))) {
+    return PACKAGING_SUFFIX_RE.test(title) ? 'beer' : 'unknown';
+  }
+  return 'nonBeer';
 }
 
 export const piwnemosty: SiteAdapter = {

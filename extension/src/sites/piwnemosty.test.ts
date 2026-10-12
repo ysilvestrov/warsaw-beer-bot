@@ -250,6 +250,64 @@ describe('piwnemosty adapter', () => {
     expect(piwnemosty.isNonBeerPage?.(new URL('https://www.piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(false);
   });
 
+  it('parses beer in kategoria tymczasowa when packaging suffix is present (#848)', () => {
+    const source = productHtml({
+      id: '12459',
+      title: 'PINTA Barrel Brewing: Grove - butelka 375 ml',
+      brand: 'Browar PINTA Barrel Brewing',
+    }).replace('"item_category": "Piwo"', '"item_category": "kategoria tymczasowa"');
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      {
+        el: doc.querySelector('.product'),
+        brewery: 'Browar PINTA Barrel Brewing',
+        name: 'Grove',
+      },
+    ]);
+  });
+
+  it('parses beer in kategoria tymczasowa with can packaging suffix', () => {
+    const source = productHtml({
+      id: '12460',
+      title: 'Moon Lark: Snap - puszka 500 ml',
+      brand: 'Browar Moon Lark',
+    }).replace('"item_category": "Piwo"', '"item_category": "kategoria tymczasowa"');
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      {
+        el: doc.querySelector('.product'),
+        brewery: 'Browar Moon Lark',
+        name: 'Snap',
+      },
+    ]);
+  });
+
+  it('skips item in kategoria tymczasowa without packaging suffix as unknown (#848)', () => {
+    const source = productHtml({
+      id: '12461',
+      title: 'PINTA Barrel Brewing: Grove',
+      brand: 'Browar PINTA Barrel Brewing',
+    }).replace('"item_category": "Piwo"', '"item_category": "kategoria tymczasowa"');
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+
+    expect(piwnemosty.parseCards(doc)).toEqual([]);
+  });
+
+  it('still marks non-beer title in kategoria tymczasowa as non-beer', () => {
+    const source = productHtml({
+      id: '9231',
+      title: 'Beer Geek Madness: Plecak festiwalowy 2025',
+      brand: 'Beer Geek Madness',
+    }).replace('"item_category": "Piwo"', '"item_category": "kategoria tymczasowa"');
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true },
+    ]);
+  });
+
   it('returns confirmed non-beer products from the non-beer fixture', () => {
     const doc = new DOMParser().parseFromString(nonBeerHtml, 'text/html');
     const cards = piwnemosty.parseCards(doc);
