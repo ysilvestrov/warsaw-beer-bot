@@ -1,0 +1,21 @@
+# /etc/sudoers.d/wbb-image
+#
+# Lets the operator user (default: ysi) run the image deployer's root steps without a password prompt: the verbs
+# of the root helper wbb-image (spec docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md §5).
+# Installed by deploy/install-image.sh, which checks it with `visudo -cf` first; by hand:
+#
+#   sudo visudo -cf deploy/sudoers.d/wbb-image
+#   sudo install -m 0440 -o root -g root deploy/sudoers.d/wbb-image /etc/sudoers.d/wbb-image
+#
+# A `*` in sudoers matches spaces too, so these patterns are not the trust boundary: the helper is (argparse
+# refuses extra arguments; --sha is a full SHA, every digest is sha256:<64 hex>, --snapshot a pre-snapshot NAME,
+# never a path; nothing the operator passes reaches podman but a checked digest).
+#
+# If the operator user is not `ysi`, change `ysi` below to match.
+
+ysi ALL=(root) NOPASSWD: /usr/local/libexec/wbb-image pull --sha * --digest *, \
+    /usr/local/libexec/wbb-image audit --digest *, \
+    /usr/local/libexec/wbb-image trial --digest * --previous * --snapshot *, \
+    /usr/local/libexec/wbb-image activate --digest *, \
+    /usr/local/libexec/wbb-image current, \
+    /usr/local/libexec/wbb-image prune --keep *

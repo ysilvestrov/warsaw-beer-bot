@@ -507,6 +507,40 @@ Dockerfile's `FROM` (Dependabot `docker` bumps it); `scripts/image-base-digest.s
 build arg. Local build behind a TLS-intercepting proxy:
 `docker build -f deploy/image/Dockerfile --secret id=ca,src=<ca-bundle> --build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)" --build-arg SOURCE_SHA=$(git rev-parse HEAD) .`
 
+## Root helper `wbb-image` (not installed until the switchover)
+
+Design: the spec above, §5; plan `docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md`.
+`deploy/image/helper/wbb_image.py` is the only root step of the image deployer: the merge-deploy
+tick (rewritten in the next stage) calls it through `sudo -n` with the fixed rules of
+`deploy/sudoers.d/wbb-image`. It takes no paths and no podman arguments from its caller — a full
+SHA, `sha256:` digests and a pre-snapshot NAME, all checked — and works only on local images of
+`ghcr.io/ysilvestrov/warsaw-beer-bot` with a `revision` label.
+
+| Verb | Does | Verdict line |
+|---|---|---|
+| `pull --sha X --digest D` | refuses below 5 GiB free; `podman pull …@D`; checks `.Digest`, `RepoDigests`, `revision == X` | `PULLED <D> <image id> content=<wbb.content> revision=<X>` |
+| `audit --digest D` | `npm audit --omit=dev` → `audit-verdict-cli` inside D (`--network=host`, read-only, no `.env`, no volumes, bot UID) | `AUDIT CLEAN <D>` / `AUDIT ADVISORY <D>` |
+| `trial --digest D --previous S --snapshot NAME` | on one copy of the pre snapshot: TRIAL (D migrates twice), START (D), COMPAT (S); every container `--network=none`, read-only, fake environment, no `.env` | `TRIAL OK`, `START OK`, `COMPAT OK <S>` — or `TRIAL FAILED` / `START FAILED` / `COMPAT FAILED` |
+| `activate --digest D` | writes `/etc/containers/systemd/warsaw-beer-bot.container` from the template (atomic), `daemon-reload`, `restart` — only while the unit is ours (`SourcePath`/`FragmentPath`) or absent | `ACTIVATED <D>` |
+| `current` | the Quadlet file's image, the running container's image and digest, the unit type | `CURRENT quadlet=… container-image=… container-digest=… unit=quadlet\|foreign\|absent` |
+| `prune --keep D…` | removes our other images; never the Quadlet file's | `PRUNED <n> skipped <m> kept …` |
+
+Exit: 0 done; 1 only with a verdict on the candidate (`TRIAL`/`START`/`COMPAT FAILED`, `AUDIT
+ADVISORY`); 2 `REFUSED:` (an input or a precondition, not a verdict); 64 usage; 70 internal error;
+75 could not judge now, retry (podman, a timeout, no registry, `START TIMEOUT`).
+
+START and COMPAT run `start-check --leave-running`: under this host's AppArmor no process in a
+container may signal another one (spec §2 V11), so the check exits after its verdict and the end of
+the container stops the bot. A previous image whose `start-check` predates the flag is refused as a
+COMPAT target.
+
+Install (and later check) from a clean checkout of `main` — nothing is enabled, started or activated:
+
+```bash
+sudo bash deploy/install-image.sh            # visudo -cf + quadlet -dryrun of the template first
+sudo bash deploy/install-image.sh --check    # 0 when every installed copy matches this checkout
+```
+
 ## Runtime artifact (history: replaced by the image above)
 
 Design: `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`, superseded.
