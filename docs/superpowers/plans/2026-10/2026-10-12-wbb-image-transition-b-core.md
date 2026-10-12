@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Статус:** чернетка; чекає відповідей власника на «Відкриті питання» і проб P1–P2 з VPS.
+**Статус:** чернетка; проби P1–P2 з VPS пройдені 12.10 (нижче); чекає рішень за «Відкритими питаннями» (власник віддав їх на зовнішнє рев'ю).
 
 **Goal:** у репо є новий контролер merge-deploy під образи — `deploy/image/autodeploy.sh`:
 - гейти перенесені без змін; CI-гейт додатково вимагає `image=success`; новий гейт — відкритий інцидент;
@@ -193,8 +193,8 @@
 
 | Заявка | Що стверджує | Доказ | Сила |
 |---|---|---|---|
-| Резолв тегу → D (не факт) | нічого; лише кандидат | довіру дають два рядки нижче | n/a; проба P1 |
-| Атестація пройшла (без неї `pull` не викликається) | D зібрав `ci.yml` з X на `main`, hosted runner | `gh attestation verify` з `--source-digest X`; V3/V9 (інтерактивно) | сильний за формою; **слабкий** у режимі таймера до P2 |
+| Резолв тегу → D (не факт) | нічого; лише кандидат | довіру дають два рядки нижче | n/a; P1 пройдена: з VPS під таймером 200 + digest для main, 404 → вихід 3 |
+| Атестація пройшла (без неї `pull` не викликається) | D зібрав `ci.yml` з X на `main`, hosted runner | `gh attestation verify` з `--source-digest X`; V3/V9; P2 під таймером: 0 на справжньому (~4,5 с), 1 з `expected SourceRepositoryDigest …` на чужому, без мережі — `no valid Sigstore verifiers could be initialized` (ненульовий; будь-який ненульовий = «не вдалося перевірити», п.9) | сильний |
 | CI зелений | тести, збірка й образ пройшли на X | `ci` і `image` success з одного suite | сильний |
 | `PULLED …` → `WINDOW_ID/CONTENT` | локальний I — це D з `revision == X` | перевірки хелпера; контролер звіряє D і X у рядку з запитаними | сильний |
 | `DEPLOYED_SHA = X` після noop | runtime X == запущений runtime | `wbb.content` рівні (CI-тест §4.1) + `current` = DEPLOYED + мітка з атестованого образу | сильний для перелічених випадків; зміни поза образом — hold-шляхи, вони зупиняються до noop |
@@ -209,7 +209,11 @@
 | Pre утримано | доказ стану БД до X не зникне | `mark-rollback` + `prune` його пропускає; для `auto` — за побудовою, тест | сильний |
 | Тривалість tick-а | вікно вкладається в `TimeoutStartSec` | V2, V9, V13 | **слабкий**: P3 |
 
-**Проби до реалізації** (spike, нічого не комітять; результат записати сюди):
+**Проби до реалізації** (spike, нічого не комітять). Результат 12.10 (`wbb-stage-b-probe.sh`, від `ysi` через `systemd-run --uid=ysi -p Environment=HOME=/home/ysi`, main `423ff56`, digest `sha256:62b75e45…`):
+- P1: 200 + `docker-content-digest` для main; 404 → вихід 3 для неіснуючого тегу.
+- P2: `gh` оператора залогінений (`hosts.yml`, scopes `repo`, `workflow`, `read:org`, `gist`); verify 0 на справжньому, 1 на чужому `--source-digest` з причиною в stderr; без мережі — помилка ініціалізації Sigstore (код виходу проба не зловила — помилка самої проби; рішення п.9 від нього не залежить); кеш `~/.cache/gh` 1,7 MB.
+
+Опис проб:
 - **P1.** З VPS від `ysi` в оточенні юніта (`systemd-run --uid=ysi --wait --pipe`) резолв п.6: для свіжого main-SHA очікуємо 200 і digest, для вигаданого — 404.
 - **P2.** Там само `gh attestation verify`:
   - вихід 0 на справжньому;
