@@ -8,7 +8,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { hashToken, rotateToken } from '../../storage/api_tokens';
-import { countCheckins } from '../../storage/checkins';
+import { checkinExists, countCheckins } from '../../storage/checkins';
 import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
 import { addCoverage, coverageFor } from '../../storage/checkin_coverage';
 import { authMiddleware } from '../middleware/auth';
@@ -399,12 +399,36 @@ describe('POST /checkins/sync — покриття і nextCursor (#587)', () => 
     expect(coverageFor(db, TELEGRAM_ID)).toEqual([]);
   });
 
-  // Рев'ю PR #592 (P2): `oldest <= cursor` сам по собі не доводить, що сторінка та —
-  // найновіший елемент теж мусить лежати не вище курсора. Тут oldest=580 <= 590 проходить
-  // стару перевірку, а newest=600 > 590 виказує ту саму чужу сторінку.
-  it('rejects a page whose newest item is above the request cursor even when the oldest is not', async () => {
+  // #854: стрічка Untappd упорядкована за ЧАСОМ чекіна, а час можна виставити заднім
+  // числом — такий чекін має пізній id і стоїть у стрічці глибоко (жива проба 2026-10-12:
+  // «старше за 1587116567» першим повернуло 1595049563). Отже id вище курсора на сторінці
+  // — не ознака чужого фрагмента. Раніше ця сторінка діставала вічний `400 bad_cursor`.
+  it('accepts a page that carries a backdated checkin whose id is above the cursor', async () => {
     const { app, db } = setup();
-    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '590' }, RAW_TOKEN);
+    const res = await post(app, '/checkins/sync', { html: pageOf([700, 580, 570]), maxId: '590' }, RAW_TOKEN);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ merged: 3, alreadyKnown: 0, pageSize: 3, nextCursor: '570' });
+    // Верхня межа доведеного — курсор, а не 700: чекін заднім числом діапазону не розширює.
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 570, to_id: 590 }]);
+    expect(checkinExists(db, TELEGRAM_ID, '700')).toBe(true);
+  });
+
+  // #854: фрагмент «після курсора» не може містити сам курсорний чекін. Це і є те, що
+  // лишилося від вартового з рев'ю PR #592: сторінка профілю, повернута замість фрагмента,
+  // коли курсор лежить у її межах, — і без цієї перевірки обхід тихо завершився б як
+  // «роботи немає» після першої ж сторінки.
+  it('rejects a page that contains the cursor checkin itself', async () => {
+    const { app, db } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 590, 580]), maxId: null }, RAW_TOKEN);
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 590, 580]), maxId: '580' }, RAW_TOKEN);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'bad_cursor' });
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 580, to_id: 600 }]);
+  });
+
+  it('rejects a page that contains the cursor checkin in the middle', async () => {
+    const { app, db } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 590, 580]), maxId: '590' }, RAW_TOKEN);
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: 'bad_cursor' });
     expect(coverageFor(db, TELEGRAM_ID)).toEqual([]);
@@ -427,17 +451,22 @@ describe('POST /checkins/sync — покриття і nextCursor (#587)', () => 
   // Раунд 1 огляду: обхід зобов'язаний спускатися. Курсор, що не зменшився, — це цикл,
   // і клієнт після Task 5 не має власного запобіжника, щоб із нього вийти.
   //
-  // Рев'ю PR #592 (P2): стара сторінка pageOf([600, 580]) із maxId '580' мала newest=600 >
-  // курсора 580 — після додавання перевірки newest > cursor це тепер законний
-  // `400 bad_cursor` ще до вартового циклу, і той тест більше не діставався до нього.
-  // Реалістичний фрагмент повертає елементи не вище курсора: одноелементна сторінка [580]
-  // на курсорі '580' — oldest=newest=580, обидва не вищі за курсор, — проходить перевірку
-  // сторінки і потрапляє рівно на вартового циклу (`nextCursor` дорівнював би самому курсору).
-  it('stops instead of looping when the next cursor would not descend from the request cursor', async () => {
-    const { app } = setup();
+  // #854: єдина сторінка, що могла повернути курсор не нижчий за курсор запиту, — та, де
+  // найстаріший елемент і є курсором. Тепер її відкидає вартовий «сторінка містить курсорний
+  // чекін», тож окремого запобіжника циклу немає: спуск випливає з вартових.
+  it('refuses the one page that could hand back a cursor that does not descend', async () => {
+    const { app, db } = setup();
     const res = await post(app, '/checkins/sync', { html: pageOf([580]), maxId: '580' }, RAW_TOKEN);
-    expect(res.status).toBe(200);
-    expect((await res.json()).nextCursor).toBeNull();
+    expect([res.status, await res.json(), coverageFor(db, TELEGRAM_ID)]).toEqual([400, { error: 'bad_cursor' }, []]);
+  });
+
+  // #854: і з чекіном заднім числом на сторінці наступний курсор строго нижчий за курсор
+  // запиту — навіть коли діапазон, у який сторінка вливається, уже сягає глибше.
+  it('hands back a strictly lower cursor for a page with a backdated checkin', async () => {
+    const { app } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 590]), maxId: null }, RAW_TOKEN);
+    const res = await post(app, '/checkins/sync', { html: pageOf([700, 585, 560]), maxId: '590' }, RAW_TOKEN);
+    expect([res.status, (await res.json()).nextCursor]).toEqual([200, '560']);
   });
 });
 
@@ -660,9 +689,15 @@ describe('#846 a refused sync is named in the journal', () => {
     expect(warn.mock.calls).toEqual([[{ code: 'bad_cursor', reason: 'oldest_above_cursor', pageSize: 3, hasCursor: true }, 'checkins sync refused']]);
   });
 
-  it('names a page whose top alone is above the cursor', async () => {
+  it('names a page that contains the cursor checkin itself', async () => {
     const { app, warn } = setup();
-    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '590' }, RAW_TOKEN);
-    expect(warn.mock.calls).toEqual([[{ code: 'bad_cursor', reason: 'newest_above_cursor', pageSize: 2, hasCursor: true }, 'checkins sync refused']]);
+    await post(app, '/checkins/sync', { html: pageOf([600, 590, 580]), maxId: '590' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'bad_cursor', reason: 'page_contains_cursor', pageSize: 3, hasCursor: true }, 'checkins sync refused']]);
+  });
+
+  it('logs nothing for a page with a backdated checkin above the cursor', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([700, 580]), maxId: '590' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([]);
   });
 });

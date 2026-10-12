@@ -106,8 +106,8 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       });
     }
 
-    // ids/oldest/newest — до транзакції: обидва вартові нижче (суперечливий курсор,
-    // а невдовзі й цикл) мусять спрацювати ДО будь-якого запису.
+    // ids/oldest/newest — до транзакції: обидва вартові нижче мусять спрацювати ДО
+    // будь-якого запису.
     const ids = page.checkins.map((ci) => Number(ci.checkin_id));
     const oldest = Math.min(...ids);
     const newest = Math.max(...ids);
@@ -115,14 +115,16 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // #587: сторінка, найстаріший елемент якої ВИЩИЙ за курсор, — це не той фрагмент,
     // який ми просили (класично: 307-редірект more_feed на сторінку профілю). Записати
     // її діапазон означало б ствердити покриття з чужої сторінки.
-    //
-    // Рев'ю PR #592 (P2): того самого вимагає й верхній кінець. Легітимний фрагмент
-    // повертає лише елементи СТРОГО нижче свого курсора — сторінка з `newest > cursor`
-    // так само не той фрагмент (найстаріший міг випадково опинитися на місці, а верх
-    // все одно чужий), і без цієї перевірки вона проходила б у транзакцію та `addCoverage`
-    // до того, як покриття встигне це довести.
     if (cursor !== null && oldest > cursor) return badCursor('oldest_above_cursor');
-    if (cursor !== null && newest > cursor) return badCursor('newest_above_cursor');
+
+    // #854: верхній кінець id-ами не перевіряється. Стрічка Untappd упорядкована за ЧАСОМ
+    // чекіна, а час можна виставити заднім числом: такий чекін має пізній id і стоїть у
+    // стрічці глибоко, тож законний фрагмент несе id вище курсора (жива проба 2026-10-12).
+    // Вартовий `newest > cursor` з рев'ю PR #592 відкидав таку сторінку назавжди — та сама
+    // сторінка приходила на кожен повтор. Від нього лишається те, що не залежить від
+    // порядку id: фрагмент «після курсора» не може містити сам курсорний чекін. Саме так
+    // виглядає сторінка профілю, повернута замість фрагмента, коли курсор лежить у її межах.
+    if (cursor !== null && ids.includes(cursor)) return badCursor('page_contains_cursor');
 
     let merged = 0;
     let alreadyKnown = 0;
@@ -175,13 +177,13 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const caughtUp = state.profile_total !== null
       && serverCount >= state.profile_total
       && ranges.length === 1;
-    let nextCursor: string | null = caughtUp ? null : String(covering?.from_id ?? oldest);
+    const nextCursor: string | null = caughtUp ? null : String(covering?.from_id ?? oldest);
 
-    // #587: обхід зобов'язаний спускатися. Курсор, що не зменшився, — це цикл, і клієнт
-    // після Task 5 не має власного запобіжника, щоб із нього вийти.
-    if (cursor !== null && nextCursor !== null && Number(nextCursor) >= cursor) {
-      nextCursor = null;
-    }
+    // #587: обхід зобов'язаний спускатися — клієнт власного запобіжника від циклу не має.
+    // Окремої перевірки тут немає, бо спуск випливає з двох вартових вище (#854): сторінка
+    // пройшла лише з `oldest <= cursor` і без самого курсорного чекіна, тобто `oldest <
+    // cursor`; а діапазон, що містить `oldest`, має `from_id <= oldest`. Отже `nextCursor`
+    // строго менший за курсор запиту.
 
     return c.json({
       merged,
