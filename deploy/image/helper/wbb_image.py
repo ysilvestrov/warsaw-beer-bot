@@ -711,10 +711,19 @@ def activate(host, digest):
     _write_atomically(host.quadlet_path, render_template(lines, digest, uid, gid).encode('utf-8'))
     try:
         _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload')
-    except TempFail:
+    except TempFail as failed:
         # Not left naming D on disk (#858 AI review): a later reload or a reboot would start it with nobody
-        # watching. systemd did not reload, so it still holds the previous unit; only the file goes back.
-        _restore_file(host, previous)
+        # watching. The file goes back first; then one more reload, best effort — a client that failed or timed
+        # out does not prove systemd did not reload, and it must not keep a unit generated from D. Still 75:
+        # nothing was activated, and stage б repeats activate (spec §7.2).
+        try:
+            _restore_file(host, previous)
+        except OSError as e:
+            raise TempFail(f'{failed}; putting the previous {host.quadlet_path} back failed too: {e}') from None
+        try:
+            _must(host, [host.systemctl, 'daemon-reload'], DAEMON_RELOAD_TIMEOUT_S, 'systemctl daemon-reload (restore)')
+        except TempFail as again:
+            raise TempFail(f'{failed}; the previous file is back, {again}') from None
         raise
     after = unit_type(host)
     if after != 'quadlet':

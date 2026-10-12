@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -997,20 +998,49 @@ class Activate(HelperCase):
         self.assertEqual(os.path.lexists(self.quadlet), False)
 
     # #858 AI review: a reload that fails must not leave D on disk for a later reload or a reboot to start.
-    def test_a_failing_first_reload_puts_the_previous_file_back_and_is_tempfail(self):
+    def test_a_failing_first_reload_puts_the_previous_file_back_reloads_again_and_is_tempfail(self):
         previous = f'# the one before\nImage={REPO}@{D2}\n'
         self.write_quadlet(previous)
-        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'))
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner),
                          (75, '', 'TEMPFAIL: systemctl daemon-reload exited 1: Access denied\n'))
         self.assertEqual((self.argvs(runner), self.read_quadlet(), os.path.lexists(self.quadlet + '.tmp')),
-                         ([INSPECT_ARGV, SHOW_ARGV, RELOAD], (previous, 0o644), False))
+                         ([INSPECT_ARGV, SHOW_ARGV, RELOAD, RELOAD], (previous, 0o644), False))
 
-    def test_a_timed_out_first_reload_removes_a_file_there_was_none_of(self):
-        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), subprocess.TimeoutExpired('systemctl', 60))
+    # #858 AI review: a client that timed out does not prove systemd kept the previous unit.
+    def test_a_timed_out_first_reload_removes_a_file_there_was_none_of_and_reloads_again(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), subprocess.TimeoutExpired('systemctl', 60), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner),
                          (75, '', 'TEMPFAIL: systemctl daemon-reload timed out after 60s\n'))
+        self.assertEqual((self.argvs(runner), os.path.lexists(self.quadlet)),
+                         ([INSPECT_ARGV, SHOW_ARGV, RELOAD, RELOAD], False))
+
+    def test_a_second_reload_that_fails_too_is_said_in_the_tempfail(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(1, stderr='Access denied\n'),
+                            done(1, stderr='Still denied\n'))
+        self.assertEqual(self.main(['activate', '--digest', D1], runner),
+                         (75, '', 'TEMPFAIL: systemctl daemon-reload exited 1: Access denied; the previous file is '
+                                  'back, systemctl daemon-reload (restore) exited 1: Still denied\n'))
         self.assertEqual(os.path.lexists(self.quadlet), False)
+
+    # #858 AI review: a restore that cannot write is still 75 with what happened, never a traceback (70).
+    def test_a_restore_that_cannot_write_is_tempfail_saying_so(self):
+        previous = f'# the one before\nImage={REPO}@{D2}\n'
+        self.write_quadlet(previous)
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(1, stderr='Access denied\n'))
+        real = wi._write_atomically
+        calls = []
+
+        def write(path, data):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError(28, 'No space left on device')
+            return real(path, data)
+
+        with mock.patch.object(wi, '_write_atomically', write):
+            result = self.main(['activate', '--digest', D1], runner)
+        self.assertEqual(result, (75, '', 'TEMPFAIL: systemctl daemon-reload exited 1: Access denied; putting the '
+                                          f'previous {self.quadlet} back failed too: [Errno 28] No space left on device\n'))
 
     def test_a_previous_quadlet_path_that_is_not_a_file_is_refused_before_writing(self):
         os.mkdir(self.quadlet)
@@ -1054,8 +1084,8 @@ class Activate(HelperCase):
 
     def test_a_failing_reload_or_a_restart_timeout_is_tempfail(self):
         for answers, message in (
-            ([done(1, stderr='Access denied\n')], 'systemctl daemon-reload exited 1: Access denied'),
-            ([subprocess.TimeoutExpired('systemctl', 60)], 'systemctl daemon-reload timed out after 60s'),
+            ([done(1, stderr='Access denied\n'), done()], 'systemctl daemon-reload exited 1: Access denied'),
+            ([subprocess.TimeoutExpired('systemctl', 60), done()], 'systemctl daemon-reload timed out after 60s'),
             ([done(), self.ours(), subprocess.TimeoutExpired('systemctl', 180)],
              'systemctl restart warsaw-beer-bot.service timed out after 180s'),
         ):

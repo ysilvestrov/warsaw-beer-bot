@@ -133,8 +133,11 @@ def run(argv, *, timeout, cap=DEFAULT_CAP, tail=DEFAULT_TAIL, cwd=None, env=None
         # A descendant may still hold the pipe open; do not wait for it beyond the grace.
         d.thread.join(join_grace)
         d.close()
+    # Whether a reader is still running is taken BEFORE the snapshot (#858 AI review): one that reads a last chunk
+    # and exits between value() and the check would otherwise leave that chunk out with truncated False.
+    still_reading = any(d.thread.is_alive() for d in drains)
     stdout, stderr = drains[0].value(), drains[1].value()
-    truncated = drains[0].dropped or drains[1].dropped or any(d.thread.is_alive() for d in drains)
+    truncated = drains[0].dropped or drains[1].dropped or still_reading
     if text:
         stdout, stderr = stdout.decode('utf-8', 'replace'), stderr.decode('utf-8', 'replace')
     result = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
