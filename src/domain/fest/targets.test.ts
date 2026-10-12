@@ -92,6 +92,12 @@ describe('computeTargets', () => {
       expect(runAbv(unknown)).toEqual({ targets: [], unrated: unknown });
     });
 
+    it('a threshold of 0 still leaves an unknown strength out, and takes any known one', () => {
+      const unknown = item(1, null, 'Lager - Pale', 'PINTA', 0);
+      const r = computeTargets({ menu: [unknown, item(2, null, 'Lager - Pale', 'PINTA', 0.5)], triedByMember: [new Set()], overrides: new Map(), criteria: { ...criteria, minAbv: 0 } });
+      expect([r.targets.map((t) => [t.beerId, t.reasons]), r.unrated]).toEqual([[[2, ['abv']]], [unknown]]);
+    });
+
     it('without a threshold even a 12% beer gets no strength reason', () => {
       expect(run([item(1, 3.0, 'Strong Ale - Other', 'PINTA', 12)]).targets).toEqual([]);
     });

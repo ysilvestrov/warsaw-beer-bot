@@ -8,7 +8,7 @@ export interface TargetMenuItem {
   section: string;
   rating_global: number | null;
   style: string | null;
-  /** The catalogue stores an unknown strength as null or 0; neither reaches a positive threshold. */
+  /** The catalogue stores an unknown strength as null or 0; neither qualifies, whatever the threshold. */
   abv: number | null;
 }
 
@@ -57,7 +57,9 @@ export function computeTargets(input: {
     if (untried && item.rating_global !== null && item.rating_global >= input.criteria.minRating) reasons.push('rating');
     const style = (item.style ?? '').toLowerCase();
     if (untried && style && patterns.some((p) => style.includes(p))) reasons.push('style');
-    if (untried && input.criteria.minAbv !== null && item.abv !== null && item.abv >= input.criteria.minAbv) reasons.push('abv');
+    // 0 is the catalogue's "unknown strength", not a strength: it qualifies under no threshold.
+    const abv = item.abv !== null && item.abv > 0 ? item.abv : null;
+    if (untried && input.criteria.minAbv !== null && abv !== null && abv >= input.criteria.minAbv) reasons.push('abv');
     if (override === 'add') reasons.push('manual');
 
     if (reasons.length > 0) {
