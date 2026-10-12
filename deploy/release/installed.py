@@ -84,7 +84,7 @@ def installed_path(repo_path):
 # The files of deploy/sudoers.d, by name (test_installed checks this is exactly that directory): the only names in
 # SUDOERS_DIR root digests for the operator (e2e review N2 — not "any name sudo would read", which let the operator
 # ask root about a foreign file such as another package's sudoers drop-in).
-SUDOERS_FILES = ('warsaw-beer-bot', 'wbb-release')
+SUDOERS_FILES = ('warsaw-beer-bot', 'wbb-image', 'wbb-release')
 
 
 def digestable(path):
