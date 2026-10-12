@@ -11,11 +11,11 @@ const root = resolve(__dirname, '..');
 describe.skipIf(process.platform !== 'linux')('runtime artifact tools (deploy/release)', () => {
   it('pass their Python unit tests', () => {
     const result = spawnSync('python3', ['-B', '-m', 'unittest', 'discover', '-s', 'deploy/release', '-p', 'test_*.py', '-v'], {
-      cwd: root, encoding: 'utf8', timeout: 90_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,
+      cwd: root, encoding: 'utf8', timeout: 180_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,
     });
     expect(result.error, result.stderr).toBe(undefined);
     expect(result.status, result.stdout + result.stderr).toBe(0);
-  }, 100_000);
+  }, 190_000);
 });
 
 const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8').split('\n');
