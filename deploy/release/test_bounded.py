@@ -238,6 +238,20 @@ class Bounded(unittest.TestCase):
         d._run()
         self.assertEqual((bytes(d.head), d.dropped, pipe.closed), (b'partial', True, True))
 
+    def test_a_failed_close_marks_the_capture_truncated_without_escaping(self):
+        for error in (OSError(5, 'Input/output error'), ValueError('closed')):
+            with self.subTest(error=type(error).__name__):
+                class CloseFails(io.BytesIO):
+                    def close(self):
+                        super().close()
+                        raise error
+
+                pipe = CloseFails(b'partial')
+                d = bounded._Drain(pipe, 100, 10)
+                d._run()
+                self.assertEqual((pipe.closed, d.dropped, d.value()),
+                                 (True, True, b'partial' + bounded.MARK))
+
     def test_check_raises_on_failure(self):
         with self.assertRaises(subprocess.CalledProcessError) as cm:
             bounded.run(py('import sys; sys.exit(2)'), timeout=30, check=True)

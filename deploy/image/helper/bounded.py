@@ -61,7 +61,11 @@ class _Drain:
 
         finally:
             # EOF may arrive after run's join grace: the reader owns the pipe until then (#841).
-            self.pipe.close()
+            try:
+                self.pipe.close()
+            except (OSError, ValueError):
+                with self.lock:
+                    self.dropped = True
 
     def _keep(self, chunk):
         room = self.cap - len(self.head)
@@ -74,15 +78,6 @@ class _Drain:
             while self.end_len - len(self.end[0]) >= self.tail:
                 self.end_len -= len(self.end.popleft())
                 self.dropped = True
-
-    def close(self):
-        """Close our end once the reader is done; one still reading (a descendant holds the pipe) keeps it.
-
-        Left to the garbage collector, the descriptors closed at a moment nobody chose, and a test counting
-        /proc/self/fd elsewhere in the same process failed on whoever ran last (PR #834 CI).
-        """
-        if not self.thread.is_alive():
-            self.pipe.close()
 
     def value(self):
         # The reader may still be running (a descendant holds the pipe past the join grace): read under its lock.
@@ -131,12 +126,10 @@ def run(argv, *, timeout, cap=DEFAULT_CAP, tail=DEFAULT_TAIL, cwd=None, env=None
     except BaseException:
         for d in drains:
             d.thread.join(join_grace)
-            d.close()
         raise
     for d in drains:
         # A descendant may still hold the pipe open; do not wait for it beyond the grace.
         d.thread.join(join_grace)
-        d.close()
     # Whether a reader is still running is taken BEFORE the snapshot (#858 AI review): one that reads a last chunk
     # and exits between value() and the check would otherwise leave that chunk out with truncated False.
     still_reading = any(d.thread.is_alive() for d in drains)
