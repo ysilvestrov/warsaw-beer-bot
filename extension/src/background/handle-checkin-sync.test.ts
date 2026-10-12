@@ -197,6 +197,16 @@ describe('#611 binding-aware runner', () => {
     expect(out.status).toBe('page_rejected');
   });
 
+  it('keeps what earlier pages saved when a later page is rejected', async () => {
+    let n = 0;
+    const submitPage = async () => {
+      if (++n === 2) throw new ApiError('page_rejected');
+      return page({ merged: 15, serverCount: 165, profileTotal: 8200, nextCursor: '400' });
+    };
+    const out = await runCheckinSync(baseDeps({ submitPage }));
+    expect(out).toEqual({ status: 'page_rejected', complete: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 15 });
+  });
+
   it('keeps a network failure of the feed request a plain error', async () => {
     const out = await runCheckinSync(baseDeps({ fetchFeed: async () => { throw new TypeError('Failed to fetch'); } }));
     expect(out.status).toBe('error');

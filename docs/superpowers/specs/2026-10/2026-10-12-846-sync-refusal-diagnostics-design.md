@@ -48,8 +48,10 @@ connection and token, then retry.» і при кожному повторі зу
 
 - `feed_unavailable`: «Untappd did not return your check-in feed — open untappd.com, make sure
   you are signed in to the linked account, then sync again.»
-- `page_rejected`: «Untappd returned an unexpected page, so nothing was saved — try again
-  later, or use /import in the bot.»
+- `page_rejected`: «Untappd returned an unexpected page, so the sync stopped at N of M — try
+  again later, or use /import in the bot.» Не «nothing was saved» (перша редакція, знята
+  перехресним рев'ю): сторінки, прийняті до відмови, вже збережені, тож текст називає, де
+  прогін зупинився, тими самими лічильниками, що й `cancelled`.
 
 Обидва стани не є «повністю»: `complete` рахується як і для решти (збіг лічильників), нових
 винятків немає.

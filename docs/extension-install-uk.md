@@ -273,7 +273,8 @@ https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg
   синхронізація зупинилась, той самий рядок каже чому. Два повідомлення — про
   Untappd, а не про твоє з'єднання: `Untappd did not return your check-in feed…` —
   відкрий untappd.com і перевір, що ти залогінений у той акаунт, який прив'язав у
-  боті; `Untappd returned an unexpected page, so nothing was saved…` — спробуй
+  боті; `Untappd returned an unexpected page, so the sync stopped at…` — уже завантажене
+  лишається; спробуй
   пізніше, а якщо повторюється, завантаж історію через `/import` у боті.
 - **«Refresh this page»** (кнопка з контуром) — скидає кеш накладки для **поточної**
   сторінки й перемальовує бейджі наново (зручно, якщо магазин підвантажив нові позиції

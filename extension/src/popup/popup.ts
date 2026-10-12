@@ -32,7 +32,8 @@ export function formatSyncStatus(s: SyncStatusView): string {
     case 'account_changed': return 'Untappd account changed — start a new sync for the linked account.';
     case 'sync_context_required': return 'Update the extension, then start a new sync for the linked account.';
     case 'feed_unavailable': return 'Untappd did not return your check-in feed — open untappd.com, make sure you are signed in to the linked account, then sync again.';
-    case 'page_rejected': return 'Untappd returned an unexpected page, so nothing was saved — try again later, or use /import in the bot.';
+    // Не «nothing was saved»: сторінки, прийняті до відмови, уже збережені.
+    case 'page_rejected': return `Untappd returned an unexpected page, so the sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''} — try again later, or use /import in the bot.`;
     case 'error': return 'Sync failed — check your connection and token, then retry.';
     case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;

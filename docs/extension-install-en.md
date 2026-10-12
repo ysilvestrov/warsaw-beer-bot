@@ -270,7 +270,7 @@ housekeeping one at the bottom:
   about Untappd rather than your connection: `Untappd did not return your
   check-in feed…` — open untappd.com and check you are signed in to the
   account you linked in the bot; `Untappd returned an unexpected page, so
-  nothing was saved…` — try again later, and if it keeps happening, load your
+  the sync stopped at…` — what was loaded before that is kept; try again later, and if it keeps happening, load your
   history with `/import` in the bot instead.
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
