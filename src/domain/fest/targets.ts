@@ -1,5 +1,6 @@
 // Festival Target list (spec §5): menu beers nobody in the team has had that are worth the
-// queue — by rating or by a festival style pattern — adjusted by the team's manual overrides.
+// queue — by rating, by a festival style pattern or by strength — adjusted by the team's manual
+// overrides.
 // Pure: the caller supplies the menu, each member's tried set and the overrides.
 
 export interface TargetMenuItem {
@@ -7,15 +8,19 @@ export interface TargetMenuItem {
   section: string;
   rating_global: number | null;
   style: string | null;
+  /** The catalogue stores an unknown strength as null or 0; neither reaches a positive threshold. */
+  abv: number | null;
 }
 
 export interface TargetCriteria {
   minRating: number;
+  /** null: the festival has no strength rule. */
+  minAbv: number | null;
   /** Case-insensitive substrings of the raw Untappd style ("Stout - Imperial / Double"). */
   stylePatterns: string[];
 }
 
-export type TargetReason = 'rating' | 'style' | 'manual';
+export type TargetReason = 'rating' | 'style' | 'abv' | 'manual';
 
 export interface Target {
   beerId: number;
@@ -27,7 +32,7 @@ export interface Target {
 
 export interface TargetsResult {
   targets: Target[];
-  /** Untried beers with no rating and no matching style: shown apart, never silently dropped. */
+  /** Untried beers with no rating and no automatic reason: shown apart, never silently dropped. */
   unrated: TargetMenuItem[];
 }
 
@@ -52,6 +57,7 @@ export function computeTargets(input: {
     if (untried && item.rating_global !== null && item.rating_global >= input.criteria.minRating) reasons.push('rating');
     const style = (item.style ?? '').toLowerCase();
     if (untried && style && patterns.some((p) => style.includes(p))) reasons.push('style');
+    if (untried && input.criteria.minAbv !== null && item.abv !== null && item.abv >= input.criteria.minAbv) reasons.push('abv');
     if (override === 'add') reasons.push('manual');
 
     if (reasons.length > 0) {

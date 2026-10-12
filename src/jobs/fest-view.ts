@@ -60,7 +60,7 @@ export function buildFestView(db: DB, p: { festId: number; teamId: number; now: 
     menu,
     triedByMember: team.map((m) => triedBeerIds(db, m.telegram_id)),
     overrides: overridesFor(db, p.teamId),
-    criteria: { minRating: fest.target_min_rating, stylePatterns: fest.target_style_patterns },
+    criteria: { minRating: fest.target_min_rating, minAbv: fest.target_min_abv, stylePatterns: fest.target_style_patterns },
   });
 
   const bidByBeer = new Map<number, number>();

@@ -227,6 +227,7 @@ export const en: Messages = {
   'fest.unrated_header': '<b>Untried without a rating: {count}</b> (not a Target, not discarded)',
   'fest.reason_rating': '⭐ {rating}',
   'fest.reason_style': '🧪 style',
+  'fest.reason_abv': '💪 strong',
   'fest.reason_manual': '✋ manual',
   'fest.remove_button': '➖ {name}',
   'fest.add_usage': 'Send part of a beer or brewery name: /fest add motueka',

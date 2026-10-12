@@ -1038,6 +1038,14 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS handler_failures_at ON handler_failures(at);
     `,
   },
+  {
+    version: 48,
+    // Festival Target by strength: the ABV from which an untried beer is worth the queue. NULL —
+    // the festival has no such rule. No value is seeded: the operator sets it, like the patterns.
+    sql: `
+      ALTER TABLE fests ADD COLUMN target_min_abv REAL;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

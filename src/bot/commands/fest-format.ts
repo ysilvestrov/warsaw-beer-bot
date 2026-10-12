@@ -93,6 +93,7 @@ function reasonsLabel(t: Translator, target: FestView['targets'][number]): strin
   return target.reasons.map((r) =>
     r === 'rating' ? t('fest.reason_rating', { rating: (target.rating ?? 0).toFixed(2) })
       : r === 'style' ? t('fest.reason_style')
+      : r === 'abv' ? t('fest.reason_abv')
       : t('fest.reason_manual')).join(' · ');
 }
 

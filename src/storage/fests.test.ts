@@ -36,8 +36,15 @@ describe('migration 42 — festival mode', () => {
       name: 'Warszawski Festiwal Piwa 22',
       menu_venue_id: 11142155,
       target_min_rating: 3.8,
+      target_min_abv: null,
       target_style_patterns: ['Imperial', 'Wild Ale', 'Sour', 'Lambic', 'Eisbock', 'Barleywine', 'Wheatwine'],
     });
+  });
+
+  it('migration 48 is recorded, and a strength threshold the operator sets is read back', () => {
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 48').get()).toEqual({ version: 48 });
+    const info = db.prepare("UPDATE fests SET target_min_abv = 8 WHERE slug = 'wfp22'").run();
+    expect([info.changes, getFestBySlug(db, 'wfp22')!.target_min_abv]).toEqual([1, 8]);
   });
 
   it('seeds the three WFP22 sessions in UTC (Warsaw is UTC+2 until 25.10)', () => {

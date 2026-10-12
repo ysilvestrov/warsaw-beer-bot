@@ -6,6 +6,8 @@ export interface Fest {
   name: string;
   menu_venue_id: number;
   target_min_rating: number;
+  /** null: no strength rule. Set by the operator, like the style patterns. */
+  target_min_abv: number | null;
   target_style_patterns: string[];
 }
 

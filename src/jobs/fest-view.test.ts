@@ -57,6 +57,19 @@ describe('buildFestView', () => {
     expect([view.menuCount, view.menuUpdatedAt]).toEqual([3, '2026-10-15T11:00:00.000Z']);
   });
 
+  it('with the festival\'s strength threshold set, a strong untried beer is a Target by strength', () => {
+    const { db, festId, teamId } = setup();
+    db.prepare(
+      `INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery, style, rating_global, abv)
+       VALUES (13, 6000013, 'Delta', 'Brew', 'delta', 'brew', 'IPA - Belgian', NULL, 9)`,
+    ).run();
+    upsertMenuItem(db, festId, 13, 'PINTA', '2026-10-15T10:00:00.000Z');
+    expect(buildFestView(db, { festId, teamId, now: NOW }).unrated.map((u) => u.beer_id)).toEqual([13]);
+    db.prepare('UPDATE fests SET target_min_abv = 8 WHERE id = ?').run(festId);
+    const view = buildFestView(db, { festId, teamId, now: NOW });
+    expect([view.targets.map((t) => [t.beerId, t.reasons]), view.unrated]).toEqual([[[11, ['rating']], [13, ['abv']], [12, ['style']]], []]);
+  });
+
   it('marks a Target on tap from a stadium check-in and puts its section first', () => {
     const { db, festId, teamId } = setup();
     insertVenueCheckins(db, [{ checkin_id: 1, venue_id: 2167060, bid: 6000012, untappd_user: 'x', checkin_at: '2026-10-15T17:50:00.000Z' }], 'laptop', NOW.toISOString());

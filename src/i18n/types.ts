@@ -235,6 +235,7 @@ export interface Messages {
   'fest.unrated_header': string;
   'fest.reason_rating': string;
   'fest.reason_style': string;
+  'fest.reason_abv': string;
   'fest.reason_manual': string;
   'fest.remove_button': string;
   'fest.add_usage': string;

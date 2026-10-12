@@ -227,6 +227,7 @@ export const pl: Messages = {
   'fest.unrated_header': '<b>Niepite bez oceny: {count}</b> (nie cel, ale nie odrzucone)',
   'fest.reason_rating': '⭐ {rating}',
   'fest.reason_style': '🧪 styl',
+  'fest.reason_abv': '💪 mocne',
   'fest.reason_manual': '✋ ręcznie',
   'fest.remove_button': '➖ {name}',
   'fest.add_usage': 'Napisz część nazwy piwa lub browaru: /fest add motueka',
