@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Статус:** чернетка; проби P1–P2 з VPS пройдені 12.10 (нижче); чекає рішень за «Відкритими питаннями» (власник віддав їх на зовнішнє рев'ю).
+**Статус:** редакція 2 — враховує зовнішнє рев'ю (Codex, на `3707821`, 12.10): рішення власника за 8 питаннями (розділ «Рішення власника» внизу) і п'ять блокерів (п.3, 9, 10, 11, 13, 14, 16, нова Task 0). Проби P1–P2 з VPS пройдені.
 
 **Goal:** у репо є новий контролер merge-deploy під образи — `deploy/image/autodeploy.sh`:
 - гейти перенесені без змін; CI-гейт додатково вимагає `image=success`; новий гейт — відкритий інцидент;
@@ -48,28 +48,28 @@
    - Кроку на хості немає: після мерджу людина запускає `bash deploy/deploy.sh` (flat, як після «а»).
    - Між «б» і «в» PR зі змінами `deploy/image/helper/**` чи шаблону Quadlet теж носять hold без кроку на хості. Це свідома ціна.
 
-3. **Стан — `image-state.env` у тому ж `STATE_DIR`; він розбирається, а не виконується через `.`.**
-   - Розбір: `while IFS= read -r line` → ключ з allowlist `STATE_KEYS`, значення — решта рядка. Причина: `INCIDENT=<sha> <digest> <причина>` містить пробіли (§7.1), і `. "$STATE"` виконав би другий токен як команду.
-   - `write_state` відмовляє на значенні з `\n` (exit 4).
+3. **Стан — `image-state.env` у тому ж `STATE_DIR`; він розбирається, перевіряється і лише тоді використовується.**
+   - Розбір: `while IFS= read -r line` → ключ з allowlist `STATE_KEYS`, значення — решта рядка. `. "$STATE"` не вживається: `INCIDENT=<sha> <digest> <причина>` містить пробіли (§7.1), і другий токен виконався б як команда.
+   - **Валідація до будь-якої дії** (рев'ю Codex): дубльований ключ, невідомий ключ, рядок не `KEY=…`, обрізаний файл (останній рядок без `\n`), значення не свого формату (SHA — 40 hex, digest — `sha256:`+64, ID — 64 hex, час — ціле), неповні комбінації (`SETTLED_SHA` без `SETTLED_DIGEST`/`SETTLED_ID`; `WINDOW_PHASE` без `WINDOW_SHA`/`WINDOW_DIGEST`/`WINDOW_MODE`; `DEPLOYED_DIGEST` без `DEPLOYED_ID`) → **`STATE CORRUPT`**: нуль дій, 🔥 раз на добу, вихід 3. Наявний, але пошкоджений файл ніколи не трактується як bootstrap; bootstrap — лише коли файлу нема.
+   - Запис атомарний: тимчасовий файл у тому ж каталозі, `fsync` (через `sync -d <file>` або `python3 -c os.fsync` — обрати те, що є в `coreutils` 9.4 Ubuntu 24.04, і зафіксувати тестом argv), `mv`, `sync` каталогу. Reboot після успішного `write_state` не повертає попередній стан. `write_state` відмовляє на значенні з `\n` (exit 4).
    - `state.env` новий контролер не читає й не пише.
    - Lock той самий (`$STATE_DIR/lock`): старий `deploy.sh` і новий контролер виключають одне одного.
 
-4. **Ключі стану:** §7.1 плюс сім нових (жирним), бо без них заявкам нема на що спертися.
+4. **Ключі стану:** §7.1 плюс нові (жирним), бо без них заявкам нема на що спертися.
 
    | Група | Ключі |
    |---|---|
    | гейтові | `DEPLOYED_SHA`, `PREVIOUS_SHA`, `LAST_SEEN_DEPLOYED_SHA`, `REGRESSION_FROM_SHA`, `REGRESSION_TO_SHA`, `LAST_FAILED_SHA`, `MAIN_SEEN_SHA`, `MAIN_SEEN_S`, `LAST_CI_NOTICE_SHA`, `LAST_HOLD_NOTICE`, `LAST_STALE_NOTICE`, `LAST_ASSESS_NOTICE`, **`LAST_INCIDENT_NOTICE`** |
    | образні | `DEPLOYED_DIGEST`, `DEPLOYED_ID`, **`DEPLOYED_CONTENT`**, `SETTLED_SHA`, `SETTLED_DIGEST`, `SETTLED_ID`, **`SETTLED_CONTENT`** |
-   | вікно | `WINDOW_SHA`, `WINDOW_DIGEST`, **`WINDOW_ID`**, **`WINDOW_CONTENT`**, **`WINDOW_OLD`**, `WINDOW_PREV_DIGEST`, `WINDOW_MODE`, `WINDOW_PHASE`, `WINDOW_PRE`, `WINDOW_START`, `WINDOW_BOOT`, `WINDOW_NRESTARTS`, **`WINDOW_REASON`** |
-   | hold кандидата | **`CANDIDATE_HELD`**, **`CANDIDATE_HELD_WHY`** |
+   | вікно | `WINDOW_SHA`, `WINDOW_DIGEST`, **`WINDOW_ID`**, **`WINDOW_CONTENT`**, **`WINDOW_OLD`**, `WINDOW_PREV_DIGEST`, `WINDOW_MODE`, `WINDOW_PHASE`, `WINDOW_PRE`, `WINDOW_START`, `WINDOW_BOOT`, `WINDOW_NRESTARTS`, **`WINDOW_FAILS`**, **`WINDOW_LAST_READ`**, **`WINDOW_REASON`**, **`ROLLBACK_ATTEMPTS`** |
+   | hold кандидата | **`CANDIDATE_HELD`** (`<X> <D> <S>`), **`CANDIDATE_HELD_WHY`**, **`CANDIDATE_RETRY_X`**, **`CANDIDATE_RETRY_AT`** |
+   | утримання | **`RETAINED_PRE`** (імена позначених знімків через пробіл) |
    | інцидент | `INCIDENT` |
 
    Семантика:
-   - `DEPLOYED_SHA` — гейтова база («production еквівалентний X»).
-   - `DEPLOYED_DIGEST/ID/CONTENT` — що запущено.
-   - `SETTLED_*` — ціль відкату; міняється лише після повного вікна.
-   - `SETTLED_SHA` — мітка `revision` образу `SETTLED_DIGEST`.
-   - `WINDOW_OLD` — гейтова база до вікна.
+   - `DEPLOYED_SHA` — гейтова база («production еквівалентний X»); `DEPLOYED_DIGEST/ID/CONTENT` — що запущено; `SETTLED_*` — ціль відкату, міняється лише після повного вікна; `SETTLED_SHA` — мітка `revision` образу `SETTLED_DIGEST`; `WINDOW_OLD` — гейтова база до вікна.
+   - `WINDOW_FAILS` — поспіль невдалі health; `WINDOW_LAST_READ` — час останнього **повністю прочитаного** опитування (п.11). Обидва пишуться після кожного опитування, тож kill tick-а їх не обнуляє.
+   - `ROLLBACK_ATTEMPTS` — скільки разів уже викликано `activate S` у цьому відкаті; пишеться **до** виклику (п.13).
 
    Спека §7.1 доповнюється в цьому ж PR.
 
@@ -101,20 +101,31 @@
    - `CHECKS_CMD` дає колонку `.check_suite.id`.
    - `image` відсутній або в іншому suite → `WAIT`; `image` неуспішний → `FAIL` (повідомлення раз на SHA).
 
-9. **Розгалуження за вердиктом хелпера — за парою (код, точний рядок), ніколи за кодом.**
-   - Рядок вердикту — останній рядок stdout; формат перевіряється регексом.
-   - Комбінація поза таблицею (зокрема вихід 1 без рядка — так `sudo -n` відповідає на відсутнє правило) → «не вдалося перевірити», ніколи failed-SHA.
+9. **Розгалуження за вердиктом хелпера — за парою (код, рядок), розбір окремий для кожної дії; ніколи за кодом.** (Рев'ю Codex, блокер: `audit` друкує деталі npm **після** рядка вердикту, тож «останній рядок» для нього хибний.)
+
+   | Дія | Де вердикт | Формат |
+   |---|---|---|
+   | `pull` | єдиний рядок stdout | `PULLED <D> <I> content=<C> revision=<X>` |
+   | `local` (Task 0) | єдиний рядок stdout | `LOCAL <D> <I> content=<C> revision=<X>` |
+   | `audit` | **перший** рядок stdout | `AUDIT CLEAN <D>` / `AUDIT ADVISORY <D>` (далі — деталі, лише для повідомлення) |
+   | `trial` | рядки кроків; вердикт — **останній** рядок stdout | `TRIAL OK…`, `START OK <X>`, `COMPAT OK <S>` / `TRIAL FAILED:`, `START FAILED:`, `COMPAT FAILED:` |
+   | `activate` | єдиний рядок stdout | `ACTIVATED <D>` / `ACTIVATE FAILED: …` |
+   | `current` | єдиний рядок stdout | `CURRENT quadlet=… container-image=… container-digest=… unit=…` |
+   | будь-яка | **перший рядок stderr** при 2 / 75 | `REFUSED: …` / `TEMPFAIL: …` |
+
+   Комбінація поза таблицею (зокрема вихід 1 без рядка — так `sudo -n` відповідає на відсутнє правило) → «не вдалося перевірити», ніколи failed-SHA.
+   Розбирачі тестуються на **справжніх** виходах хелпера: Task 0 генерує golden-файли з самого `wbb_image.py` (його `main` з фейковим runner-ом), і тест перевіряє, що вони не застаріли.
 
    | Дія | Вердикт | Контролер |
    |---|---|---|
    | `pull` X D | 0 + `PULLED D I content=C revision=X` (саме ті D і X) | далі |
    | `pull` | 2 / 75 / інше | assess, без failed-SHA |
    | `audit` D | 0 `AUDIT CLEAN D` | далі |
-   | `audit` | 1 `AUDIT ADVISORY D` | за відповіддю на питання 2 (рекомендовано: refuse → `LAST_FAILED_SHA`) |
+   | `audit` | 1 `AUDIT ADVISORY D` | refuse → `LAST_FAILED_SHA=X` (рішення власника 2; README хелпера узгоджується в Task 4) |
    | `audit` | 75 / інше | assess, повтор |
    | `trial` | 1 `TRIAL FAILED:` / `START FAILED:` | `discard` pre, refuse → `LAST_FAILED_SHA` |
-   | `trial` | 1 `COMPAT FAILED: …` | `discard` pre, `CANDIDATE_HELD=X`, `CANDIDATE_HELD_WHY`, ⏸ з порадою `deploy.sh --ack-incompatible`; **без** `LAST_FAILED_SHA` |
-   | `trial` | 2 `REFUSED:` | `discard` pre, `CANDIDATE_HELD=X`, ⏸ з текстом |
+   | `trial` | 1 `COMPAT FAILED: …` | `discard` pre, `CANDIDATE_HELD="X D S"`, `CANDIDATE_HELD_WHY`, ⏸ з порадою `deploy.sh --ack-incompatible`; **без** `LAST_FAILED_SHA` |
+   | `trial` | 2 `REFUSED:` | `discard` pre; **не** `CANDIDATE_HELD` (рев'ю Codex: передумову — права, знімок, старий S — лагодять без нового коміту): `CANDIDATE_RETRY_X=X`, `CANDIDATE_RETRY_AT=now+3600`, ⏸ з текстом stderr раз на добу; до `RETRY_AT` X не пробується, після — пробується заново |
    | `trial` | 0, останній рядок `COMPAT OK <S>` | далі |
    | `trial` | 75 / 70 / інше | `discard` pre, assess, повтор |
    | `activate` D | 0 `ACTIVATED D` | `PHASE=watching` |
@@ -122,22 +133,31 @@
    | `activate` D | 75 | `PHASE` лишається `activating`, ⚠️; наступний tick — рядки 1–2 §7.2 |
    | `activate` D | 2 | `current`: `unit=foreign` → інцидент; інакше вікно скасоване, assess |
 
-   `CANDIDATE_HELD == X` → тихо, нагадування раз на добу. Новий head скидає ключ.
+   `CANDIDATE_HELD` діє, лише поки збігаються всі три: X — head, D — його digest, S — `SETTLED_DIGEST`. Новий head або новий settled скидає ключ (доведена несумісність стосувалася саме цієї пари образів). Тихо, нагадування раз на добу.
 
-10. **Ціль відкату S мусить бути локальною до trial.**
-    - Перед pre: `pull --sha SETTLED_SHA --digest SETTLED_DIGEST`; `I ≠ SETTLED_ID` → assess без деплою.
-    - Відкат тоді не залежить від реєстру (V7).
+10. **Ціль відкату S мусить бути локальною до trial — перевірка локально, без мережі.** (Рев'ю Codex: `pull` завжди йде в реєстр і перевіряє місце.)
+    - Нова дія хелпера `local --digest S` (Task 0): лише `image inspect` локального образу, жодної мережі; `LOCAL …` або вихід 3 «не локальний».
+    - Перед pre: `local SETTLED_DIGEST`. `I ≠ SETTLED_ID` або чужа revision → assess без деплою. Вихід 3 → `pull --sha SETTLED_SHA --digest SETTLED_DIGEST` (мережа є: D щойно стягнули), потім знову `local`.
+    - Відкат тоді не залежить від реєстру (V7) — і контролер теж ніде на шляху відкату не кличе `pull`.
     - Немає `SETTLED_DIGEST` — автоматика не деплоїть («перший образ-реліз — руками», раз на добу).
 
-11. **Вікно, 600 с, опитування кожні 10 с:** health → `releaseSha`; `NRestarts`; `wbb-image current`.
-    - Провал:
-      - 3 поспіль невдалі health (контейнер `none` теж рахується як невдалий);
-      - `releaseSha ≠ X`;
-      - `container-image ≠ WINDOW_ID` або `quadlet ≠ WINDOW_DIGEST`;
-      - `NRestarts > WINDOW_NRESTARTS`.
+11. **Вікно, 600 с, опитування кожні 10 с.** Кожне опитування читає чотири речі:
+    - health → `releaseSha`;
+    - `NRestarts`;
+    - **стан юніта**: новий seam `WBB_UNIT_STATE_CMD` = `systemctl show warsaw-beer-bot -p ActiveState,SubState,MainPID` (оператор читає без root). «Працює» = `ActiveState=active`, `SubState=running`, `MainPID` ≠ 0. (Рев'ю Codex, блокер: `current` читає ID і digest контейнера, але не `.State.Running` — зупинений контейнер має ті самі значення.)
+    - `wbb-image current`.
+
+    **Провал:**
+    - `WINDOW_FAILS` ≥ 3 (поспіль невдалі health; контейнер `none` або юніт не «працює» — теж невдалий health). Лічильник пишеться в стан після кожного опитування.
+    - `releaseSha ≠ X`; `container-image ≠ WINDOW_ID` або `quadlet ≠ WINDOW_DIGEST`; `NRestarts > WINDOW_NRESTARTS`.
+    - **Неможливість спостерігати:** `now − WINDOW_LAST_READ > OBSERVE_MAX_S` (300 с) — стільки часу жодне опитування не було прочитане повністю (`current`, `NRestarts`, стан юніта). Це провал вікна з причиною «could not observe»: auto → відкат, manual → інцидент. Вікно більше не може висіти `watching` вічно.
     - `unit=foreign` → інцидент.
-    - Нечитане опитування — ні провал, ні прохід. Settled вимагає повністю прочитаного й чистого опитування на t ≥ 600; інакше вікно лишається `watching`, і наступний tick його довершує.
-    - Старт: після `ACTIVATED` до `STARTUP_S=120` чекати на health з `releaseSha == X` (Quadlet `Type=notify` сигналить про контейнер, не про застосунок). Таймаут → провал.
+
+    **Втрата доказу — не прохід і не провал, а нове вікно:** `NRestarts < WINDOW_NRESTARTS` у тому самому boot, або годинник позаду `WINDOW_START`/`WINDOW_LAST_READ` → `WINDOW_START=now`, нова база `NRestarts`, `WINDOW_FAILS=0`, ⚠️ з причиною. Reboot (інший `boot_id`) — так само (рядок 5 §7.2).
+
+    **Settled** вимагає повністю прочитаного й чистого опитування на t ≥ 600 від `WINDOW_START`; неповне — ні провал, ні прохід (до межі `OBSERVE_MAX_S`).
+
+    **Старт:** після `ACTIVATED` до `STARTUP_S=120` чекати на health з `releaseSha == X` і юніт «працює» (Quadlet `Type=notify` сигналить про контейнер, не про застосунок). Таймаут → провал.
 
 12. **Hold-списки.**
     - `path_is_held` нового контролера = старий список + `deploy/image/autodeploy.sh` + `deploy/image/helper/*` + `deploy/image/warsaw-beer-bot.container`.
@@ -148,27 +168,21 @@
 
 13. **Відкат лише коду й інцидент.**
     - Провал у `auto`:
-      1. **першим записом** `LAST_FAILED_SHA=X`, `WINDOW_PHASE=rolling-back`, `WINDOW_REASON`;
+      1. **першим записом** `LAST_FAILED_SHA=X`, `WINDOW_PHASE=rolling-back`, `WINDOW_REASON`, `ROLLBACK_ATTEMPTS=0`;
       2. ⚠️;
-      3. `activate SETTLED_DIGEST`;
-      4. до `STARTUP_S` чекати health з `releaseSha == SETTLED_SHA` і `current` з `container-image == SETTLED_ID`, `quadlet == SETTLED_DIGEST`;
-      5. ок → `DEPLOYED_* = SETTLED_*`, `DEPLOYED_SHA = LAST_SEEN = WINDOW_OLD`, вікно очищено, 🔥 «rolled back (code only, DB untouched)», вихід 2.
-    - `activate S` → 75: одна повторна спроба через 30 с; друге 75, або 1, або 2 → інцидент.
-    - Провал у `manual`:
-      - без відкату;
-      - `mark-rollback WINDOW_PRE`;
-      - `INCIDENT=X D <причина>`;
-      - 🔥 з інструкцією, вихід 3;
-      - `LAST_FAILED_SHA` — за відповіддю на питання 3.
+      3. **перед кожною спробою** — спершу факт: `current` + стан юніта + health. Якщо S уже працює (`quadlet == container-digest == SETTLED_DIGEST`, `container-image == SETTLED_ID`, юніт «працює», `releaseSha == SETTLED_SHA`) → одразу крок 5, **без рестарту** (рев'ю Codex: 75 не доводить, що активація не відбулася; обрив після старту S не має рестартувати його вдруге);
+      4. інакше `ROLLBACK_ATTEMPTS ≥ 2` → інцидент; інакше `ROLLBACK_ATTEMPTS += 1` **записати**, потім `activate SETTLED_DIGEST`, до `STARTUP_S` чекати на ознаки з кроку 3; 75 → через 30 с назад до кроку 3;
+      5. ок → `DEPLOYED_* = SETTLED_*`, `DEPLOYED_SHA = LAST_SEEN = WINDOW_OLD`, pre позначено (п.14), вікно очищено, 🔥 «rolled back (code only, DB untouched)», вихід 2.
+    - Лічильник у стані, тож обрив tick-а не скидає ліміт: після kill наступний tick іде з кроку 3 з тим самим `ROLLBACK_ATTEMPTS`.
+    - Провал у `manual` (рішення власника 3): **одним записом, до очищення вікна** — `LAST_FAILED_SHA=X`, `INCIDENT=X D <причина>`, `RETAINED_PRE` (п.14); без відкату; 🔥 з інструкцією, вихід 3.
     - `INCIDENT` блокує все, крім PAUSED і lock, ще до `resume_window` і `git fetch`. Нагадування раз на добу, вихід 0.
 
-14. **Утримання (§9).**
-    - Settled → `prune --keep D` і `prune` знімків (keep 3).
+14. **Утримання (§9).** (Рішення власника 5: pre після автоматичного провалу утримується до рішення людини.)
+    - Settled → `prune --keep D` і `prune` знімків (keep 3). `db-snapshot.sh prune` пропускає `*-rollback-pre.db` (перевірено в коді).
     - Noop → `prune --keep DEPLOYED --keep SETTLED`.
     - Провал trial → `discard` pre.
-    - Провал `auto` → pre не позначається й не видаляється (питання 5).
-    - Інцидент / провал `manual` → `mark-rollback`.
-    - Зняття утримання (`db-snapshot.sh unmark`) — стадія «в»: зміна `db-snapshot.sh` зробила б застарілою копію старого контролера.
+    - Провал вікна — **будь-який** (auto з відкатом, auto з інцидентом, manual) → `mark-rollback WINDOW_PRE`. Скрипт **перейменовує** файл і друкує нове ім'я; контролер бере саме це ім'я (а не старий `WINDOW_PRE`) і додає до `RETAINED_PRE`. Повідомлення називає файл.
+    - Зняття утримання — людиною; дієслово `db-snapshot.sh unmark` — стадія «в» (зміна `db-snapshot.sh` зробила б застарілою копію старого контролера). До того повідомлення каже, який файл і як прибрати.
 
 15. **Встановлені копії (`installed_is_stale`) нового контролера:**
     - `deploy/image/autodeploy.sh=$0`, `read-env.sh`, `db-snapshot.sh`, `installed-current.sh`;
@@ -182,12 +196,34 @@
     | 0 | idle / settled / wait / noop |
     | 1 | refused |
     | 2 | rolled back |
-    | 3 | інцидент відкрито |
+    | 3 | інцидент відкрито / стан пошкоджений |
     | 4 | збій запису стану |
 
     Вони збігаються з `SuccessExitStatus=0 1 2` чинного юніта.
-    - Гірший бюджет tick-а перевищує `TimeoutStartSec=30min`: pull 600 + audit 300 + trial 480 + activate 180 + старт 120 + вікно 600 + відкат 180 + 120.
-    - Вбивство tick-а в такому разі покриває §7.2, але питання 6 — підняти до 45 хв на стадії «в».
+
+17. **Бюджет tick-а — з усіх вкладених таймаутів, не з кроків.** (Рішення власника 6: рев'ю Codex порахувало, що 45 хв не вистачає.) Найгірший шлях, кожен виклик на межі свого таймауту:
+
+    | Крок | с |
+    |---|---|
+    | resolve (токен + HEAD, 2×20) | 40 |
+    | attest | 120 |
+    | `pull` D (pull 600 + inspect 60) | 660 |
+    | `current` (inspect 60 + systemctl 30) | 90 |
+    | audit | 300 |
+    | `local` S + `pull` S + `local` S | 780 |
+    | pre-знімок (`VACUUM INTO`) | 300 |
+    | trial (180 + 150 + 150 + 3 × rm 60 + 2 × inspect 60 + копія) | 900 |
+    | activate (reload 60 + restart 180) | 240 |
+    | старт | 120 |
+    | вікно 600 + перебіг останнього опитування (health 5, systemctl 5 + 5, current 90) | 705 |
+    | відкат: 2 × (перевірка 100 + activate 240 + старт 120) + 30 | 950 |
+    | інцидент, повідомлення, запис стану | 60 |
+    | **разом** | **≈ 5265 (88 хв)** |
+
+    - У контролері це константи з одним джерелом (`STEP_TIMEOUT_*`), і тест Task 2 рахує суму з них і перевіряє, що вона < `TICK_BUDGET_S=5400` (90 хв). Стадія «в» ставить `TimeoutStartSec=90min` і `LOCK_STALL_S` > 5400 (`5700`), інакше stall-сигнал стане хибним.
+    - Типовий tick — кілька хвилин (V2, V9, V13, P2); 90 хв — межа, після якої systemd вбиває tick, а §7.2 відновлює.
+
+18. **Ручний вхід — встановлена копія** (рішення власника 8, обв'язка): `deploy/image/deploy.sh` з checkout-у передає лише target SHA і підтвердження і викликає **встановлений** контролер; якщо копія ≠ checkout — відмова з інструкцією оновити. Ядро відкидає будь-які аргументи (usage 64), щоб інтерфейс з'явився свідомо.
 
 ## Таблиця «заявка → доказ» (що записує це ядро)
 
@@ -201,13 +237,17 @@
 | `*_CONTENT` | мітка запущеного / settled образу | рядок `PULLED` того образу | сильний |
 | `WINDOW_*`, `PHASE=activating` | зараз почнеться зміна production і в якому режимі | `write_state` до `activate`; тест: фейковий `activate` друкує стан у лог | сильний |
 | `DEPLOYED_DIGEST/ID = D/I` при `ACTIVATED` | Quadlet указує на D, юніт наш, рестарт пройшов | вердикт хелпера | сильний на момент; здоров'я — вікно |
-| `SETTLED_* = D` | D працював 600 с чисто | `watch_window`; фінальне опитування прочитане | сильний |
+| `SETTLED_* = D` | D працював 600 с чисто | `watch_window`: фінальне опитування прочитане, юніт «працює» (`ActiveState/SubState/MainPID`), а не лише правильні ID | сильний |
+| `WINDOW_FAILS`, `WINDOW_LAST_READ` | історія спостереження переживає kill tick-а | пишуться після кожного опитування; тест: дві невдачі → kill → третя невдача = провал | сильний |
+| `ROLLBACK_ATTEMPTS` | відкат не рестартує S більше двох разів за будь-яких обривів | пишеться до `activate S`; перед спробою — факт (`current` + юніт + health) | сильний |
+| `RETAINED_PRE` | pre провалу не зникне від `prune` | ім'я з виводу `mark-rollback`; тест зі справжнім `db-snapshot.sh prune` після >3 нових знімків | сильний |
+| Стан валідний | рішення приймаються з цілого, узгодженого файлу | валідація п.3 до дій; пошкоджений → `STATE CORRUPT`, не bootstrap | сильний |
 | `WINDOW_NRESTARTS`, `WINDOW_BOOT` | база для «бот падав, поки ніхто не дивився» | `systemctl show -p NRestarts`; `boot_id` | **середній**: P4 (чи `daemon-reload` регенерованого юніта зберігає лічильник) |
 | `LAST_FAILED_SHA = X` | X поганий | лише рядки `TRIAL`/`START`/`ACTIVATE FAILED`, `AUDIT ADVISORY` з кодом 1, або провал вікна з причиною | сильний |
 | `CANDIDATE_HELD = X` | X потребує людини | `COMPAT FAILED` (позитивний контроль START (D)) / `REFUSED` з trial | сильний для COMPAT; консервативний для REFUSED |
 | `INCIDENT` | production потребує людини | відкат не довів S; провал у `manual`; `unit=foreign` | сильний (консервативний) |
 | Pre утримано | доказ стану БД до X не зникне | `mark-rollback` + `prune` його пропускає; для `auto` — за побудовою, тест | сильний |
-| Тривалість tick-а | вікно вкладається в `TimeoutStartSec` | V2, V9, V13 | **слабкий**: P3 |
+| Тривалість tick-а | найгірший tick вкладається в `TimeoutStartSec` | сума вкладених таймаутів (п.17) < 5400, тест на константах | сильний як межа; типовий час — P3 |
 
 **Проби до реалізації** (spike, нічого не комітять). Результат 12.10 (`wbb-stage-b-probe.sh`, від `ysi` через `systemd-run --uid=ysi -p Environment=HOME=/home/ysi`, main `423ff56`, digest `sha256:62b75e45…`):
 - P1: 200 + `docker-content-digest` для main; 404 → вихід 3 для неіснуючого тегу.
@@ -239,6 +279,15 @@
 - PR: `[deploy:hold]` + мітка `deploy:hold`. В описі: «кроку на хості немає; новий контролер не встановлюється; після мерджу — `bash deploy/deploy.sh`».
 
 ---
+
+### Task 0: хелпер — дія `local`, sudoers, golden-виходи
+
+**Files:** `deploy/image/helper/wbb_image.py` (+ `test_wbb_image.py`), `deploy/sudoers.d/wbb-image`, `deploy/README.md` (таблиця дій), нові `scripts/autodeploy/fixtures/wbb-image/*.txt`, `scripts/autodeploy/wbb-image-golden.py`, `scripts/autodeploy/wbb-image-golden.test.ts`.
+
+- [ ] `local --digest D`: `inspect_ours` (без `pull`, без перевірки місця) → `LOCAL <D> <I> content=<C> revision=<X>`, вихід 0; образу нема → вихід **3** і `NOT LOCAL <D>` у stdout («нема» — нормальний стан, контролер тоді тягне); не наш / зламаний inspect → як у `inspect_ours` (2 / 75). Тести як для `pull`.
+- [ ] Sudoers: рядок `/usr/local/libexec/wbb-image local --digest *`.
+- [ ] Golden: `wbb-image-golden.py` імпортує `wbb_image` і проганяє `main` з фейковим runner-ом для кожної комбінації, яку розбирає контролер — `PULLED`, `LOCAL`, `NOT LOCAL`, `AUDIT CLEAN`, `AUDIT ADVISORY` **з деталями npm**, `trial` OK / кожен FAILED / `COMPAT FAILED: START TIMEOUT` / REFUSED / TEMPFAIL, `ACTIVATED`, `ACTIVATE FAILED`, `CURRENT` у трьох станах юніта — і пише `<назва>.txt` (код, stdout, stderr). Тест: регенерація в temp і `toEqual` з комітнутими файлами (застарілий golden — червоний з підказкою команди).
+- [ ] Гейт, коміт.
 
 ### Task 1: каркас контролера — стан, гейти, CI з `image`, інцидент-гейт, резолв/атестація/pull/noop
 
@@ -272,7 +321,9 @@
   - (і) Стійкість стану:
     - `state.env` ігнорується;
     - `$(touch <файл>)` у значенні не виконується;
-    - невідомий ключ відкидається.
+    - невідомий ключ, дубльований ключ, обрізаний файл, `SETTLED_SHA` без `SETTLED_DIGEST`, `WINDOW_PHASE` без `WINDOW_DIGEST`, SHA не 40 hex → `STATE CORRUPT`, нуль дій, вихід 3; файлу нема → bootstrap («перший образ-реліз — руками»);
+    - `write_state`: тимчасовий файл + fsync + `mv` (точний argv seam-а синхронізації).
+  - (ї) Розбирачі вердиктів на **golden-виходах** Task 0: `AUDIT ADVISORY` з деталями → failed-SHA; trial з рядками кроків → останній рядок; `REFUSED:`/`TEMPFAIL:` зі stderr.
 - [ ] Реалізація:
   - перенести lock, PAUSED, stall, `notify`, `once_a_day`, `refuse`, `observe_deployment`, `report_regression_hold`, `scan_range`, `ci_verdict`, `installed_is_stale` (зі змінами п.3, 5, 8, 12, 15);
   - `read_state`/`write_state`;
@@ -283,7 +334,9 @@
   - holds після noop → (и);
   - `. "$STATE"` замість розбору → (і);
   - CI-вердикт без suite → (б);
-  - INCIDENT після `git fetch` → (г).
+  - INCIDENT після `git fetch` → (г);
+  - audit за останнім рядком → (ї);
+  - пошкоджений файл як bootstrap → (і).
 - [ ] Гейт, коміт.
 
 ### Task 2: шлях до production — audit, S локально, pre, trial, стан вікна, activate, вікно, settled, відкат, інцидент
@@ -323,17 +376,29 @@
   - (з) `activate S`: 75, потім 0 → відкат успішний; 75 двічі → інцидент.
   - (и) S не піднявся → `INCIDENT`, 🔥, вихід 3.
   - (і) `manual` → без `activate S`, `mark-rollback`, `INCIDENT`, вихід 3.
-  - (ї) Утримання:
-    - settled → `prune --keep D` + `prune` знімків;
-    - `auto`-провал → pre лишається.
+  - (ї) Утримання — **зі справжнім `deploy/db-snapshot.sh`** (seam `MARK`/`PRUNE` вказує на нього, каталог — temp):
+    - `auto`-провал → `mark-rollback` з точним шляхом; у `RETAINED_PRE` — **нове** ім'я з виводу;
+    - далі чотири settled з новими pre → справжній `prune 3` → позначений файл на місці, три найновіші непозначені на місці, решта видалена.
+  - (й) Стан юніта: контейнер з правильними ID, але юніт `inactive`/`failed` → невдалий health; три такі → провал.
+  - (к) `WINDOW_FAILS` переживає обрив: дві невдачі → `kill` → наступний tick, третя невдача → провал.
+  - (л) `OBSERVE_MAX_S`: `current` нечитаний 300 с → провал «could not observe» → відкат; 290 с → ще `watching`.
+  - (м) Втрата доказу: `NRestarts` нижче бази в тому ж boot → нове вікно від зараз з новою базою, ⚠️, без провалу; годинник назад → так само.
+  - (н) Відкат: S уже працює перед спробою → нуль `activate`, відкат завершено; `ROLLBACK_ATTEMPTS=2` у стані → інцидент без третього `activate`.
+  - (о) Послідовність (рев'ю Codex): hold → ручний noop-коміт (засіяно) → наступний реальний реліз → провал вікна → відкат: health чекає `SETTLED_SHA` реального образу, а ancestry/holds рахуються від просунутої `DEPLOYED_SHA`.
+  - (п) Бюджет: сума `STEP_TIMEOUT_*` з констант скрипта < `TICK_BUDGET_S` (5400).
 - [ ] Реалізація: `deploy_pipeline`, `begin_window`, `activate_candidate`, `watch_window`, `settle`, `roll_back_code`, `open_incident`, утримання.
 - [ ] Мутації — кожна має зробити червоним свій тест:
   - стан вікна після `activate` → (б);
   - `LAST_FAILED_SHA` після `activate S` → (є);
   - `COMPAT FAILED` → `LAST_FAILED_SHA` → (в);
   - settled без прочитаного опитування → (д);
-  - `discard` pre на `auto` → (ї);
-  - відкат у `manual` → (і).
+  - `discard` замість `mark-rollback` на `auto` → (ї);
+  - старий `WINDOW_PRE` замість імені з виводу → (ї);
+  - відкат у `manual` → (і);
+  - «працює» лише за ID → (й);
+  - `WINDOW_FAILS` у пам'яті → (к);
+  - без `OBSERVE_MAX_S` → (л);
+  - `activate S` без перевірки факту → (н).
 - [ ] Гейт, коміт.
 
 ### Task 3: відновлення після обриву — кожен рядок §7.2 окремим тестом
@@ -353,7 +418,8 @@
   8. Відкат не підняв S після resume → `INCIDENT`, далі нуль дій.
   9. `manual` після «reboot» → не відкат, інцидент.
   10. `unit=foreign` — `it.each` на три фази → нуль `activate`/`prune`, `INCIDENT`, вихід 3.
-- [ ] Ще: невідома `WINDOW_PHASE` або вікно без обов'язкових ключів → інцидент, не здогадка.
+- [ ] Ще: невідома `WINDOW_PHASE` → `STATE CORRUPT` (п.3), не здогадка.
+- [ ] Наскрізні `kill`-тести (рев'ю Codex: засівання доводить рішення, але не те, що контролер лишає саме такий стан) — по одному: після `ACTIVATED D` до запису `watching`; після старту S у відкаті до фінального запису; перед і після запису інциденту. Кожен: стан після kill = стан, який засіває відповідний рядок; наступний tick робить дію рядка.
 - [ ] Реалізація: `resume_window` — функція рішення від (`PHASE`, `MODE`, `current`, `boot_id`, health, `NRestarts`) до дії.
 - [ ] Мутації — кожна має зробити червоним свій рядок:
   - рядок 3: повторний `activate`;
@@ -370,7 +436,7 @@
 **Files:**
 - `scripts/autodeploy/deploy-hold-check.ts` (+ тест);
 - спека 2026-10-11 (§7.1 — ключі п.4; рядок статусу; §14 — «noop просуває `DEPLOYED_SHA`», «база `NRestarts`»);
-- `deploy/README.md` (абзац про контролер стадії «б» і вердикт `AUDIT ADVISORY`).
+- `deploy/README.md`: абзац про контролер стадії «б»; `AUDIT ADVISORY` — провал кандидата (failed-SHA), не hold (рішення власника 2).
 
 - [ ] Тести спершу:
   - `TABLE_COMMON` — проти `isHoldPath` і обох `path_is_held`.
@@ -389,7 +455,7 @@
   - оператор, чистий checkout;
   - `--target`, `--force`, `--ack-holds`;
   - `--ack-incompatible` → `WINDOW_MODE=manual`;
-  - `--resolve-incident --settled <sha>`;
+  - `--resolve-incident --settled <sha>` — **через контрольоване вікно** (рев'ю Codex): контролер перевіряє, що працює саме вказаний образ з Quadlet, і відкриває вікно 600 с у `manual`; `SETTLED_*` — лише після нього. Спека §7.3 правиться разом з обв'язкою;
   - bootstrap першого образ-релізу (`trial --previous D`, manual);
   - README для оператора.
 - **Стадія «в»:**
@@ -398,18 +464,18 @@
   - видалення `ships.sh`, `rsync-filter`, rsync/npm-шляху й NOPASSWD-правил;
   - `state.env` → каталог; перенесення гейтових ключів;
   - `db-snapshot.sh unmark`;
-  - `TimeoutStartSec`;
+  - `TimeoutStartSec=90min`, `LOCK_STALL_S=5700` (п.17);
   - репетиція §8 п.5;
   - проби P3/P4;
   - ops-шляхи (§12 п.2) і старі checkout-и.
 
-## Відкриті питання до власника
+## Рішення власника (12.10, за рев'ю Codex на `3707821`)
 
-1. **Імена:** нові файли в `deploy/image/` до «в», потім `git mv` поверх старих (рекомендовано) — чи нові імена назавжди з правкою спеки й CLAUDE.md.
-2. **`AUDIT ADVISORY`:** failed-SHA, як каже спека §4.2 «як зараз» (рекомендовано: виправлення приходить новим мерджем-бампом), чи hold, як писав README хелпера.
-3. **Провал у `manual`** теж пише `LAST_FAILED_SHA=X`? Рекомендовано так, щоб після `--resolve-incident` tick знову не взяв X.
-4. **75 від `activate S` у відкаті:** одна повторна спроба, потім інцидент (рекомендовано) — чи повтор на кожному tick-у до N.
-5. **Pre `auto`-провалу:** лишити непозначеним, щоб доживав серед трьох останніх (рекомендовано), — чи `mark-rollback` назавжди.
-6. **`TimeoutStartSec`:** 45 хв на стадії «в» (рекомендовано) — чи прийняти kill + resume у гіршому випадку.
-7. **`isHoldPath` для `deploy/image/helper/**` уже в «б»** (рекомендовано) — чи лише в «в».
-8. **`deploy.sh` → встановлена копія контролера чи копія з checkout-у** (обв'язка; впливає на CLI manual-режиму).
+1. **Імена:** нові файли в `deploy/image/` до «в», потім `git mv` поверх старих.
+2. **`AUDIT ADVISORY`:** провал кандидата, `LAST_FAILED_SHA=X` (спека §4.2 «як зараз»). Наступний мердж оцінюється заново. Content-noop аудит пропускає: запущений код не змінюється, вразливість ловить щоденний `prod-audit`. README узгоджується (Task 4).
+3. **Провал у `manual`:** теж `LAST_FAILED_SHA=X`, одним записом з інцидентом, до очищення вікна (п.13).
+4. **75 від `activate S`:** спершу факт (S уже працює → завершити без рестарту), далі одна повторна спроба через 30 с, потім інцидент; лічильник спроб у стані (п.13).
+5. **Pre після автоматичного провалу:** `mark-rollback`, утримання до рішення людини; ім'я з виводу скрипта (п.14).
+6. **Бюджет:** з вкладених таймаутів (п.17) ≈ 88 хв; `TimeoutStartSec=90min`, `LOCK_STALL_S=5700` на стадії «в».
+7. **Hold для `deploy/image/helper/**`** уже в «б».
+8. **Ручний вхід** кличе встановлену копію контролера; розбіжність з checkout-ом — відмова (п.18, обв'язка).
