@@ -245,8 +245,7 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     if (!team) return ctx.answerCbQuery();
     ensureProfile(db, ctx.from.id);
     if (!getProfile(db, ctx.from.id)?.untappd_username) {
-      await ctx.answerCbQuery();
-      await ctx.reply(ctx.t('fest.need_link'));
+      await ctx.answerCbQuery(ctx.t('fest.need_link'), { show_alert: true });
       return;
     }
     if (isTeamMember(db, team.id, ctx.from.id)) {

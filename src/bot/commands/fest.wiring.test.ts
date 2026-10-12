@@ -5,7 +5,7 @@ import { openDb, type DB } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { getFestBySlug } from '../../storage/fests';
-import { addMember, createTeam } from '../../storage/fest_teams';
+import { addMember, createTeam, isTeamMember } from '../../storage/fest_teams';
 import { upsertMenuItem } from '../../storage/fest_menu';
 import { queueFor } from '../../storage/fest_queue';
 import { stationTeam } from '../../storage/fest_print';
@@ -23,7 +23,7 @@ function callback(updateId: number, from: number, data: string) {
     message: { message_id: 1, date: 1, chat: { id: -100, type: 'supergroup' as const, title: 'Team' } } } };
 }
 
-function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: string[]; answers: (string | undefined)[] } {
+function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: string[]; answers: (string | undefined)[]; extras: unknown[] } {
   const db = openDb(':memory:');
   migrate(db);
   const festId = getFestBySlug(db, 'wfp22')!.id;
@@ -38,17 +38,48 @@ function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: 
   bot.botInfo = BOT_INFO;
   const replies: string[] = [];
   const answers: (string | undefined)[] = [];
+  const extras: unknown[] = [];
   bot.use((ctx, next) => {
     ctx.deps = { db, env: {}, log: {} } as never;
     ctx.locale = 'en';
     ctx.t = createTranslator('en');
     ctx.reply = (async (message: string) => { replies.push(message); return { message_id: 1 }; }) as never;
-    ctx.answerCbQuery = (async (text?: string) => { answers.push(text); return true; }) as never;
+    ctx.answerCbQuery = (async (text?: string, extra?: unknown) => { answers.push(text); extras.push(extra); return true; }) as never;
     return next();
   });
   bot.use(createFestCommand({ downloadFile: async () => Buffer.from(''), printStationUrl: 'https://beer-api.example/fest-print' }));
-  return { db, bot, teamId, replies, answers };
+  return { db, bot, teamId, replies, answers, extras };
 }
+
+describe('«Я в команді» (fest:j)', () => {
+  it('someone without a linked Untappd is told so in an alert only they see, and is not added', async () => {
+    const { db, bot, teamId, replies, answers, extras } = setup();
+    await bot.handleUpdate(callback(1, 8, `fest:j:${teamId}`) as unknown as Update);
+    expect([replies, answers, extras, isTeamMember(db, teamId, 8)]).toEqual([
+      [], ['First link Untappd in a private chat with the bot: /link <username>'], [{ show_alert: true }], false,
+    ]);
+  });
+
+  it('someone with a linked Untappd joins and is announced by name', async () => {
+    const { db, bot, teamId, replies, answers } = setup();
+    ensureProfile(db, 8);
+    setUntappdUsername(db, 8, 'newcomer');
+    await bot.handleUpdate(callback(1, 8, `fest:j:${teamId}`) as unknown as Update);
+    expect([replies, answers, isTeamMember(db, teamId, 8)]).toEqual([['✅ Test joined the team.'], [undefined], true]);
+  });
+
+  it('a member who presses again is told so and nothing is posted', async () => {
+    const { bot, teamId, replies, answers, extras } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:j:${teamId}`) as unknown as Update);
+    expect([replies, answers, extras]).toEqual([[], ['You are already in the team.'], [undefined]]);
+  });
+
+  it('a button of a team that does not exist posts nothing and adds nobody', async () => {
+    const { db, bot, teamId, replies, answers } = setup();
+    await bot.handleUpdate(callback(1, 8, `fest:j:${teamId + 1}`) as unknown as Update);
+    expect([replies, answers, isTeamMember(db, teamId, 8)]).toEqual([[], [undefined], false]);
+  });
+});
 
 describe('«Взяв» (fest:q)', () => {
   it('a member gets a glass number, announced in the chat; a double tap gives the same glass', async () => {
