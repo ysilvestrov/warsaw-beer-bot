@@ -18,6 +18,18 @@ describe.skipIf(process.platform !== 'linux')('runtime artifact tools (deploy/re
   }, 190_000);
 });
 
+// Image transition core (plan docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md, Task 2): the
+// root helper wbb-image, its copy of bounded.py and its wrapper, tested from Python with a fake host.
+describe.skipIf(process.platform !== 'linux')('root image helper (deploy/image/helper)', () => {
+  it('passes its Python unit tests', () => {
+    const result = spawnSync('python3', ['-B', '-m', 'unittest', 'discover', '-s', 'deploy/image/helper', '-p', 'test_*.py', '-v'], {
+      cwd: root, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,
+    });
+    expect(result.error, result.stderr).toBe(undefined);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+  }, 70_000);
+});
+
 const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8').split('\n');
 
 // The lines of one top-level job: from `  <name>:` to the next two-space key.
