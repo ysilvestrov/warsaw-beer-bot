@@ -116,13 +116,13 @@ class Digestable(unittest.TestCase):
         """The helper cannot see the repo: the rule it applies must only ever admit images of installed_path."""
         self.assertIn('/etc/litestream.yml', ins.COPIES.values())
         self.assertEqual(sorted(ins.installed_path(f'deploy/sudoers.d/{n}') for n in ins.SUDOERS_FILES),
-                         ['/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/wbb-release'])
+                         ['/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/wbb-image', '/etc/sudoers.d/wbb-release'])
 
     def test_every_installed_copy_root_must_digest_is_digestable(self):
         """What the operator may be unable to read (sudoers 0440; the litestream config, if closed) has the root path."""
         dests = [ins.installed_path(f) for f in repo_files('deploy')]
         self.assertEqual(sorted(d for d in dests if d is not None and ins.digestable(d)),
-                         ['/etc/litestream.yml', '/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/wbb-release'])
+                         ['/etc/litestream.yml', '/etc/sudoers.d/warsaw-beer-bot', '/etc/sudoers.d/wbb-image', '/etc/sudoers.d/wbb-release'])
 
 
 if __name__ == '__main__':
