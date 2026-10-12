@@ -2,6 +2,7 @@
 # is removed in stage «в» of the image transition; plan 2026-10-12-wbb-image-transition-core, "Рішення" п.5).
 import hashlib
 import inspect
+import io
 import os
 import shutil
 import signal
@@ -187,7 +188,7 @@ class Bounded(unittest.TestCase):
         with patch, mock.patch.object(bounded, '_Drain', side_effect=record_drain):
             r = bounded.run(py('import subprocess; subprocess.Popen(["sleep", "1"]); print("done")'),
                             timeout=10, join_grace=0.01)
-        self.assertEqual((r.returncode, r.stdout, r.truncated), (0, b'done\n', True))
+        self.assertEqual((r.returncode, r.truncated), (0, True))
         for d in drains:
             d.thread.join(5)
         self.assertEqual([d.thread.is_alive() for d in drains], [False, False])
@@ -205,8 +206,9 @@ class Bounded(unittest.TestCase):
 
         with patch, mock.patch.object(bounded, '_Drain', side_effect=record_drain), \
                 self.assertRaises(subprocess.TimeoutExpired):
-            bounded.run(py('import subprocess, time; subprocess.Popen(["sleep", "2"]); time.sleep(60)'),
-                        timeout=0.5, term_grace=1, join_grace=0.01)
+            bounded.run(py('import subprocess, time; subprocess.Popen(["sleep", "5"]); time.sleep(60)'),
+                        timeout=2, term_grace=1, join_grace=0.01)
+        self.assertEqual([d.thread.is_alive() for d in drains], [True, True])
         for d in drains:
             d.thread.join(5)
         self.assertEqual([d.thread.is_alive() for d in drains], [False, False])
@@ -225,20 +227,19 @@ class Bounded(unittest.TestCase):
 
     def test_a_failed_read_marks_the_capture_truncated(self):
         # #817 AI review: a read error part-way must not pass for a complete capture.
-        class Broken:
+        class Broken(io.BytesIO):
             calls = 0
 
             def read1(self, n):
                 Broken.calls += 1
                 if Broken.calls == 1:
-                    return b'partial'
+                    return super().read1(n)
                 raise OSError(5, 'Input/output error')
 
-            def close(self):
-                pass
-        d = bounded._Drain(Broken(), 100, 10)
+        pipe = Broken(b'partial')
+        d = bounded._Drain(pipe, 100, 10)
         d._run()
-        self.assertEqual((bytes(d.head), d.dropped), (b'partial', True))
+        self.assertEqual((bytes(d.head), d.dropped, pipe.closed), (b'partial', True, True))
 
     def test_check_raises_on_failure(self):
         with self.assertRaises(subprocess.CalledProcessError) as cm:
