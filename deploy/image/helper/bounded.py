@@ -59,6 +59,10 @@ class _Drain:
             with self.lock:
                 self.dropped = True
 
+        finally:
+            # EOF may arrive after run's join grace: the reader owns the pipe until then (#841).
+            self.pipe.close()
+
     def _keep(self, chunk):
         room = self.cap - len(self.head)
         if room > 0:

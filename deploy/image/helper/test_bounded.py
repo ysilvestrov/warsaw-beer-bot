@@ -173,6 +173,46 @@ class Bounded(unittest.TestCase):
             bounded.run(py('import time; time.sleep(30)'), timeout=0.5, term_grace=1, join_grace=1)
         self.assertEqual((made[0].stdout.closed, made[0].stderr.closed), (True, True))
 
+    def test_pipes_close_when_a_descendant_exits_after_the_join_grace(self):
+        # #841: run has already returned when EOF arrives; the reader must close its own pipe.
+        made, patch = self._recording_popen()
+        drains = []
+        real_drain = bounded._Drain
+
+        def record_drain(*args):
+            d = real_drain(*args)
+            drains.append(d)
+            return d
+
+        with patch, mock.patch.object(bounded, '_Drain', side_effect=record_drain):
+            r = bounded.run(py('import subprocess; subprocess.Popen(["sleep", "1"]); print("done")'),
+                            timeout=10, join_grace=0.01)
+        self.assertEqual((r.returncode, r.stdout, r.truncated), (0, b'done\n', True))
+        for d in drains:
+            d.thread.join(5)
+        self.assertEqual([d.thread.is_alive() for d in drains], [False, False])
+        self.assertEqual((made[0].stdout.closed, made[0].stderr.closed), (True, True))
+
+    def test_pipes_close_after_a_timeout_when_the_descendant_later_exits(self):
+        made, patch = self._recording_popen()
+        drains = []
+        real_drain = bounded._Drain
+
+        def record_drain(*args):
+            d = real_drain(*args)
+            drains.append(d)
+            return d
+
+        with patch, mock.patch.object(bounded, '_Drain', side_effect=record_drain), \
+                self.assertRaises(subprocess.TimeoutExpired):
+            bounded.run(py('import subprocess, time; subprocess.Popen(["sleep", "2"]); time.sleep(60)'),
+                        timeout=0.5, term_grace=1, join_grace=0.01)
+        for d in drains:
+            d.thread.join(5)
+        self.assertEqual([d.thread.is_alive() for d in drains], [False, False])
+        self.assertEqual((made[0].returncode, made[0].stdout.closed, made[0].stderr.closed),
+                         (-signal.SIGTERM, True, True))
+
     def test_limits_are_validated_before_anything_runs(self):
         # #817 AI review: tail=0 used to kill the reader thread with IndexError.
         for cap, tail in ((0, 0), (-1, 10), (10, -5)):

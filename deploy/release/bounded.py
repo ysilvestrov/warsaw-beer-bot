@@ -60,6 +60,10 @@ class _Drain:
             # A read that failed part-way leaves the capture incomplete: say so (#817 AI review).
             self.dropped = True
 
+        finally:
+            # EOF may arrive after run's join grace: the reader owns the pipe until then (#841).
+            self.pipe.close()
+
     def close(self):
         """Close our end once the reader is done; one still reading (a descendant holds the pipe) keeps it.
 
