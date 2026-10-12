@@ -1,6 +1,6 @@
 import type { AlgoliaResponse, CheckinSyncPageResult, CheckinSyncState, EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
 
-export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required';
+export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required' | 'feed_unavailable' | 'page_rejected';
 
 export class ApiError extends Error {
   constructor(public code: ApiErrorCode, message?: string) {
@@ -165,6 +165,12 @@ export async function postCheckinSyncPage(
   // #587: 422 контрадикторить наші власні дані (порожня сторінка вище найстарішого
   // check-in'у, що ми маємо) — сесія Untappd мертва, а не дно стрічки.
   if (res.status === 422) throw new ApiError('no_session');
+  // #846: сервер відхилив сторінку як не той фрагмент, який просили. Це не збій з'єднання
+  // й не токен, тож має власний код; будь-який інший 400 лишається 'server'.
+  if (res.status === 400) {
+    const body = await res.json().catch(() => null) as { error?: unknown } | null;
+    throw new ApiError(body?.error === 'bad_cursor' ? 'page_rejected' : 'server', 'status 400');
+  }
   if (!res.ok) throw new ApiError('server', `status ${res.status}`);
   return (await res.json()) as CheckinSyncPageResult;
 }

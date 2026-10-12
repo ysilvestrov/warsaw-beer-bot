@@ -1,7 +1,7 @@
 import { getSettings } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
-import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
+import { feedFailure, runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
 
@@ -330,9 +330,12 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
             headers: isMoreFeed ? { 'X-Requested-With': 'XMLHttpRequest' } : undefined,
             signal: controller.signal,
           });
-          if ((isMoreFeed && res.redirected) || !res.ok) {
-            throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
+          const failure = feedFailure(isMoreFeed, res);
+          if (failure === 'feed_unavailable') {
+            // #846: єдине місце, де цей факт узагалі існує — сервер цього запиту не бачить.
+            console.warn('[beer-overlay] Untappd did not return the check-in feed', { status: res.status, redirected: res.redirected, deep: isMoreFeed });
           }
+          if (failure) throw new ApiError(failure);
           return res.text();
         },
         submitPage: (html, maxId, linkRevision) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal, undefined, linkRevision),

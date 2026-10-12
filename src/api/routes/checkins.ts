@@ -51,28 +51,38 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const telegramId = c.get('telegramId')!; // auth middleware guarantees a value
     const profile = getProfile(deps.db, telegramId);
     const username = profile?.untappd_username ?? null;
-    if (!username) return c.json({ error: 'not_linked' }, 409);
+    // #846: кожна відмова лишає рядок у журналі. Фактів про людину в ньому немає — ані
+    // Telegram id, ані акаунта, ані id чекінів чи курсора (id чекіна відкриває публічну
+    // сторінку з профілем): для діагнозу досить відношення «вище курсора», а не чисел.
+    const refuse = <S extends 400 | 409 | 422 | 502>(status: S, code: string, facts: Record<string, unknown> = {}) => {
+      deps.log.warn({ code, ...facts }, 'checkins sync refused');
+      return c.json({ error: code }, status);
+    };
+    if (!username) return refuse(409, 'not_linked');
 
     const { html, maxId, linkRevision } = c.req.valid('json');
     const owner = getHistoryOwner(deps.db, telegramId);
     if (linkRevision !== undefined && linkRevision !== owner.linkRevision) {
-      return c.json({ error: 'account_changed' }, 409);
+      return refuse(409, 'account_changed');
     }
     if (linkRevision === undefined && profile!.legacy_sync_revision !== owner.linkRevision) {
-      return c.json({ error: 'sync_context_required' }, 409);
+      return refuse(409, 'sync_context_required');
     }
-    if (isBlockPage(html)) return c.json({ error: 'blocked' }, 502);
+    const hasCursor = maxId !== undefined && maxId !== null;
+    if (isBlockPage(html)) return refuse(502, 'blocked', { hasCursor });
 
     const page = parseCheckinFeedPage(html);
+    const pageSize = page.checkins.length;
+    const badCursor = (reason: string) => refuse(400, 'bad_cursor', { reason, pageSize, hasCursor });
     // Курсор — числовий id. Нечислове сюди прийти не мало б, але без явної перевірки
     // воно перетворилося б на NaN і впало б уже всередині транзакції, віддавши 500.
     let cursor: number | null = null;
     if (maxId !== undefined && maxId !== null) {
       // Той самий числовий формат, що й для id у парсері фіду (`/^\d+$/`): без нього
       // Number() пропустив би '5e2', ' 580 ' чи '0x244' як валідні числа.
-      if (!/^\d+$/.test(maxId)) return c.json({ error: 'bad_cursor' }, 400);
+      if (!/^\d+$/.test(maxId)) return badCursor('cursor_format');
       const n = Number(maxId);
-      if (!Number.isInteger(n) || n <= 0) return c.json({ error: 'bad_cursor' }, 400);
+      if (!Number.isInteger(n) || n <= 0) return badCursor('cursor_format');
       cursor = n;
     }
 
@@ -82,7 +92,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     if (page.checkins.length === 0) {
       const oldestKnown = oldestCheckinId(deps.db, telegramId, owner.accountKey);
       if (cursor !== null && oldestKnown !== null && cursor > oldestKnown) {
-        return c.json({ error: 'no_session' }, 422);
+        return refuse(422, 'no_session', { reason: 'empty_above_known', pageSize, hasCursor });
       }
       return c.json({
         merged: 0,
@@ -111,9 +121,8 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // так само не той фрагмент (найстаріший міг випадково опинитися на місці, а верх
     // все одно чужий), і без цієї перевірки вона проходила б у транзакцію та `addCoverage`
     // до того, як покриття встигне це довести.
-    if (cursor !== null && (oldest > cursor || newest > cursor)) {
-      return c.json({ error: 'bad_cursor' }, 400);
-    }
+    if (cursor !== null && oldest > cursor) return badCursor('oldest_above_cursor');
+    if (cursor !== null && newest > cursor) return badCursor('newest_above_cursor');
 
     let merged = 0;
     let alreadyKnown = 0;

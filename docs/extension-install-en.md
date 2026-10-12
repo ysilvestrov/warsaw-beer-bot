@@ -266,7 +266,12 @@ housekeeping one at the bottom:
   you've saved a token** — before that, the "Not connected" block below leads
   instead. While a sync is running the button is greyed out and the line
   under it counts up (`Syncing… 1200 / 8200`): that means "working", not
-  "broken".
+  "broken". If a sync stops, the same line says why. Two of the messages are
+  about Untappd rather than your connection: `Untappd did not return your
+  check-in feed…` — open untappd.com and check you are signed in to the
+  account you linked in the bot; `Untappd returned an unexpected page, so
+  nothing was saved…` — try again later, and if it keeps happening, load your
+  history with `/import` in the bot instead.
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
   items, or you just ran `/import`). With beer search enabled, a beer that reached

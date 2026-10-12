@@ -223,6 +223,25 @@ describe('postCheckinSyncPage', () => {
     vi.unstubAllGlobals();
   });
 
+  // #846: сервер відхилив сторінку як не той фрагмент — це не «з'єднання чи токен».
+  it('maps 400 bad_cursor to page_rejected', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'bad_cursor' }), { status: 400 })));
+    await expect(postCheckinSyncPage('http://x', 'tok', '<html>', '5')).rejects.toMatchObject({ code: 'page_rejected' });
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps any other 400 a server error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'payload_too_large' }), { status: 400 })));
+    await expect(postCheckinSyncPage('http://x', 'tok', '<html>', '5')).rejects.toMatchObject({ code: 'server' });
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps a 400 with an unreadable body a server error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>', { status: 400 })));
+    await expect(postCheckinSyncPage('http://x', 'tok', '<html>', '5')).rejects.toMatchObject({ code: 'server' });
+    vi.unstubAllGlobals();
+  });
+
   // #587: 422 контрадикторить наші власні дані (порожня сторінка вище найстарішого
   // check-in'у) — мертва сесія Untappd, а не дно стрічки. Без цього мапінгу воно
   // провалюється в generic 'server' і обхід класифікує його як звичайну помилку.

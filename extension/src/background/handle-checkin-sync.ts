@@ -6,7 +6,16 @@ export interface SyncProgress {
   mergedThisRun: number;
 }
 
-export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required' | 'error';
+export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required' | 'feed_unavailable' | 'page_rejected' | 'error';
+
+// #846: чому Untappd не віддав стрічку. more_feed — лише для XHR: перенаправлення на ньому
+// означає, що запит не вшановано, і парсити сторінку, куди нас відправили, не можна.
+// Сторінка профілю перенаправляється законно (перейменований акаунт).
+export function feedFailure(isMoreFeed: boolean, res: { ok: boolean; status: number; redirected: boolean }): 'blocked' | 'feed_unavailable' | null {
+  if (res.status === 403 || res.status === 429) return 'blocked';
+  if ((isMoreFeed && res.redirected) || !res.ok) return 'feed_unavailable';
+  return null;
+}
 
 export interface SyncOutcome {
   status: SyncStatus;
@@ -64,7 +73,9 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
       html = await deps.fetchFeed(state.username, cursor);
     } catch (e) {
       if (deps.signal?.aborted) return finish('cancelled');
-      return finish(errCode(e) === 'blocked' ? 'blocked' : 'error');
+      const code = errCode(e);
+      if (code === 'blocked' || code === 'feed_unavailable') return finish(code);
+      return finish('error');
     }
     if (deps.signal?.aborted) return finish('cancelled');
     let res: CheckinSyncPageResult;
@@ -77,6 +88,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
       if (code === 'blocked') return finish('blocked');
       if (code === 'not_linked') return finish('not_linked');
       if (code === 'no_session') return finish('no_session');
+      if (code === 'page_rejected') return finish('page_rejected');
       return finish('error');
     }
     pages++;

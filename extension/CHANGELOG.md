@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+- When “Sync my check-ins” stopped because Untappd did not return your check-in feed, the popup said “check your connection and token”, which was not the cause. It now says that Untappd did not return the feed, or returned an unexpected page, and what to do next.
+
 - After switching your linked Untappd account or replacing your token, old ratings no longer reappear on shop pages from saved or delayed results.
 
 - After removing your API token, “Sync my check-ins” could keep running and old personal ratings could remain visible. Removing the token now stops the sync and clears those saved ratings.

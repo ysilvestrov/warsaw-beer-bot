@@ -43,6 +43,14 @@ describe('formatSyncStatus', () => {
     expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 10, outcome: 'blocked', complete: false }))
       .toBe('Untappd is rate-limiting — try again later.');
   });
+  it('says Untappd did not return the feed', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 0, outcome: 'feed_unavailable', complete: false }))
+      .toBe('Untappd did not return your check-in feed — open untappd.com, make sure you are signed in to the linked account, then sync again.');
+  });
+  it('says the page from Untappd was not the expected one', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 0, outcome: 'page_rejected', complete: false }))
+      .toBe('Untappd returned an unexpected page, so nothing was saved — try again later, or use /import in the bot.');
+  });
   it('reports a transient error', () => {
     expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 10, outcome: 'error', complete: false }))
       .toBe('Sync failed — check your connection and token, then retry.');

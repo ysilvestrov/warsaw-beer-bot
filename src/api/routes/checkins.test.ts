@@ -605,3 +605,64 @@ test('feed A → B → A restores proven coverage, rejects delayed/ABA pages and
   expect(coverageFor(db, 1, 'other')).toEqual([{ from_id: 100, to_id: 100 }]);
   db.close();
 });
+
+// #846: кожна відмова лишає в журналі один рядок із назвою причини — без id чекінів,
+// курсора, акаунта чи HTML.
+describe('#846 a refused sync is named in the journal', () => {
+  it('logs nothing for an accepted page', async () => {
+    const { app, warn } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    expect([res.status, warn.mock.calls]).toEqual([200, []]);
+  });
+
+  it('names a profile with no linked account', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600]), maxId: null }, RAW_TOKEN_NO_USER);
+    expect(warn.mock.calls).toEqual([[{ code: 'not_linked' }, 'checkins sync refused']]);
+  });
+
+  it('names a sync started for an account that is no longer the linked one', async () => {
+    const { app, db, warn } = setup();
+    setUntappdUsername(db, TELEGRAM_ID, 'other');
+    await post(app, '/checkins/sync', { html: pageOf([600]), maxId: null, linkRevision: 1 }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'account_changed' }, 'checkins sync refused']]);
+  });
+
+  it('names an old client that sends no account binding after a relink', async () => {
+    const { app, db, warn } = setup();
+    setUntappdUsername(db, TELEGRAM_ID, 'other');
+    await post(app, '/checkins/sync', { html: pageOf([600]), maxId: null }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'sync_context_required' }, 'checkins sync refused']]);
+  });
+
+  it('names a block page and whether it came from deep in the feed', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: '<html>Just a moment...</html>', maxId: '900' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'blocked', hasCursor: true }, 'checkins sync refused']]);
+  });
+
+  it('names a cursor that is not a number', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '5e2' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'bad_cursor', reason: 'cursor_format', pageSize: 2, hasCursor: true }, 'checkins sync refused']]);
+  });
+
+  it('names an empty page above the oldest known checkin', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    await post(app, '/checkins/sync', { html: '<html><body></body></html>', maxId: '900' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'no_session', reason: 'empty_above_known', pageSize: 0, hasCursor: true }, 'checkins sync refused']]);
+  });
+
+  it('names a page that lies wholly above the cursor', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580, 570]), maxId: '100' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'bad_cursor', reason: 'oldest_above_cursor', pageSize: 3, hasCursor: true }, 'checkins sync refused']]);
+  });
+
+  it('names a page whose top alone is above the cursor', async () => {
+    const { app, warn } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '590' }, RAW_TOKEN);
+    expect(warn.mock.calls).toEqual([[{ code: 'bad_cursor', reason: 'newest_above_cursor', pageSize: 2, hasCursor: true }, 'checkins sync refused']]);
+  });
+});

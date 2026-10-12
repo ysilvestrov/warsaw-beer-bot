@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runCheckinSync, type CheckinSyncDeps } from './handle-checkin-sync';
+import { feedFailure, runCheckinSync, type CheckinSyncDeps } from './handle-checkin-sync';
+import { ApiError } from '../api/client';
 import type { CheckinSyncPageResult, CheckinSyncState } from '../api/types';
 
 function page(over: Partial<CheckinSyncPageResult>): CheckinSyncPageResult {
@@ -182,5 +183,42 @@ describe('#611 binding-aware runner', () => {
     const out = await runCheckinSync(baseDeps({ submitPage }));
     expect(out).toEqual({ status: code, complete: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5 });
     expect(submitPage).toHaveBeenCalledTimes(2);
+  });
+
+  // #846: відмова має назву. Те, що лишається `error`, — мережа, токен, 5xx.
+  it('names a feed that Untappd did not return, without submitting anything', async () => {
+    const submitPage = vi.fn(async () => page({}));
+    const out = await runCheckinSync(baseDeps({ fetchFeed: async () => { throw new ApiError('feed_unavailable'); }, submitPage }));
+    expect([out.status, submitPage.mock.calls.length]).toEqual(['feed_unavailable', 0]);
+  });
+
+  it('names a page the server rejected', async () => {
+    const out = await runCheckinSync(baseDeps({ submitPage: async () => { throw new ApiError('page_rejected'); } }));
+    expect(out.status).toBe('page_rejected');
+  });
+
+  it('keeps a network failure of the feed request a plain error', async () => {
+    const out = await runCheckinSync(baseDeps({ fetchFeed: async () => { throw new TypeError('Failed to fetch'); } }));
+    expect(out.status).toBe('error');
+  });
+
+  it('keeps a server failure on submit a plain error', async () => {
+    const out = await runCheckinSync(baseDeps({ submitPage: async () => { throw new ApiError('server'); } }));
+    expect(out.status).toBe('error');
+  });
+});
+
+describe('feedFailure', () => {
+  it.each([
+    { name: 'the profile page', isMoreFeed: false, res: { ok: true, status: 200, redirected: false }, want: null },
+    { name: 'a profile page reached through a redirect', isMoreFeed: false, res: { ok: true, status: 200, redirected: true }, want: null },
+    { name: 'a feed fragment', isMoreFeed: true, res: { ok: true, status: 200, redirected: false }, want: null },
+    { name: 'a redirected feed fragment', isMoreFeed: true, res: { ok: true, status: 200, redirected: true }, want: 'feed_unavailable' },
+    { name: 'a server error', isMoreFeed: true, res: { ok: false, status: 500, redirected: false }, want: 'feed_unavailable' },
+    { name: 'a missing profile', isMoreFeed: false, res: { ok: false, status: 404, redirected: false }, want: 'feed_unavailable' },
+    { name: 'a forbidden response', isMoreFeed: true, res: { ok: false, status: 403, redirected: false }, want: 'blocked' },
+    { name: 'a rate limit', isMoreFeed: false, res: { ok: false, status: 429, redirected: false }, want: 'blocked' },
+  ])('$name → $want', ({ isMoreFeed, res, want }) => {
+    expect(feedFailure(isMoreFeed, res)).toBe(want);
   });
 });
