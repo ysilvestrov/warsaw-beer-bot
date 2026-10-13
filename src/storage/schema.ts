@@ -1051,10 +1051,11 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // Festival Target by name: substrings of the beer name that mark a beer brewed for the
     // festival (a JSON array, like the style patterns). '[]' — the festival has no such rule.
     // No value is seeded: the operator sets it by hand, so the CHECK refuses a value every festival
-    // read would then fail to parse.
+    // read would then fail to parse. CASE, not AND: SQLite promises no short-circuit for AND, and
+    // json_type raises on malformed JSON instead of failing the constraint.
     sql: `
       ALTER TABLE fests ADD COLUMN target_name_patterns TEXT NOT NULL DEFAULT '[]'
-        CHECK (json_valid(target_name_patterns) AND json_type(target_name_patterns) = 'array');
+        CHECK (CASE WHEN json_valid(target_name_patterns) THEN json_type(target_name_patterns) = 'array' ELSE 0 END);
     `,
   },
 ];
