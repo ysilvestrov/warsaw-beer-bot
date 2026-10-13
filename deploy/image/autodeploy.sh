@@ -160,6 +160,14 @@ UNIT_STATE_CMD="${WBB_UNIT_STATE_CMD:-_unit_state_default}"
 _boot_id_default() { cat /proc/sys/kernel/random/boot_id; }
 # Monotonic seconds since boot, for deadlines inside one tick: the wall clock may step.
 _uptime_default() { local u _; read -r u _ < /proc/uptime; echo "${u%%.*}"; }
+# The monotonic clock as a plain integer, or failure (#867 AI review: a broken or odd clock must
+# be a hold, never an aborted tick or garbage arithmetic).
+uptime_now() {
+  local u
+  u=$("$UPTIME_CMD" 2>/dev/null) || return 1
+  [[ $u =~ ^(0|[1-9][0-9]*)$ ]] || return 1
+  echo "$u"
+}
 UPTIME_CMD="${WBB_UPTIME_CMD:-_uptime_default}"
 BOOT_ID_CMD="${WBB_BOOT_ID_CMD:-_boot_id_default}"
 
@@ -447,16 +455,26 @@ _RE_CANDIDATE_HELD='^[0-9a-f]{40} sha256:[0-9a-f]{64} sha256:[0-9a-f]{64}$'
 _RE_INCIDENT='^[0-9a-f]{40} sha256:[0-9a-f]{64} [^ ].*$'
 # A pre snapshot's path (db-snapshot.sh names: <stamp>-<sha>-pre.db, marked -rollback-pre.db).
 _RE_PRE='^/[A-Za-z0-9._/-]+-pre[.]db$'
+# Which kind of pre a key may hold (#867 AI review): a pending mark or a pending pre is an UNMARKED
+# snapshot (mark-rollback would otherwise rename a retained one a second time); a retained one is
+# MARKED (-rollback-pre.db); WINDOW_PRE is either (retain_pre points it at the marked name).
+pre_path_ok() { # <kind any|unmarked|marked> <path>
+  [[ $2 =~ $_RE_PRE ]] || return 1
+  case "$1" in
+    unmarked) case "$2" in *-rollback-pre.db|*-unverified-pre.db) return 1 ;; esac ;;
+    marked) case "$2" in *-rollback-pre.db) ;; *) return 1 ;; esac ;;
+  esac
+}
 # A space-separated list of them, each element checked on its own; read with `read -a`, which
 # neither globs nor reinterprets anything.
-_all_pre_paths() {
+_all_pre_paths() { # <kind> <list>
   local -a items
   local item
-  read -r -a items <<< "$1"
+  read -r -a items <<< "$2"
   [ "${#items[@]}" -gt 0 ] || return 1
-  [ "$1" = "${items[*]}" ] || return 1
+  [ "$2" = "${items[*]}" ] || return 1
   for item in "${items[@]}"; do
-    [[ $item =~ $_RE_PRE ]] || return 1
+    pre_path_ok "$1" "$item" || return 1
   done
 }
 # The format of each key's value. Leading zeros are refused: bash arithmetic reads 010 as 8.
@@ -481,8 +499,10 @@ value_ok() {
     INCIDENT) [[ $v =~ $_RE_INCIDENT ]] ;;
     # Free text (a path, a reason): one line by construction; it must say something.
     # Snapshot paths: no space, no glob character — a list of them splits on spaces alone.
-    WINDOW_PRE|PENDING_PRE) [[ $v =~ $_RE_PRE ]] ;;
-    RETAINED_PRE|PENDING_MARK) _all_pre_paths "$v" ;;
+    WINDOW_PRE) pre_path_ok any "$v" ;;
+    PENDING_PRE) pre_path_ok unmarked "$v" ;;
+    PENDING_MARK) _all_pre_paths unmarked "$v" ;;
+    RETAINED_PRE) _all_pre_paths marked "$v" ;;
     WINDOW_REASON|CANDIDATE_HELD_WHY) [ -n "$v" ] ;;
     *) return 1 ;;
   esac
@@ -707,7 +727,7 @@ add_unique() {
 # Fills HOLDS (reasons) and RANGE_PRS (#n of every PR in DEPLOYED_SHA..$1).
 # A failure to look is a hold, never a pass (fail closed).
 scan_range() {
-  local x="$1" paths commits c out pr labels f l start
+  local x="$1" paths commits c out pr labels f l start up
   HOLDS=()
   RANGE_PRS=()
   if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$x"); then
@@ -720,11 +740,18 @@ scan_range() {
     HOLDS+=("could not list the commits")
     return 0
   fi
-  start=$("$UPTIME_CMD")
+  if ! start=$(uptime_now); then
+    add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
+    return 0
+  fi
   while IFS= read -r c; do
     if [ -z "$c" ]; then continue; fi
     # A range too long to read in time is a hold, never a pass (a monotonic deadline).
-    if [ $(( $("$UPTIME_CMD") - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
+    if ! up=$(uptime_now); then
+      add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
+      break
+    fi
+    if [ $(( up - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
       add_unique HOLDS "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
       break
     fi

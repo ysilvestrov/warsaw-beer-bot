@@ -692,6 +692,11 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
     // Round 2, item 3: snapshot paths — no glob character, no space, one space between list elements.
     ['a PENDING_MARK path with a glob character', (w) => `${good(w)}PENDING_MARK=/s/*-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
+    // #867 AI review: a pending mark is an UNMARKED pre (a marked one would be renamed twice);
+    // a retained one is MARKED.
+    ['a PENDING_MARK path that is already marked', (w) => `${good(w)}PENDING_MARK=/s/a-rollback-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
+    ['a PENDING_PRE path that is already marked', (w) => `${good(w)}PENDING_PRE=/s/a-rollback-pre.db\n`, 'PENDING_PRE has a value that is not of its format'],
+    ['a RETAINED_PRE path that is not marked', (w) => `${good(w)}RETAINED_PRE=/s/a-pre.db\n`, 'RETAINED_PRE has a value that is not of its format'],
     ['a RETAINED_PRE list with an empty element', (w) => `${good(w)}RETAINED_PRE=/s/a-rollback-pre.db  /s/b-rollback-pre.db\n`,
       'RETAINED_PRE has a value that is not of its format'],
     ['a WINDOW_PRE that is not a pre snapshot', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_PRE=/s/notes.txt'),
@@ -1187,6 +1192,25 @@ describe('PR #866 review, round 2', () => {
     } finally {
       holder.kill();
     }
+  });
+
+  // #867 AI review: an unreadable or odd monotonic clock is a hold, never an aborted tick.
+  it.each([
+    ['fails', 'exit 1'],
+    ['prints garbage', 'echo 12.5x'],
+  ])('a monotonic clock that %s holds the range, with no label lookup', (_name, body) => {
+    const w = imageWorld();
+    push(w, { 'docs/x.md': '1\n' }, 'docs 1');
+    noopCandidate(w);
+    const calls = join(w.bin, 'labels.calls');
+    const labels = stub(w.bin, 'labels-counting', `echo "$1" >> "${calls}"; printf '7\\t\\n'`);
+    const clock = stub(w.bin, 'uptime-broken', body);
+    ready(w, { WBB_PR_LABELS_CMD: labels, WBB_UPTIME_CMD: clock });
+    expect(tick(w, { WBB_PR_LABELS_CMD: labels, WBB_UPTIME_CMD: clock }).code).toBe(0);
+    expect([existsSync(calls), events(w)]).toEqual([false, []]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• could not read the monotonic clock for the PR-label scan\n${HOLD_TAIL}`,
+    ]);
   });
 
   it('item 6: the range-scan deadline is monotonic — a wall clock stepping back does not extend it', () => {
