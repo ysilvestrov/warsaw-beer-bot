@@ -1213,6 +1213,25 @@ describe('PR #866 review, round 2', () => {
     ]);
   });
 
+  // #867 AI review: an integer clock that moves backwards would never reach the deadline.
+  it('a monotonic clock that moves backwards holds the range after one lookup', () => {
+    const w = imageWorld();
+    for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);
+    noopCandidate(w);
+    const calls = join(w.bin, 'labels.calls');
+    const labels = stub(w.bin, 'labels-rewinding', [
+      `echo "$1" >> "${calls}"`,
+      `echo $(( $(cat "${w.uptime}") - 100 )) > "${w.uptime}"`,
+      `printf '7\\t\\n'`,
+    ].join('\n'));
+    ready(w, { WBB_PR_LABELS_CMD: labels });
+    expect(tick(w, { WBB_PR_LABELS_CMD: labels }).code).toBe(0);
+    expect([readFileSync(calls, 'utf8').split('\n').filter((l) => l !== '').length, events(w)]).toEqual([1, []]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• could not read the monotonic clock for the PR-label scan\n${HOLD_TAIL}`,
+    ]);
+  });
+
   it('item 6: the range-scan deadline is monotonic — a wall clock stepping back does not extend it', () => {
     const w = imageWorld();
     for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);

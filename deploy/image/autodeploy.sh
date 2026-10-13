@@ -747,7 +747,8 @@ scan_range() {
   while IFS= read -r c; do
     if [ -z "$c" ]; then continue; fi
     # A range too long to read in time is a hold, never a pass (a monotonic deadline).
-    if ! up=$(uptime_now); then
+    # Unreadable, or behind where the scan started: a clock that cannot bound it is a hold.
+    if ! up=$(uptime_now) || [ "$up" -lt "$start" ]; then
       add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
       break
     fi
