@@ -1050,9 +1050,11 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     version: 49,
     // Festival Target by name: substrings of the beer name that mark a beer brewed for the
     // festival (a JSON array, like the style patterns). '[]' — the festival has no such rule.
-    // No value is seeded: the operator sets it.
+    // No value is seeded: the operator sets it by hand, so the CHECK refuses a value every festival
+    // read would then fail to parse.
     sql: `
-      ALTER TABLE fests ADD COLUMN target_name_patterns TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE fests ADD COLUMN target_name_patterns TEXT NOT NULL DEFAULT '[]'
+        CHECK (json_valid(target_name_patterns) AND json_type(target_name_patterns) = 'array');
     `,
   },
 ];

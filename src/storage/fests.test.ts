@@ -48,6 +48,16 @@ describe('migration 42 — festival mode', () => {
     expect([info.changes, getFestBySlug(db, 'wfp22')!.target_name_patterns]).toEqual([1, ['WFP', 'Festiwal']]);
   });
 
+  it.each([['["WFP"'], ['"WFP"'], ['{"a":"WFP"}'], ['']])('refuses name patterns that are not a JSON array: %s', (value) => {
+    expect(() => db.prepare("UPDATE fests SET target_name_patterns = ? WHERE slug = 'wfp22'").run(value)).toThrow('CHECK constraint failed');
+    expect(getFestBySlug(db, 'wfp22')!.target_name_patterns).toEqual([]);
+  });
+
+  it('keeps only the strings of a name-pattern array', () => {
+    db.prepare(`UPDATE fests SET target_name_patterns = '["WFP",22,null,["x"]]' WHERE slug = 'wfp22'`).run();
+    expect(getFestBySlug(db, 'wfp22')!.target_name_patterns).toEqual(['WFP']);
+  });
+
   it('migration 48 is recorded, and a strength threshold the operator sets is read back', () => {
     expect(db.prepare('SELECT version FROM schema_version WHERE version = 48').get()).toEqual({ version: 48 });
     const info = db.prepare("UPDATE fests SET target_min_abv = 8 WHERE slug = 'wfp22'").run();

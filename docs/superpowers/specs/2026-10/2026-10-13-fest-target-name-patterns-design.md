@@ -37,6 +37,10 @@ Basil»). Слова стилю в назві — смак, а не стиль. 
 
 - `fests.target_name_patterns TEXT NOT NULL DEFAULT '[]'` — JSON-масив рядків, як
   `target_style_patterns`. Порожній масив — правила немає (поведінка як досі).
+- Значення вписує оператор руками, а `toFest` розбирає його на кожному читанні фесту, тож зіпсований
+  JSON клав би і команди фесту, і опитування (AI-рев'ю PR #865). Колонка несе
+  `CHECK (json_valid(…) AND json_type(…) = 'array')`: хибний `UPDATE` падає одразу, в оператора на
+  очах. Елемент масиву, що не є рядком, шаблоном не вважається й відкидається при читанні.
 - `TargetCriteria.namePatterns: string[]`, `TargetMenuItem.name: string` (рядок меню вже його несе).
 - Збіг — регістронезалежний підрядок у `beers.name`. Назва броварні, секція і стиль не
   переглядаються.
@@ -50,7 +54,7 @@ Basil»). Слова стилю в назві — смак, а не стиль. 
 
 ### Міграція й значення
 
-v49: `ALTER TABLE fests ADD COLUMN target_name_patterns TEXT NOT NULL DEFAULT '[]';` — чистий
+v49: `ALTER TABLE fests ADD COLUMN target_name_patterns TEXT NOT NULL DEFAULT '[]' CHECK (…);` — чистий
 expand. Попередній реліз читає `fests` через `SELECT *` і зайве поле ігнорує; причини Target ніде
 не зберігаються. Відкат лише коду безпечний.
 

@@ -38,7 +38,8 @@ function toFest(row: FestRow): Fest {
   return {
     ...row,
     target_style_patterns: JSON.parse(row.target_style_patterns) as string[],
-    target_name_patterns: JSON.parse(row.target_name_patterns) as string[],
+    // The column's CHECK guarantees a JSON array; an element that is not a string is no pattern.
+    target_name_patterns: (JSON.parse(row.target_name_patterns) as unknown[]).filter((p): p is string => typeof p === 'string'),
   };
 }
 
