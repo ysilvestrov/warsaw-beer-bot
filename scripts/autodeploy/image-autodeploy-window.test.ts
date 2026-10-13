@@ -534,9 +534,9 @@ describe('(п) the tick\'s budget', () => {
 
   it('the worst tick, built from those bounds and the loops, fits TICK_BUDGET_S', () => {
     expect([value('WINDOW_WORST_S'), value('ROLLBACK_WORST_S'), value('WORST_PATH_S'), value('TICK_BUDGET_S')])
-      .toEqual([1120, 1690, 7170, 7200]);
+      .toEqual([1120, 1690, 7290, 7500]);
     expect(value('WORST_PATH_S') < value('TICK_BUDGET_S')).toBe(true);
-    expect(value('LOCK_STALL_S')).toBe(7500);
+    expect(value('LOCK_STALL_S')).toBe(7800);
   });
 
   it('the helper runs under `timeout` with its action\'s bound (the real default seam, a fake sudo)', () => {

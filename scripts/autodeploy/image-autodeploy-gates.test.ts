@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, CHECKS_OK, DAY1, GOLDEN_DIR, SCRIPT,
@@ -690,6 +690,12 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     ['a manual window rolling back', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ROLLING)}`.replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
       'WINDOW_PHASE is rolling-back but WINDOW_MODE is manual (a manual window never rolls back)'],
     ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
+    // Round 2, item 3: snapshot paths — no glob character, no space, one space between list elements.
+    ['a PENDING_MARK path with a glob character', (w) => `${good(w)}PENDING_MARK=/s/*-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
+    ['a RETAINED_PRE list with an empty element', (w) => `${good(w)}RETAINED_PRE=/s/a-rollback-pre.db  /s/b-rollback-pre.db\n`,
+      'RETAINED_PRE has a value that is not of its format'],
+    ['a WINDOW_PRE that is not a pre snapshot', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_PRE=/s/notes.txt'),
+      'WINDOW_PRE has a value that is not of its format'],
   ];
 
   it.each(CORRUPT)('STATE CORRUPT on %s: nothing runs, the file is untouched, 🔥 once a day, exit 3', (_name, build, problem) => {
@@ -911,21 +917,21 @@ describe('(а) a stalled lock', () => {
     throw new Error('the lock holder never acquired the lock');
   }
 
-  // LOCK_STALL_S = TICK_BUDGET_S (7200) + 300.
-  it('says nothing for 7499 s, then reports a held lock once a day', async () => {
+  // LOCK_STALL_S = TICK_BUDGET_S (7500) + 300.
+  it('says nothing for 7799 s, then reports a held lock once a day', async () => {
     const w = imageWorld();
     const before = stateText(w);
     const holder = await holdLock(join(w.stateDir, 'lock'));
     try {
       expect(tick(w).code).toBe(0);
-      advance(w, 7499);
+      advance(w, 7799);
       tick(w);
       expect(notes(w)).toEqual([]);
       advance(w, 1);
       tick(w);
       tick(w);
       expect(notes(w)).toEqual([
-        `⚠️ merge-deploy: the deploy lock has been held for 125 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
+        `⚠️ merge-deploy: the deploy lock has been held for 130 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
       ]);
       expect([stateText(w), events(w)]).toEqual([before, []]);
     } finally {
@@ -947,7 +953,7 @@ describe('(а) a stalled lock', () => {
 
   it('treats a busy-since record older than two stall periods as stale', async () => {
     const w = imageWorld();
-    writeFileSync(join(w.stateDir, 'lock-busy-since'), String(100000 - 15000));
+    writeFileSync(join(w.stateDir, 'lock-busy-since'), String(100000 - 15600));
     const holder = await holdLock(join(w.stateDir, 'lock'));
     try {
       tick(w);
@@ -1086,8 +1092,8 @@ describe('PR #866 review: the range scan has a deadline (item 3)', () => {
     for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);
     noopCandidate(w);
     const calls = join(w.bin, 'labels.calls');
-    // Each lookup takes 100 s of the tick's clock.
-    const slow = stub(w.bin, 'labels-slow', `echo "$1" >> "${calls}"; echo $(( $(cat "${w.clock}") + 100 )) > "${w.clock}"; printf '7\\t\\n'`);
+    // Each lookup takes 100 s of monotonic time.
+    const slow = stub(w.bin, 'labels-slow', `echo "$1" >> "${calls}"; echo $(( $(cat "${w.uptime}") + 100 )) > "${w.uptime}"; printf '7\\t\\n'`);
     ready(w, { WBB_PR_LABELS_CMD: slow });
     expect(tick(w, { WBB_PR_LABELS_CMD: slow }).code).toBe(0);
     expect(readFileSync(calls, 'utf8').split('\n').filter((l) => l !== '').length).toBe(3);
@@ -1125,10 +1131,10 @@ describe('PR #866 review: a malformed lock-busy-since does not abort the tick (i
     try {
       expect(tick(w).code).toBe(0);
       expect(readFileSync(busy, 'utf8')).toBe('100000\n');
-      advance(w, 7500);
+      advance(w, 7800);
       tick(w);
       expect(notes(w)).toEqual([
-        `⚠️ merge-deploy: the deploy lock has been held for 125 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
+        `⚠️ merge-deploy: the deploy lock has been held for 130 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
       ]);
     } finally {
       holder.kill();
@@ -1146,3 +1152,60 @@ async function holdTheLock(lock: string): Promise<ChildProcess> {
   holder.kill();
   throw new Error('the lock holder never acquired the lock');
 }
+
+describe('PR #866 review, round 2', () => {
+  /** A pre snapshot as db-snapshot.sh leaves it, under the world's snapshot directory. */
+  function pre(w: ImageWorld, name: string): string {
+    const p = join(w.snapshots, name);
+    mkdirSync(w.snapshots, { recursive: true });
+    writeFileSync(p, 'pre\n');
+    writeFileSync(`${p}.sha256`, `${'0'.repeat(64)}\n`);
+    return p;
+  }
+  const rb = (p: string) => p.replace(/-pre\.db$/, '-rollback-pre.db');
+
+  it('item 1 + 3: pending marks are retried element by element, at most two per tick', () => {
+    const w = imageWorld();
+    const [a, b, c] = ['19700101T000001Z-aaaaaa1-pre.db', '19700101T000002Z-aaaaaa2-pre.db', '19700101T000003Z-aaaaaa3-pre.db'].map((n) => pre(w, n));
+    seedState(w, { ...settledState(w.settled), PENDING_MARK: `${a} ${b} ${c}` });
+    expect(tick(w).code).toBe(0);
+    expect(events(w)).toEqual(['mark 19700101T000001Z-aaaaaa1-pre.db', 'mark 19700101T000002Z-aaaaaa2-pre.db']);
+    expect([readState(w).PENDING_MARK, readState(w).RETAINED_PRE]).toEqual([c, `${rb(a)} ${rb(b)}`]);
+    tick(w);
+    expect([readState(w).PENDING_MARK, readState(w).RETAINED_PRE]).toEqual([undefined, `${rb(a)} ${rb(b)} ${rb(c)}`]);
+    expect([a, b, c].map((p) => existsSync(rb(p)))).toEqual([true, true, true]);
+  });
+
+  it('item 5: a busy record in the future is malformed — replaced by now', async () => {
+    const w = imageWorld();
+    const busy = join(w.stateDir, 'lock-busy-since');
+    writeFileSync(busy, '200000\n');
+    const holder = await holdTheLock(join(w.stateDir, 'lock'));
+    try {
+      expect(tick(w).code).toBe(0);
+      expect(readFileSync(busy, 'utf8')).toBe('100000\n');
+    } finally {
+      holder.kill();
+    }
+  });
+
+  it('item 6: the range-scan deadline is monotonic — a wall clock stepping back does not extend it', () => {
+    const w = imageWorld();
+    for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);
+    noopCandidate(w);
+    const calls = join(w.bin, 'labels.calls');
+    // Each lookup: 100 s of uptime pass while the wall clock steps 100 s back.
+    const slow = stub(w.bin, 'labels-stepping', [
+      `echo "$1" >> "${calls}"`,
+      `echo $(( $(cat "${w.uptime}") + 100 )) > "${w.uptime}"`,
+      `echo $(( $(cat "${w.clock}") - 100 )) > "${w.clock}"`,
+      `printf '7\\t\\n'`,
+    ].join('\n'));
+    ready(w, { WBB_PR_LABELS_CMD: slow });
+    expect(tick(w, { WBB_PR_LABELS_CMD: slow }).code).toBe(0);
+    expect([readFileSync(calls, 'utf8').split('\n').filter((l) => l !== '').length, events(w)]).toEqual([3, []]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• could not read the PR labels of the whole range within 240s\n${HOLD_TAIL}`,
+    ]);
+  });
+});

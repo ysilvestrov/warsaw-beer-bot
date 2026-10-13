@@ -102,6 +102,8 @@ export interface ImageWorld {
   /** The image of `base`: deployed, settled and running when the world is made. */
   settled: Image;
   clock: string;
+  /** Monotonic seconds since boot (WBB_UPTIME_CMD): moves with sleeps, never back. */
+  uptime: string;
   eventsLog: string;
   notesLog: string;
   syncLog: string;
@@ -343,7 +345,9 @@ function writeFakes(w: ImageWorld): Record<string, string> {
     WBB_FAKE_EVENTS: w.eventsLog,
     WBB_FAKE_SYNC_LOG: w.syncLog,
     WBB_CLOCK_CMD: stub(b, 'clock-cmd', `printf '%s\\n' "$(<"${w.clock}")"`),
-    WBB_SLEEP_CMD: stub(b, 'sleep-cmd', `echo $(( $(<"${w.clock}") + $1 )) > "${w.clock}"`),
+    // A sleep advances the wall clock and the monotonic uptime alike.
+    WBB_SLEEP_CMD: stub(b, 'sleep-cmd', `echo $(( $(<"${w.clock}") + $1 )) > "${w.clock}"; echo $(( $(<"${w.uptime}") + $1 )) > "${w.uptime}"`),
+    WBB_UPTIME_CMD: stub(b, 'uptime-cmd', `printf '%s\\n' "$(<"${w.uptime}")"`),
     WBB_NOTIFY_CMD: stub(b, 'notify', `printf '%s\\n<<END>>\\n' "$1" >> "${w.notesLog}"`),
     WBB_API_PORT_CMD: stub(b, 'port', 'echo 3000'),
     WBB_READ_ENV_CMD: stub(b, 'read-env', 'echo "read-env $1" >&2; exit 1'),
@@ -496,11 +500,12 @@ export function imageWorld(): ImageWorld {
   mkdirSync(host);
   const clock = join(bin, 'clock');
   writeFileSync(clock, '100000');
+  writeFileSync(join(bin, 'uptime'), '5000');
   const settled = imageOf(base);
   const w: ImageWorld = {
     home, dataDir, stateHome, stateDir, statePath: join(stateDir, 'image-state.env'), repo, bin, pathBin, host,
     snapshots: join(home, 'snapshots'),
-    remote, seed, base, settled, clock,
+    remote, seed, base, settled, clock, uptime: join(bin, 'uptime'),
     eventsLog: join(bin, 'events.log'),
     notesLog: join(bin, 'notify.log'),
     syncLog: join(bin, 'sync.log'),

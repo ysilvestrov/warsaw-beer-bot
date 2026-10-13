@@ -80,6 +80,8 @@ OBSERVE_MAX_S=300
 # Plan п.13: at most two `activate S` per rollback, this far apart after a 75.
 ROLLBACK_ATTEMPTS_MAX=2
 ROLLBACK_RETRY_S=30
+# A tick retries at most this many failed marks (each a db-snapshot.sh call), the rest the next.
+PENDING_MARK_MAX_PER_TICK=2
 # The worst tick, every call at the edge of its bound (plan п.17), from the loops as they are:
 # - a poll is health + NRestarts + the unit state + `current`; the window settles on the first
 #   clean poll at t >= WINDOW_S, or fails OBSERVE_MAX_S after the last fully read one: the last
@@ -90,6 +92,7 @@ ROLLBACK_RETRY_S=30
 # - three messages (failed, rolled back or incident, one lost-evidence notice);
 # - the check runs (one call), and the PR labels of the range: no call starts after SCAN, and the
 #   last one started may run its GH;
+# - the pending-mark retries at the tick's start;
 # - the failed path (rollback) is the longer one: a settled tick runs the image and snapshot prunes
 #   (PRUNE_IMAGES + SNAPSHOT_OP) instead of the rollback.
 POLL_WORST_S=$(( 3 * STEP_TIMEOUT_SEAM_S + STEP_TIMEOUT_CURRENT_S ))
@@ -102,9 +105,10 @@ WORST_PATH_S=$(( 2 * STEP_TIMEOUT_GIT_S + STEP_TIMEOUT_INSTALLED_S + STEP_TIMEOU
   + STEP_TIMEOUT_RESOLVE_S + STEP_TIMEOUT_ATTEST_S + STEP_TIMEOUT_PULL_S + STEP_TIMEOUT_CURRENT_S
   + STEP_TIMEOUT_AUDIT_S + 2 * STEP_TIMEOUT_LOCAL_S + STEP_TIMEOUT_PULL_S + STEP_TIMEOUT_READ_ENV_S
   + STEP_TIMEOUT_SNAPSHOT_S + STEP_TIMEOUT_TRIAL_S + STEP_TIMEOUT_ACTIVATE_S + WINDOW_WORST_S
-  + STEP_TIMEOUT_SNAPSHOT_OP_S + ROLLBACK_WORST_S + 3 * NOTIFY_WORST_S ))
+  + STEP_TIMEOUT_SNAPSHOT_OP_S + ROLLBACK_WORST_S + 3 * NOTIFY_WORST_S
+  + PENDING_MARK_MAX_PER_TICK * STEP_TIMEOUT_SNAPSHOT_OP_S ))
 # The unit's TimeoutStartSec (stage «в») must be at least this.
-TICK_BUDGET_S=7200
+TICK_BUDGET_S=7500
 # --- timeouts and the tick's budget ------------------------------------------------------- END
 # Quadlet's Type=notify signals the container, not the application: after ACTIVATED wait this
 # long for /health to answer releaseSha == X with the unit running.
@@ -154,6 +158,9 @@ RESTARTS_CMD="${WBB_RESTARTS_CMD:-_restarts_default}"
 _unit_state_default() { timeout "$STEP_TIMEOUT_SEAM_S" systemctl show warsaw-beer-bot -p ActiveState,SubState,MainPID; }
 UNIT_STATE_CMD="${WBB_UNIT_STATE_CMD:-_unit_state_default}"
 _boot_id_default() { cat /proc/sys/kernel/random/boot_id; }
+# Monotonic seconds since boot, for deadlines inside one tick: the wall clock may step.
+_uptime_default() { local u _; read -r u _ < /proc/uptime; echo "${u%%.*}"; }
+UPTIME_CMD="${WBB_UPTIME_CMD:-_uptime_default}"
 BOOT_ID_CMD="${WBB_BOOT_ID_CMD:-_boot_id_default}"
 
 # The root helper (spec §5): one sudoers rule per verb, never a password prompt.
@@ -387,7 +394,8 @@ if ! flock -n 9; then
   # Only a plain integer is a record; anything else, or a record older than two stall periods
   # (an earlier busy period that no tick closed), starts the count afresh — written atomically.
   since=$(cat "$busy" 2>/dev/null || true)
-  if ! [[ $since =~ ^(0|[1-9][0-9]{0,17})$ ]] || [ $(( $(now) - since )) -ge $(( 2 * LOCK_STALL_S )) ]; then
+  if ! [[ $since =~ ^(0|[1-9][0-9]{0,17})$ ]] || [ "$since" -gt "$(now)" ] \
+     || [ $(( $(now) - since )) -ge $(( 2 * LOCK_STALL_S )) ]; then
     since=$(now)
     printf '%s\n' "$since" > "$busy.tmp" && mv -f "$busy.tmp" "$busy"
   fi
@@ -437,6 +445,20 @@ is_state_key() {
 # CANDIDATE_HELD="<X> <D> <S>", INCIDENT="<sha> <digest> <reason>" (spec §7.1).
 _RE_CANDIDATE_HELD='^[0-9a-f]{40} sha256:[0-9a-f]{64} sha256:[0-9a-f]{64}$'
 _RE_INCIDENT='^[0-9a-f]{40} sha256:[0-9a-f]{64} [^ ].*$'
+# A pre snapshot's path (db-snapshot.sh names: <stamp>-<sha>-pre.db, marked -rollback-pre.db).
+_RE_PRE='^/[A-Za-z0-9._/-]+-pre[.]db$'
+# A space-separated list of them, each element checked on its own; read with `read -a`, which
+# neither globs nor reinterprets anything.
+_all_pre_paths() {
+  local -a items
+  local item
+  read -r -a items <<< "$1"
+  [ "${#items[@]}" -gt 0 ] || return 1
+  [ "$1" = "${items[*]}" ] || return 1
+  for item in "${items[@]}"; do
+    [[ $item =~ $_RE_PRE ]] || return 1
+  done
+}
 # The format of each key's value. Leading zeros are refused: bash arithmetic reads 010 as 8.
 value_ok() {
   local k="$1" v="$2"
@@ -458,7 +480,10 @@ value_ok() {
     CANDIDATE_HELD) [[ $v =~ $_RE_CANDIDATE_HELD ]] ;;
     INCIDENT) [[ $v =~ $_RE_INCIDENT ]] ;;
     # Free text (a path, a reason): one line by construction; it must say something.
-    WINDOW_PRE|WINDOW_REASON|CANDIDATE_HELD_WHY|RETAINED_PRE|PENDING_PRE|PENDING_MARK) [ -n "$v" ] ;;
+    # Snapshot paths: no space, no glob character — a list of them splits on spaces alone.
+    WINDOW_PRE|PENDING_PRE) [[ $v =~ $_RE_PRE ]] ;;
+    RETAINED_PRE|PENDING_MARK) _all_pre_paths "$v" ;;
+    WINDOW_REASON|CANDIDATE_HELD_WHY) [ -n "$v" ] ;;
     *) return 1 ;;
   esac
 }
@@ -695,11 +720,11 @@ scan_range() {
     HOLDS+=("could not list the commits")
     return 0
   fi
-  start=$(now)
+  start=$("$UPTIME_CMD")
   while IFS= read -r c; do
     if [ -z "$c" ]; then continue; fi
-    # A range too long to read in time is a hold, never a pass.
-    if [ $(( $(now) - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
+    # A range too long to read in time is a hold, never a pass (a monotonic deadline).
+    if [ $(( $("$UPTIME_CMD") - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
       add_unique HOLDS "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
       break
     fi
@@ -986,12 +1011,18 @@ mark_pre() {
   fi
   out=$("$MARK_CMD" "$1" 2>/dev/null) && [ "$(tail -n 1 <<< "$out")" = "$MARKED" ]
 }
-retain() {
-  case " $RETAINED_PRE " in
-    *" $1 "*) ;;
-    *) RETAINED_PRE="${RETAINED_PRE:+$RETAINED_PRE }$1" ;;
-  esac
+# Appends $2 to the list variable named $1 unless it is in it (element by element, no globbing).
+_list_add() {
+  local -a items
+  local item
+  read -r -a items <<< "${!1}"
+  for item in "${items[@]}"; do
+    if [ "$item" = "$2" ]; then return 0; fi
+  done
+  items+=("$2")
+  printf -v "$1" '%s' "${items[*]}"
 }
+retain() { _list_add RETAINED_PRE "$1"; }
 retain_pre() {
   case "$WINDOW_PRE" in
     '') PRE_NOTE="none (the window had no pre snapshot)"; return 0 ;;
@@ -1000,10 +1031,7 @@ retain_pre() {
   if ! mark_pre "$WINDOW_PRE"; then
     # The evidence must not be lost to a failed mark: it is remembered, retried by every tick
     # before anything else, and no snapshot prune runs until it is marked.
-    case " $PENDING_MARK " in
-      *" $WINDOW_PRE "*) ;;
-      *) PENDING_MARK="${PENDING_MARK:+$PENDING_MARK }$WINDOW_PRE" ;;
-    esac
+    _list_add PENDING_MARK "$WINDOW_PRE"
     PRE_NOTE="NOT marked yet (mark-rollback did not answer ${MARKED}); retried every tick, and snapshots are not pruned until it is: $WINDOW_PRE"
     return 0
   fi
@@ -1013,20 +1041,28 @@ retain_pre() {
 }
 # Every tick, first: a pre whose mark failed is marked now, if it can be.
 retry_pending_marks() {
-  local p left="" changed=0
+  local -a items left=()
+  local p changed=0 tried=0
   [ -n "$PENDING_MARK" ] || return 0
-  for p in $PENDING_MARK; do
+  read -r -a items <<< "$PENDING_MARK"
+  for p in "${items[@]}"; do
+    # Bounded per tick (plan п.17): the rest waits for the next tick.
+    if [ "$tried" -ge "$PENDING_MARK_MAX_PER_TICK" ]; then
+      left+=("$p")
+      continue
+    fi
+    tried=$(( tried + 1 ))
     if mark_pre "$p"; then
       retain "$MARKED"
       if [ "$WINDOW_PRE" = "$p" ]; then WINDOW_PRE="$MARKED"; fi
       changed=1
     else
-      left="${left:+$left }$p"
+      left+=("$p")
       echo "WARNING: could not mark $p yet; snapshot pruning waits for it"
     fi
   done
   if [ "$changed" = 1 ]; then
-    PENDING_MARK="$left"
+    PENDING_MARK="${left[*]:-}"
     write_state
   fi
 }
