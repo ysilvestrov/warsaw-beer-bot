@@ -23,8 +23,7 @@
 # the flat deployer and deploy.sh, so they exclude each other.
 #
 # Exit (plan п.16): 0 idle / wait / hold / noop / settled, 1 refused, 2 rolled back (code only),
-#       3 incident opened or state corrupt, 4 state write failed, 64 usage,
-#       70 a found window, until plan Task 3 resumes it.
+#       3 incident opened or state corrupt, 4 state write failed, 64 usage.
 set -euo pipefail
 # notify() cuts messages by CHARACTERS. Under systemd's default C locale bash counts bytes and
 # can cut a UTF-8 character in half, which Telegram rejects.
@@ -1295,11 +1294,79 @@ candidate_retry() {
   write_state
 }
 
-# Plan Task 3 replaces this stub: a tick that finds a window finishes it first (spec §7.2).
+# Spec §7.2: a tick that finds a window finishes what its predecessor started, before anything
+# else. A decision from the state (phase, mode, attempts) and the live facts (`current`, the boot
+# id, then — inside the window — health, NRestarts and the unit state); nothing is remembered
+# outside the state, and nothing is guessed: what the facts do not settle waits for the next tick.
+# Never returns while a window is open.
 resume_window() {
   [ -n "$WINDOW_PHASE" ] || return 0
-  echo "resume_window: Task 3 — not implemented yet; a ${WINDOW_PHASE} window is open" >&2
-  exit 70
+  local kind q i d u boot started
+  X="$WINDOW_SHA"
+  D="$WINDOW_DIGEST"
+  CAND_ID="$WINDOW_ID"
+  CAND_CONTENT="$WINDOW_CONTENT"
+  if ! PORT=$("$API_PORT_CMD"); then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not resolve API_PORT — the ${WINDOW_PHASE} window of ${X:0:7} waits; retrying next tick."
+    exit 0
+  fi
+  image_call current
+  read -r kind q i d u <<< "$IMG_VERDICT"
+  if [ "$kind" != CURRENT ]; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read what production runs: ${IMG_VERDICT} — the ${WINDOW_PHASE} window of ${X:0:7} waits; retrying next tick."
+    exit 0
+  fi
+  # Row 10: whatever the phase, a unit that is not our Quadlet is a human's.
+  if [ "$u" = foreign ]; then
+    open_incident "the unit is not our Quadlet (unit=foreign) in the ${WINDOW_PHASE} window"
+  fi
+  case "$WINDOW_PHASE" in
+    activating)
+      # Row 1: the Quadlet file still names S — activate never ran, production is unchanged.
+      if [ "$q" = "$WINDOW_PREV_DIGEST" ]; then
+        cancel_window "⚠️ merge-deploy: the deploy of ${X:0:7} was interrupted before its activation; production still runs the settled ${SETTLED_SHA:0:7}, so the window is cancelled and ${X:0:7} is tried again next tick."
+      fi
+      if [ "$q" != "$WINDOW_DIGEST" ]; then
+        open_incident "the Quadlet file names ${q}, neither ${X:0:7} nor the settled image, in an activating window"
+      fi
+      # Row 3: D already runs — no second restart; the window starts now.
+      if [ "$d" = "$WINDOW_DIGEST" ] && [ "$i" = "$WINDOW_ID" ]; then
+        DEPLOYED_SHA="$X"
+        LAST_SEEN_DEPLOYED_SHA="$X"
+        DEPLOYED_DIGEST="$D"
+        DEPLOYED_ID="$CAND_ID"
+        DEPLOYED_CONTENT="$CAND_CONTENT"
+        start_watching
+        watch_window 0
+      fi
+      # Row 2: the Quadlet file names D, S (or nothing) runs — D never started; activate again.
+      activate_candidate
+      ;;
+    watching)
+      if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
+        once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — the window of ${X:0:7} waits; retrying next tick."
+        exit 0
+      fi
+      # Row 5: a reboot is itself a restart, so the old NRestarts says nothing: a full window
+      # from now with a new base. The mode is in the state: manual stays manual.
+      if [ "$boot" != "$WINDOW_BOOT" ]; then
+        WINDOW_BOOT="$boot"
+        new_window "a reboot: the boot id changed"
+        watch_window 0
+      fi
+      # Row 4: the same boot — the window goes on from its recorded start; past the start-up
+      # time a failed health counts at once.
+      started=0
+      if [ $(( $(now) - WINDOW_START )) -ge "$STARTUP_S" ]; then started=1; fi
+      watch_window "$started"
+      ;;
+    rolling-back)
+      # Row 7: LAST_FAILED_SHA is already recorded; the pre is marked if the dead tick had not.
+      retain_pre
+      write_state
+      rollback_loop
+      ;;
+  esac
 }
 
 # --- the tick ----------------------------------------------------------------------------------------

@@ -32,9 +32,8 @@
  * against those files, so `current`, health and NRestarts always describe the same host. A test
  * overrides one answer with `reply(w, <action>, <digest | sha | '-'>, …)`: a queue of replies, one per
  * call — 'pass' (the host's own answer), an exact {code, stdout, stderr} (a golden output of the real
- * helper, `golden(name)`), or
- * 'kill-before' / 'kill-after-write', which kill the tick itself before the action or after its first
- * host write. Every call of every seam is one line in the events log.
+ * helper, `golden(name)`), or 'kill-before' / 'kill-after-write' / 'kill-after', which kill the tick
+ * itself before the action, after its first host write, or after the whole action. Every call of every seam is one line in the events log.
  *
  * The clock is a file: the clock stub reads it and the sleep stub advances it, so ten minutes of quiet
  * cost no wall time. The setup never computes what the controller should decide: expected values are
@@ -142,12 +141,14 @@ kill_tick() {
 # raw:<dir> replays dir/{code,stdout,stderr} exactly; kill-before kills now; kill-after-write is the
 # caller's (it sets KILL_AFTER_WRITE).
 KILL_AFTER_WRITE=0
+KILL_AFTER=0
 apply_reply() {
   case "$1" in
     ''|pass) return 0 ;;
     kill-before) kill_tick; exit 0 ;;
     kill-after-write) KILL_AFTER_WRITE=1; return 0 ;;
-    raw:*) cat "\${1#raw:}/stdout"; cat "\${1#raw:}/stderr" >&2; exit "$(cat "\${1#raw:}/code")" ;;
+    kill-after) KILL_AFTER=1; return 0 ;;
+    raw:*) cat "\${1#raw:}/stdout"; cat "\${1#raw:}/stderr" >&2; exit "$(<"\${1#raw:}/code")" ;;
     *) echo "fake: unknown reply '$1'" >&2; exit 99 ;;
   esac
 }
@@ -158,8 +159,10 @@ entry() { cat "$H/registry/$1"; }
 faulty() {
   local f t from to c
   [ -f "$H/activated_at" ] || return 1
-  t=$(( $(cat "$WBB_FAKE_CLOCK") - $(cat "$H/activated_at") ))
-  c=$(cat "$H/container" 2>/dev/null || echo none)
+  [ -f "$H/fault.$1" ] || compgen -G "$H/fault.$1.*" > /dev/null || return 1
+  t=$(( $(<"$WBB_FAKE_CLOCK") - $(<"$H/activated_at") ))
+  c=none
+  if [ -f "$H/container" ]; then c=$(<"$H/container"); fi
   for f in "$H/fault.$1" "$H/fault.$1.$c"; do
     [ -f "$f" ] || continue
     while read -r from to; do
@@ -249,6 +252,8 @@ case "$action" in
     echo "PRUNED $removed skipped 0 kept $(printf '%s\n' "\${keeps[@]}" | sort -u | tr '\n' ' ' | sed 's/ $//')" ;;
   *) echo "fake wbb-image: unknown action $action" >&2; exit 64 ;;
 esac
+# kill-after: the action is done; the tick dies before it reads the answer.
+if [ "$KILL_AFTER" = 1 ]; then kill_tick; fi
 `.replace(/\\\$/g, '$');
 
 const FAKE_RESOLVE = String.raw`
@@ -275,14 +280,14 @@ const FAKE_HEALTH = String.raw`
 if faulty kill && [ ! -f "$H/killed" ]; then touch "$H/killed"; kill_tick; exit 1; fi
 if [ -f "$H/clock-back" ] && [ -f "$H/activated_at" ]; then
   read -r at delta < "$H/clock-back"
-  if [ $(( $(cat "$WBB_FAKE_CLOCK") - $(cat "$H/activated_at") )) -ge "$at" ]; then
-    echo $(( $(cat "$WBB_FAKE_CLOCK") - delta )) > "$WBB_FAKE_CLOCK"; rm -f "$H/clock-back"
+  if [ $(( $(<"$WBB_FAKE_CLOCK") - $(<"$H/activated_at") )) -ge "$at" ]; then
+    echo $(( $(<"$WBB_FAKE_CLOCK") - delta )) > "$WBB_FAKE_CLOCK"; rm -f "$H/clock-back"
   fi
 fi
 # swap: "AT DIGEST" — at AT s after the latest activation someone else makes DIGEST run.
 if [ -f "$H/swap" ] && [ -f "$H/activated_at" ]; then
   read -r at sd < "$H/swap"
-  if [ $(( $(cat "$WBB_FAKE_CLOCK") - $(cat "$H/activated_at") )) -ge "$at" ]; then
+  if [ $(( $(<"$WBB_FAKE_CLOCK") - $(<"$H/activated_at") )) -ge "$at" ]; then
     echo "$sd" > "$H/quadlet"; echo "$sd" > "$H/container"; read -r _ rev _ < "$H/registry/$sd"; echo "$rev" > "$H/running_sha"
     rm -f "$H/swap"
   fi
@@ -337,8 +342,8 @@ function writeFakes(w: ImageWorld): Record<string, string> {
     WBB_FAKE_HOST: w.host,
     WBB_FAKE_EVENTS: w.eventsLog,
     WBB_FAKE_SYNC_LOG: w.syncLog,
-    WBB_CLOCK_CMD: stub(b, 'clock-cmd', `cat "${w.clock}"`),
-    WBB_SLEEP_CMD: stub(b, 'sleep-cmd', `echo $(( $(cat "${w.clock}") + $1 )) > "${w.clock}"`),
+    WBB_CLOCK_CMD: stub(b, 'clock-cmd', `printf '%s\\n' "$(<"${w.clock}")"`),
+    WBB_SLEEP_CMD: stub(b, 'sleep-cmd', `echo $(( $(<"${w.clock}") + $1 )) > "${w.clock}"`),
     WBB_NOTIFY_CMD: stub(b, 'notify', `printf '%s\\n<<END>>\\n' "$1" >> "${w.notesLog}"`),
     WBB_API_PORT_CMD: stub(b, 'port', 'echo 3000'),
     WBB_READ_ENV_CMD: stub(b, 'read-env', 'echo "read-env $1" >&2; exit 1'),
@@ -412,7 +417,7 @@ export function stateAtActivate(w: ImageWorld, n: number): Record<string, string
   return parseState(readFileSync(join(w.host, `state-at-activate.${n}`), 'utf8'));
 }
 
-export type Reply = 'pass' | 'kill-before' | 'kill-after-write' | { code: number; stdout?: string; stderr?: string };
+export type Reply = 'pass' | 'kill-before' | 'kill-after-write' | 'kill-after' | { code: number; stdout?: string; stderr?: string };
 let replySeq = 0;
 
 function replyLine(w: ImageWorld, r: Reply): string {
