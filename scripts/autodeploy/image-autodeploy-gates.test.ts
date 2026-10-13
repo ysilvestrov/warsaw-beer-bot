@@ -1232,6 +1232,26 @@ describe('PR #866 review, round 2', () => {
     ]);
   });
 
+  // #867 AI review: a step back that stays above the scan's start is still a broken clock.
+  it('a monotonic clock that steps back above the scan start holds the range after two lookups', () => {
+    const w = imageWorld();
+    for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);
+    noopCandidate(w);
+    const calls = join(w.bin, 'labels.calls');
+    const labels = stub(w.bin, 'labels-stepping-back', [
+      `echo "$1" >> "${calls}"`,
+      `case $(wc -l < "${calls}") in 1) d=100 ;; *) d=-50 ;; esac`,
+      `echo $(( $(cat "${w.uptime}") + d )) > "${w.uptime}"`,
+      `printf '7\\t\\n'`,
+    ].join('\n'));
+    ready(w, { WBB_PR_LABELS_CMD: labels });
+    expect(tick(w, { WBB_PR_LABELS_CMD: labels }).code).toBe(0);
+    expect([readFileSync(calls, 'utf8').split('\n').filter((l) => l !== '').length, events(w)]).toEqual([2, []]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• could not read the monotonic clock for the PR-label scan\n${HOLD_TAIL}`,
+    ]);
+  });
+
   it('item 6: the range-scan deadline is monotonic — a wall clock stepping back does not extend it', () => {
     const w = imageWorld();
     for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);

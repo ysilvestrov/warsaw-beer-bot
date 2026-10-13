@@ -727,7 +727,7 @@ add_unique() {
 # Fills HOLDS (reasons) and RANGE_PRS (#n of every PR in DEPLOYED_SHA..$1).
 # A failure to look is a hold, never a pass (fail closed).
 scan_range() {
-  local x="$1" paths commits c out pr labels f l start up
+  local x="$1" paths commits c out pr labels f l start up last
   HOLDS=()
   RANGE_PRS=()
   if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$x"); then
@@ -744,14 +744,16 @@ scan_range() {
     add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
     return 0
   fi
+  last=$start
   while IFS= read -r c; do
     if [ -z "$c" ]; then continue; fi
     # A range too long to read in time is a hold, never a pass (a monotonic deadline).
-    # Unreadable, or behind where the scan started: a clock that cannot bound it is a hold.
-    if ! up=$(uptime_now) || [ "$up" -lt "$start" ]; then
+    # Unreadable, or behind its previous reading: a clock that cannot bound the scan is a hold.
+    if ! up=$(uptime_now) || [ "$up" -lt "$last" ]; then
       add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
       break
     fi
+    last=$up
     if [ $(( up - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
       add_unique HOLDS "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
       break
