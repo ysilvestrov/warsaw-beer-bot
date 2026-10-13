@@ -54,6 +54,7 @@ CI_STUCK_S=3600
 # that WORST_PATH_S, the worst tick built from them below, stays under TICK_BUDGET_S.
 STEP_TIMEOUT_GIT_S=120          # git clone, git fetch (each)
 STEP_TIMEOUT_GH_S=60            # gh api: check runs, PR labels (each call)
+STEP_TIMEOUT_SCAN_S=240         # the PR labels of the whole range (no call starts after it)
 STEP_TIMEOUT_INSTALLED_S=30     # installed-current.sh
 STEP_TIMEOUT_RESOLVE_S=40       # token + HEAD, 2 × 20
 STEP_TIMEOUT_ATTEST_S=120
@@ -87,8 +88,8 @@ ROLLBACK_RETRY_S=30
 #   unreadable — then `activate S`, then up to STARTUP_S for S, then the retry sleep; two attempts
 #   and the last fact;
 # - three messages (failed, rolled back or incident, one lost-evidence notice);
-# - PR labels are one call per commit of the range: counted once here (a merge is one commit
-#   ahead of production in the common case; a long range lengthens the tick by GH per commit);
+# - the check runs (one call), and the PR labels of the range: no call starts after SCAN, and the
+#   last one started may run its GH;
 # - the failed path (rollback) is the longer one: a settled tick runs the image and snapshot prunes
 #   (PRUNE_IMAGES + SNAPSHOT_OP) instead of the rollback.
 POLL_WORST_S=$(( 3 * STEP_TIMEOUT_SEAM_S + STEP_TIMEOUT_CURRENT_S ))
@@ -97,7 +98,7 @@ CHECK_WORST_S=$(( STEP_TIMEOUT_STARTUP_S + POLL_S + FACT_WORST_S ))
 WINDOW_WORST_S=$(( WINDOW_S + OBSERVE_MAX_S + 2 * POLL_WORST_S + POLL_S ))
 ROLLBACK_WORST_S=$(( ROLLBACK_ATTEMPTS_MAX * (CHECK_WORST_S + STEP_TIMEOUT_ACTIVATE_S + CHECK_WORST_S + ROLLBACK_RETRY_S) + CHECK_WORST_S ))
 NOTIFY_WORST_S=$(( 2 * STEP_TIMEOUT_READ_ENV_S + STEP_TIMEOUT_NOTIFY_S ))
-WORST_PATH_S=$(( 2 * STEP_TIMEOUT_GIT_S + STEP_TIMEOUT_INSTALLED_S + 2 * STEP_TIMEOUT_GH_S
+WORST_PATH_S=$(( 2 * STEP_TIMEOUT_GIT_S + STEP_TIMEOUT_INSTALLED_S + STEP_TIMEOUT_GH_S + STEP_TIMEOUT_SCAN_S + STEP_TIMEOUT_GH_S
   + STEP_TIMEOUT_RESOLVE_S + STEP_TIMEOUT_ATTEST_S + STEP_TIMEOUT_PULL_S + STEP_TIMEOUT_CURRENT_S
   + STEP_TIMEOUT_AUDIT_S + 2 * STEP_TIMEOUT_LOCAL_S + STEP_TIMEOUT_PULL_S + STEP_TIMEOUT_READ_ENV_S
   + STEP_TIMEOUT_SNAPSHOT_S + STEP_TIMEOUT_TRIAL_S + STEP_TIMEOUT_ACTIVATE_S + WINDOW_WORST_S
@@ -121,7 +122,8 @@ SNAPSHOT_DIR="${WBB_SNAPSHOT_DIR:-/var/lib/warsaw-beer-bot/deploy-snapshots}"
 DB_PATH="${WBB_DB_PATH:-/var/lib/warsaw-beer-bot/bot.db}"
 
 READ_ENV_BIN="${WBB_READ_ENV:-/usr/local/bin/wbb-read-env}"
-INSTALLED_CHECK_BIN="${WBB_INSTALLED_CHECK:-/usr/local/bin/wbb-installed-current}"
+# Unset: the installed copy. Set but EMPTY: the check is off (a test seam, never the host's).
+INSTALLED_CHECK_BIN="${WBB_INSTALLED_CHECK-/usr/local/bin/wbb-installed-current}"
 SNAPSHOT_BIN="${WBB_SNAPSHOT_BIN:-/usr/local/bin/wbb-db-snapshot}"
 # Where deploy/install-image.sh puts the helper (its library, template and wrapper).
 IMAGE_LIB_DIR="${WBB_IMAGE_LIB:-/usr/local/lib/wbb-image}"
@@ -229,7 +231,8 @@ _notify_default() {
     echo "WARNING: notifier has no token or chat id; cannot report: $1" >&2
     return 1
   fi
-  curl -fsS --max-time "$STEP_TIMEOUT_NOTIFY_S" -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
+  # The URL carries the token: it goes to curl as a config on stdin, never in argv (ps, /proc).
+  printf 'url = "%s"\n' "https://api.telegram.org/bot${tok}/sendMessage" | curl -K - -fsS --max-time "$STEP_TIMEOUT_NOTIFY_S" -X POST \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" >/dev/null
 }
@@ -381,11 +384,14 @@ if ! flock -n 9; then
   # nothing. These two files live outside the state on purpose: state is written only under the
   # lock, and this path runs because we do not have it.
   busy="$STATE_DIR/lock-busy-since"
-  # A record older than two stall periods belongs to an earlier busy period that no tick closed.
-  if [ ! -s "$busy" ] || [ $(( $(now) - $(cat "$busy") )) -ge $(( 2 * LOCK_STALL_S )) ]; then
-    now > "$busy"
+  # Only a plain integer is a record; anything else, or a record older than two stall periods
+  # (an earlier busy period that no tick closed), starts the count afresh — written atomically.
+  since=$(cat "$busy" 2>/dev/null || true)
+  if ! [[ $since =~ ^(0|[1-9][0-9]{0,17})$ ]] || [ $(( $(now) - since )) -ge $(( 2 * LOCK_STALL_S )) ]; then
+    since=$(now)
+    printf '%s\n' "$since" > "$busy.tmp" && mv -f "$busy.tmp" "$busy"
   fi
-  held_s=$(( $(now) - $(cat "$busy") ))
+  held_s=$(( $(now) - since ))
   if [ "$held_s" -ge "$LOCK_STALL_S" ] && [ "$(cat "$STATE_DIR/lock-notice" 2>/dev/null)" != "$(today)" ]; then
     notify "⚠️ merge-deploy: the deploy lock has been held for $(( held_s / 60 )) min — no tick can run. A stuck manual deploy.sh? Check: fuser -v $LOCK"
     today > "$STATE_DIR/lock-notice"
@@ -407,13 +413,14 @@ STATE_KEYS=(
   DEPLOYED_DIGEST DEPLOYED_ID DEPLOYED_CONTENT SETTLED_SHA SETTLED_DIGEST SETTLED_ID SETTLED_CONTENT
   WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
   WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ
-  WINDOW_REASON ROLLBACK_ATTEMPTS ACTIVATE_ATTEMPTS PENDING_PRE
+  WINDOW_REASON ROLLBACK_ATTEMPTS ACTIVATE_ATTEMPTS PENDING_PRE PENDING_MARK WINDOW_NRESTARTS_PRE
   CANDIDATE_HELD CANDIDATE_HELD_WHY CANDIDATE_RETRY_X CANDIDATE_RETRY_AT
   RETAINED_PRE
   INCIDENT
 )
 WINDOW_KEYS=(WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
-  WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ WINDOW_REASON)
+  WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ WINDOW_REASON
+  WINDOW_NRESTARTS_PRE)
 for _k in "${STATE_KEYS[@]}"; do printf -v "$_k" '%s' ''; done
 unset _k
 HOLDS=()
@@ -441,7 +448,7 @@ value_ok() {
       [[ $v =~ ^sha256:[0-9a-f]{64}$ ]] ;;
     DEPLOYED_ID|SETTLED_ID|WINDOW_ID|DEPLOYED_CONTENT|SETTLED_CONTENT|WINDOW_CONTENT)
       [[ $v =~ ^[0-9a-f]{64}$ ]] ;;
-    MAIN_SEEN_S|WINDOW_START|WINDOW_NRESTARTS|WINDOW_FAILS|WINDOW_LAST_READ|ROLLBACK_ATTEMPTS|ACTIVATE_ATTEMPTS|CANDIDATE_RETRY_AT)
+    MAIN_SEEN_S|WINDOW_START|WINDOW_NRESTARTS|WINDOW_NRESTARTS_PRE|WINDOW_FAILS|WINDOW_LAST_READ|ROLLBACK_ATTEMPTS|ACTIVATE_ATTEMPTS|CANDIDATE_RETRY_AT)
       [[ $v =~ ^(0|[1-9][0-9]{0,17})$ ]] ;;
     LAST_HOLD_NOTICE|LAST_STALE_NOTICE|LAST_ASSESS_NOTICE|LAST_INCIDENT_NOTICE)
       [[ $v =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] ;;
@@ -451,7 +458,7 @@ value_ok() {
     CANDIDATE_HELD) [[ $v =~ $_RE_CANDIDATE_HELD ]] ;;
     INCIDENT) [[ $v =~ $_RE_INCIDENT ]] ;;
     # Free text (a path, a reason): one line by construction; it must say something.
-    WINDOW_PRE|WINDOW_REASON|CANDIDATE_HELD_WHY|RETAINED_PRE|PENDING_PRE) [ -n "$v" ] ;;
+    WINDOW_PRE|WINDOW_REASON|CANDIDATE_HELD_WHY|RETAINED_PRE|PENDING_PRE|PENDING_MARK) [ -n "$v" ] ;;
     *) return 1 ;;
   esac
 }
@@ -504,7 +511,7 @@ check_state() {
   _requires ROLLBACK_ATTEMPTS WINDOW_PHASE || return 1
   _requires ACTIVATE_ATTEMPTS WINDOW_PHASE || return 1
   # What each phase stands on (a window is written whole, then grows phase by phase).
-  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_PRE WINDOW_BOOT || return 1
+  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_PRE WINDOW_BOOT WINDOW_NRESTARTS_PRE || return 1
   case "$WINDOW_PHASE" in
     watching)
       _requires WINDOW_PHASE WINDOW_START WINDOW_LAST_READ WINDOW_FAILS WINDOW_NRESTARTS || return 1 ;;
@@ -618,7 +625,12 @@ refuse() {
 # All of them are readable by the operator; the sudoers file (0440) is not, and is not checked.
 installed_is_stale() {
   [ -n "$INSTALLED_CHECK_BIN" ] || return 1
-  [ -x "$INSTALLED_CHECK_BIN" ] || return 1
+  # A check that is not there cannot say the copies are current: that is "cannot verify", which
+  # waits like "stale" — never a silent pass.
+  if [ ! -x "$INSTALLED_CHECK_BIN" ]; then
+    STALE_REPORT="cannot verify the installed copies: the check ${INSTALLED_CHECK_BIN} is missing or not executable"
+    return 0
+  fi
   ! STALE_REPORT=$(timeout "$STEP_TIMEOUT_INSTALLED_S" "$INSTALLED_CHECK_BIN" "$REPO" origin/main \
       "deploy/image/autodeploy.sh=$0" \
       "deploy/read-env.sh=$READ_ENV_BIN" \
@@ -670,7 +682,7 @@ add_unique() {
 # Fills HOLDS (reasons) and RANGE_PRS (#n of every PR in DEPLOYED_SHA..$1).
 # A failure to look is a hold, never a pass (fail closed).
 scan_range() {
-  local x="$1" paths commits c out pr labels f l
+  local x="$1" paths commits c out pr labels f l start
   HOLDS=()
   RANGE_PRS=()
   if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$x"); then
@@ -683,8 +695,14 @@ scan_range() {
     HOLDS+=("could not list the commits")
     return 0
   fi
+  start=$(now)
   while IFS= read -r c; do
     if [ -z "$c" ]; then continue; fi
+    # A range too long to read in time is a hold, never a pass.
+    if [ $(( $(now) - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
+      add_unique HOLDS "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
+      break
+    fi
     if ! out=$("$PR_LABELS_CMD" "$c" 2>/dev/null); then
       add_unique HOLDS "could not read PR labels for ${c:0:7}"
       continue
@@ -957,25 +975,60 @@ read_restarts() {
 # and prints the new name; that name — not the old WINDOW_PRE — is what is retained. Only stdout
 # counts, and only the one name the rename can produce. A tick that died between the rename and
 # its write left exactly that: the expected name exists and the original is gone. Sets PRE_NOTE.
+# Marks $1 with mark-rollback; 0 and MARKED=<the new name> when that is exactly the rename's name
+# (or the rename already happened: the original gone, the new name there), 1 otherwise.
+mark_pre() {
+  local out
+  MARKED="${1%-pre.db}-rollback-pre.db"
+  if [ ! -e "$1" ] && [ -e "$MARKED" ]; then
+    echo "the pre snapshot was already marked: $MARKED"
+    return 0
+  fi
+  out=$("$MARK_CMD" "$1" 2>/dev/null) && [ "$(tail -n 1 <<< "$out")" = "$MARKED" ]
+}
+retain() {
+  case " $RETAINED_PRE " in
+    *" $1 "*) ;;
+    *) RETAINED_PRE="${RETAINED_PRE:+$RETAINED_PRE }$1" ;;
+  esac
+}
 retain_pre() {
-  local out expected
   case "$WINDOW_PRE" in
     '') PRE_NOTE="none (the window had no pre snapshot)"; return 0 ;;
     *-rollback-pre.db) PRE_NOTE="$WINDOW_PRE (kept until a human removes it: rm $WINDOW_PRE $WINDOW_PRE.sha256)"; return 0 ;;
   esac
-  expected="${WINDOW_PRE%-pre.db}-rollback-pre.db"
-  if [ ! -e "$WINDOW_PRE" ] && [ -e "$expected" ]; then
-    echo "the pre snapshot was already marked: $expected"
-  elif ! out=$("$MARK_CMD" "$WINDOW_PRE" 2>/dev/null) || [ "$(tail -n 1 <<< "$out")" != "$expected" ]; then
-    PRE_NOTE="NOT marked (mark-rollback did not answer ${expected}) — prune may delete $WINDOW_PRE"
+  if ! mark_pre "$WINDOW_PRE"; then
+    # The evidence must not be lost to a failed mark: it is remembered, retried by every tick
+    # before anything else, and no snapshot prune runs until it is marked.
+    case " $PENDING_MARK " in
+      *" $WINDOW_PRE "*) ;;
+      *) PENDING_MARK="${PENDING_MARK:+$PENDING_MARK }$WINDOW_PRE" ;;
+    esac
+    PRE_NOTE="NOT marked yet (mark-rollback did not answer ${MARKED}); retried every tick, and snapshots are not pruned until it is: $WINDOW_PRE"
     return 0
   fi
-  WINDOW_PRE="$expected"
-  case " $RETAINED_PRE " in
-    *" $expected "*) ;;
-    *) RETAINED_PRE="${RETAINED_PRE:+$RETAINED_PRE }$expected" ;;
-  esac
-  PRE_NOTE="$expected (kept until a human removes it: rm $expected $expected.sha256)"
+  WINDOW_PRE="$MARKED"
+  retain "$MARKED"
+  PRE_NOTE="$MARKED (kept until a human removes it: rm $MARKED $MARKED.sha256)"
+}
+# Every tick, first: a pre whose mark failed is marked now, if it can be.
+retry_pending_marks() {
+  local p left="" changed=0
+  [ -n "$PENDING_MARK" ] || return 0
+  for p in $PENDING_MARK; do
+    if mark_pre "$p"; then
+      retain "$MARKED"
+      if [ "$WINDOW_PRE" = "$p" ]; then WINDOW_PRE="$MARKED"; fi
+      changed=1
+    else
+      left="${left:+$left }$p"
+      echo "WARNING: could not mark $p yet; snapshot pruning waits for it"
+    fi
+  done
+  if [ "$changed" = 1 ]; then
+    PENDING_MARK="$left"
+    write_state
+  fi
 }
 
 # Spec §7.3: production needs a human. The FIRST write is the incident itself (and, when X is to
@@ -1103,6 +1156,9 @@ window_failed() {
 # The window's start or a fresh one: lost evidence is neither a pass nor a failure (plan п.11).
 # A watched window stands on an NRestarts base (F7): it is read before `watching` is written,
 # and a base that cannot be read for OBSERVE_MAX_S is a window that cannot be observed.
+# $1 = compare: the start after an activation — NRestarts above the one read before `activate D`
+# means the candidate already restarted. Below it, the regenerated unit's counter may have been
+# reset by daemon-reload (P4, unproven): the new reading is the base.
 start_watching() {
   local r start
   start=$(now)
@@ -1112,6 +1168,9 @@ start_watching() {
     fi
     "$SLEEP_CMD" "$POLL_S"
   done
+  if [ "${1:-}" = compare ] && [ "$r" -gt "$WINDOW_NRESTARTS_PRE" ]; then
+    window_failed "the candidate restarted during startup (NRestarts ${WINDOW_NRESTARTS_PRE} -> ${r})"
+  fi
   WINDOW_PHASE=watching
   WINDOW_START=$(now)
   WINDOW_LAST_READ="$WINDOW_START"
@@ -1138,8 +1197,13 @@ settle() {
   write_state
   image_call prune --keep "$d"
   case "$IMG_VERDICT" in PRUNED\ *) ;; *) echo "WARNING: image prune: ${IMG_VERDICT}" ;; esac
-  "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
-  notify "✅ merge-deploy ${x:0:7} is live and settled${prs:+ — $prs}."
+  local skipped=""
+  if [ -n "$PENDING_MARK" ]; then
+    skipped=" Snapshot pruning skipped: not yet marked ${PENDING_MARK}."
+  else
+    "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
+  fi
+  notify "✅ merge-deploy ${x:0:7} is live and settled${prs:+ — $prs}.${skipped}"
   exit 0
 }
 
@@ -1246,7 +1310,7 @@ activate_candidate() {
       DEPLOYED_DIGEST="$D"
       DEPLOYED_ID="$CAND_ID"
       DEPLOYED_CONTENT="$CAND_CONTENT"
-      start_watching
+      start_watching compare
       watch_window 0
       ;;
     ACTIVATE_FAILED\ *)
@@ -1300,7 +1364,7 @@ settled_is_local() {
 # The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
 # activate, the window watched. Never returns.
 deploy_pipeline() {
-  local pre name boot kind err
+  local pre name boot kind err restarts_pre
   if ! production_is_record; then
     once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
     exit 0
@@ -1326,6 +1390,11 @@ $(tail -n +2 <<< "$IMG_VERDICT")" ;;
   fi
   if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
     once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — not deploying ${X:0:7}; retrying next tick."
+    exit 0
+  fi
+  # NRestarts before production changes: the start compares against it.
+  if ! restarts_pre=$(read_restarts); then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read NRestarts — not deploying ${X:0:7}; retrying next tick."
     exit 0
   fi
 
@@ -1394,6 +1463,7 @@ It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded agai
   WINDOW_PHASE=activating
   WINDOW_PRE="$pre"
   WINDOW_BOOT="$boot"
+  WINDOW_NRESTARTS_PRE="$restarts_pre"
   PENDING_PRE=""
   write_state
   activate_candidate
@@ -1468,7 +1538,7 @@ resume_window() {
         DEPLOYED_DIGEST="$D"
         DEPLOYED_ID="$CAND_ID"
         DEPLOYED_CONTENT="$CAND_CONTENT"
-        start_watching
+        start_watching compare
         watch_window 0
       fi
       # Row 2: the Quadlet file names D, S (or nothing) runs — D never started; activate again.
@@ -1512,6 +1582,7 @@ resume_window() {
 
 # --- the tick ----------------------------------------------------------------------------------------
 read_state || state_corrupt
+retry_pending_marks
 # Spec §7.3: an open incident blocks everything but PAUSED and the lock — before the window,
 # before git, before CI.
 if [ -n "$INCIDENT" ]; then

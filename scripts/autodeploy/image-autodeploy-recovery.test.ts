@@ -46,6 +46,7 @@ const activating = (r: Rec): Record<string, string> => ({
   ...settledState(r.s), LAST_SEEN_DEPLOYED_SHA: r.s.sha, MAIN_SEEN_SHA: r.x, MAIN_SEEN_S: '100000',
   WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
   WINDOW_PREV_DIGEST: r.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating', WINDOW_PRE: r.pre, WINDOW_BOOT: BOOT_ID,
+  WINDOW_NRESTARTS_PRE: '0',
 });
 const watching = (r: Rec, extra: Record<string, string> = {}): Record<string, string> => ({
   ...activating(r), DEPLOYED_SHA: r.x, LAST_SEEN_DEPLOYED_SHA: r.x,
@@ -135,13 +136,13 @@ describe('§7.2 row 2: activating, the Quadlet file names D, D does not run', ()
 describe('§7.2 row 3: activating, D already runs', () => {
   it('activates nothing: PHASE=watching, WINDOW_START=now, the current NRestarts as base; still watching at +590 s', () => {
     const r = recoveryWorld();
-    seedState(r.w, activating(r));
+    seedState(r.w, { ...activating(r), WINDOW_NRESTARTS_PRE: '3' });
     runImage(r.w, r.img);
     hostSet(r.w, 'nrestarts', '3');
     hostSet(r.w, 'activated_at', '100900');
     fault(r.w, 'kill', 590, 600);
     expect(tick(r.w).code).toBe(null);
-    expect(readState(r.w)).toEqual(watching(r, { WINDOW_START: '100900', WINDOW_LAST_READ: '101480', WINDOW_NRESTARTS: '3' }));
+    expect(readState(r.w)).toEqual(watching(r, { WINDOW_START: '100900', WINDOW_LAST_READ: '101480', WINDOW_NRESTARTS: '3', WINDOW_NRESTARTS_PRE: '3' }));
     expect(tick(r.w).code).toBe(0);
     expect(events(r.w).filter((e) => e.startsWith('image activate'))).toEqual([]);
     expect([readState(r.w), clock(r.w)]).toEqual([settledX(r), '101500']);
@@ -159,6 +160,18 @@ describe('§7.2 row 3: activating, D already runs', () => {
     expect(tick(w).code).toBe(0);
     expect(events(w).filter((e) => e === `image activate --digest ${img.digest}`).length).toBe(1);
     expect(readState(w)).toEqual(settledX(r));
+  });
+});
+
+describe('item 5 on resume: row 3 compares NRestarts with the reading before `activate D`', () => {
+  it('D runs and NRestarts is above it: the candidate restarted during startup — failed, rolled back', () => {
+    const r = recoveryWorld();
+    seedState(r.w, { ...activating(r), WINDOW_NRESTARTS_PRE: '3' });
+    runImage(r.w, r.img);
+    hostSet(r.w, 'nrestarts', '4');
+    expect(tick(r.w).code).toBe(2);
+    expect(notes(r.w)[0]).toBe(`⚠️ merge-deploy ${short(r.x)} failed inside its window: the candidate restarted during startup (NRestarts 3 -> 4) — `
+      + `rolling back to ${short(r.s.sha)} (code only; the database is not touched).`);
   });
 });
 

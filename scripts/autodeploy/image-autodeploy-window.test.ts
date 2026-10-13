@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   BOOT_ID, SCRIPT,
   advance, events, fault, golden, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply,
-  markThenKill, seedState, settledState, short, stateAtActivate, stub, tick, type Image, type ImageWorld, type Reply,
+  DB_SNAPSHOT, markThenKill, seedState, settledState, short, stateAtActivate, stub, tick, type Image, type ImageWorld, type Reply,
 } from './image-autodeploy-harness';
 
 // A deploy tick polls a whole simulated 10-minute window (61 polls, ~6 processes each).
@@ -98,7 +98,7 @@ describe('(б) the window is in the state before production changes', () => {
   const windowState = (d: Deploy) => settledAt(d.s, d.x, {
     WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content,
     WINDOW_OLD: d.w.base, WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating',
-    WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1',
+    WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1', WINDOW_NRESTARTS_PRE: '0',
   });
 
   it('a tick killed before `activate D` leaves exactly the window, PHASE=activating, and S in the Quadlet', () => {
@@ -340,7 +340,7 @@ describe('(є) the code-only rollback', () => {
       WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content, WINDOW_OLD: d.w.base,
       WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'rolling-back', WINDOW_PRE: marked(d), WINDOW_START: '100600',
       WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '100920',
-      WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1',
+      WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1', WINDOW_NRESTARTS_PRE: '0',
     });
     // Nothing touches the database: no restore, no post snapshot, no service stop — the helper and the pre's mark only.
     expect(events(d.w)).toEqual([...toActivate(d), ...polls(33), ...rollbackEvents(d)]);
@@ -529,12 +529,12 @@ describe('(п) the tick\'s budget', () => {
     const code = src.slice(0, src.indexOf('# --- timeouts and the tick\'s budget (plan'))
       + src.slice(src.indexOf('# --- timeouts and the tick\'s budget ---'));
     expect(steps.filter((n) => !code.includes(`$${n}`))).toEqual([]);
-    expect(steps.length).toBe(18);
+    expect(steps.length).toBe(19);
   });
 
   it('the worst tick, built from those bounds and the loops, fits TICK_BUDGET_S', () => {
     expect([value('WINDOW_WORST_S'), value('ROLLBACK_WORST_S'), value('WORST_PATH_S'), value('TICK_BUDGET_S')])
-      .toEqual([1120, 1690, 6930, 7200]);
+      .toEqual([1120, 1690, 7170, 7200]);
     expect(value('WORST_PATH_S') < value('TICK_BUDGET_S')).toBe(true);
     expect(value('LOCK_STALL_S')).toBe(7500);
   });
@@ -610,9 +610,9 @@ describe('F9: the retained pre is the name the rename produced', () => {
     fault(d.w, 'health', 300, 99999, d.img.digest);
     const liar = stub(d.w.bin, 'mark-liar', `echo "mark $(basename "$1")" >> "${d.w.eventsLog}"; echo /elsewhere/x-rollback-pre.db`);
     expect(tick(d.w, { WBB_MARK_CMD: liar }).code).toBe(2);
-    expect(readState(d.w).RETAINED_PRE).toBe(undefined);
+    expect([readState(d.w).RETAINED_PRE, readState(d.w).PENDING_MARK]).toEqual([undefined, join(d.w.snapshots, d.pre)]);
     expect(notes(d.w)[1].split('\n')[2]).toBe(
-      `Pre-deploy snapshot: NOT marked (mark-rollback did not answer ${marked(d)}) — prune may delete ${join(d.w.snapshots, d.pre)}`);
+      `Pre-deploy snapshot: NOT marked yet (mark-rollback did not answer ${marked(d)}); retried every tick, and snapshots are not pruned until it is: ${join(d.w.snapshots, d.pre)}`);
   });
 });
 
@@ -627,5 +627,67 @@ describe('F10: a pre snapshot no window owns is discarded by the next tick', () 
     expect(events(d.w)[before]).toBe(`discard ${d.pre}`);
     expect([readState(d.w).PENDING_PRE, readState(d.w).SETTLED_SHA]).toEqual([undefined, d.x]);
     expect(readdirSync(d.w.snapshots).filter((f) => f.endsWith('.db'))).toEqual([d.pre]);
+  });
+});
+
+describe('PR #866 review: a failed mark never loses the evidence (item 2)', () => {
+  it('PENDING_MARK is kept, retried by every tick, and holds back the snapshot prune until the mark succeeds', () => {
+    const d = deployWorld();
+    fault(d.w, 'health', 300, 99999, d.img.digest);
+    // mark-rollback that fails while host/mark-broken exists, and is the real db-snapshot.sh otherwise.
+    const mark = stub(d.w.bin, 'mark-flaky', [
+      `echo "mark $(basename "$1")" >> "${d.w.eventsLog}"`,
+      `[ ! -f "${join(d.w.host, 'mark-broken')}" ] || exit 1`,
+      `exec bash "${DB_SNAPSHOT}" mark-rollback "$1"`,
+    ].join('\n'));
+    hostSet(d.w, 'mark-broken', '');
+    const over = { WBB_MARK_CMD: mark };
+    expect(tick(d.w, over).code).toBe(2);
+    expect([readState(d.w).PENDING_MARK, readState(d.w).RETAINED_PRE]).toEqual([join(d.w.snapshots, d.pre), undefined]);
+
+    // The next release settles while the mark still fails: retried, and no snapshot prune.
+    const y = push(d.w, { 'src/a.ts': 'export const a = 3;\n' }, 'next');
+    publish(d.w, imageOf(y));
+    ready(d.w, over);
+    const before = events(d.w).length;
+    expect(tick(d.w, over).code).toBe(0);
+    const ev = events(d.w).slice(before);
+    expect([ev[0], ev.includes('prune'), ev[ev.length - 1]]).toEqual([`mark ${d.pre}`, false, `image prune --keep ${imageOf(y).digest}`]);
+    expect(notes(d.w)[notes(d.w).length - 1]).toBe(
+      `✅ merge-deploy ${short(y)} is live and settled — #7. Snapshot pruning skipped: not yet marked ${join(d.w.snapshots, d.pre)}.`);
+
+    // The mark works again: the first thing the next tick does is mark and retain it.
+    hostSet(d.w, 'mark-broken', null);
+    tick(d.w, over);
+    expect([readState(d.w).PENDING_MARK, readState(d.w).RETAINED_PRE]).toEqual([undefined, marked(d)]);
+    expect([existsSync(marked(d)), existsSync(join(d.w.snapshots, d.pre))]).toEqual([true, false]);
+  });
+});
+
+describe('PR #866 review: NRestarts before `activate D` is the start\'s reference (item 5)', () => {
+  it('above it at the start: the candidate restarted during startup — failed, rolled back', () => {
+    const d = deployWorld();
+    fault(d.w, 'restarts-plus', 0, 99999, d.img.digest);
+    const reason = 'the candidate restarted during startup (NRestarts 0 -> 1)';
+    expect(tick(d.w).code).toBe(2);
+    expect(events(d.w)).toEqual([...toActivate(d), ...rollbackEvents(d)]);
+    expect(notes(d.w)).toEqual([failedNote(d, reason), rolledBackNote(d, reason)]);
+  });
+
+  it('below it (daemon-reload may reset the counter, P4): the new reading is the base; the window settles', () => {
+    const d = deployWorld();
+    hostSet(d.w, 'nrestarts', '5');
+    fault(d.w, 'restarts-minus', 0, 99999, d.img.digest);
+    fault(d.w, 'kill', 10, 11);
+    expect(tick(d.w).code).toBe(null);
+    expect([readState(d.w).WINDOW_NRESTARTS_PRE, readState(d.w).WINDOW_NRESTARTS, readState(d.w).WINDOW_PHASE]).toEqual(['5', '4', 'watching']);
+  });
+
+  it('equal to it: that is the base', () => {
+    const d = deployWorld();
+    hostSet(d.w, 'nrestarts', '2');
+    fault(d.w, 'kill', 10, 11);
+    expect(tick(d.w).code).toBe(null);
+    expect([readState(d.w).WINDOW_NRESTARTS_PRE, readState(d.w).WINDOW_NRESTARTS, readState(d.w).WINDOW_PHASE]).toEqual(['2', '2', 'watching']);
   });
 });

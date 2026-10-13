@@ -661,7 +661,7 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     `WINDOW_SHA=${w.base}`, `WINDOW_DIGEST=${w.settled.digest}`, `WINDOW_ID=${w.settled.id}`, `WINDOW_CONTENT=${w.settled.content}`,
     `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
     'WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_START=100000', `WINDOW_BOOT=${BOOT_ID}`,
-    'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
+    'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', 'WINDOW_NRESTARTS_PRE=0', ...extra, '',
   ].join('\n');
   const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
   const CORRUPT: Array<[string, (w: ImageWorld) => string, string]> = [
@@ -1051,3 +1051,98 @@ describe('the harness host', () => {
     expect(events(w)).toEqual(['image current']);
   });
 });
+
+describe('PR #866 review: the installed-copies check fails closed (item 1)', () => {
+  const ADVICE = 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)';
+  it.each([
+    ['missing', (w: ImageWorld) => join(w.bin, 'no-such-check')],
+    ['not executable', (w: ImageWorld) => { const p = join(w.bin, 'not-executable'); writeFileSync(p, '#!/bin/sh\nexit 0\n'); return p; }],
+  ])('a check that is %s is "cannot verify": the deploy waits, once a day, naming the path', (_name, path) => {
+    const w = imageWorld();
+    noopCandidate(w);
+    const over = { WBB_INSTALLED_CHECK: path(w) };
+    ready(w, over);
+    tick(w, over);
+    tick(w, over);
+    expect(events(w)).toEqual([]);
+    expect(notes(w)).toEqual([
+      '⚠️ merge-deploy is waiting: the installed deployer is out of date — a merged fix is not live until it is installed.\n'
+      + `cannot verify the installed copies: the check ${path(w)} is missing or not executable\n${ADVICE}`,
+    ]);
+  });
+
+  it('an EMPTY WBB_INSTALLED_CHECK is the seam that turns the check off', () => {
+    const w = imageWorld();
+    const { x, img } = noopCandidate(w);
+    ready(w, { WBB_INSTALLED_CHECK: '' });
+    tick(w, { WBB_INSTALLED_CHECK: '' });
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+});
+
+describe('PR #866 review: the range scan has a deadline (item 3)', () => {
+  it('PR labels not read for the whole range within 240 s: a hold, no call after the deadline', () => {
+    const w = imageWorld();
+    for (const n of [1, 2, 3]) push(w, { 'docs/x.md': `${n}\n` }, `docs ${n}`);
+    noopCandidate(w);
+    const calls = join(w.bin, 'labels.calls');
+    // Each lookup takes 100 s of the tick's clock.
+    const slow = stub(w.bin, 'labels-slow', `echo "$1" >> "${calls}"; echo $(( $(cat "${w.clock}") + 100 )) > "${w.clock}"; printf '7\\t\\n'`);
+    ready(w, { WBB_PR_LABELS_CMD: slow });
+    expect(tick(w, { WBB_PR_LABELS_CMD: slow }).code).toBe(0);
+    expect(readFileSync(calls, 'utf8').split('\n').filter((l) => l !== '').length).toBe(3);
+    expect(events(w)).toEqual([]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• could not read the PR labels of the whole range within 240s\n${HOLD_TAIL}`,
+    ]);
+  });
+});
+
+describe('PR #866 review: the Telegram token never reaches argv (item 4)', () => {
+  it('the real notifier gives curl the URL as a config on stdin', () => {
+    const w = imageWorld();
+    seedState(w, { DEPLOYED_SHA: w.base });
+    const argv = join(w.bin, 'curl.argv');
+    const stdin = join(w.bin, 'curl.stdin');
+    stub(w.pathBin, 'curl', `printf '%s\\n' "$@" > "${argv}"; cat > "${stdin}"`);
+    const readEnv = stub(w.bin, 'read-env-telegram',
+      'case "$1" in TELEGRAM_BOT_TOKEN) echo 123456:SECRETTOKEN ;; ADMIN_TELEGRAM_ID) echo 42 ;; *) exit 1 ;; esac');
+    expect(tick(w, { WBB_NOTIFY_CMD: '', WBB_READ_ENV_CMD: readEnv }).code).toBe(0);
+    const message = '⛔ merge-deploy: there is no settled image yet — the first image release is deployed by hand (manual window, spec §8 п.2); '
+      + 'until then nothing deploys automatically.';
+    expect(readFileSync(argv, 'utf8')).toBe(
+      ['-K', '-', '-fsS', '--max-time', '10', '-X', 'POST', '--data-urlencode', 'chat_id=42', '--data-urlencode', `text=${message}`, ''].join('\n'));
+    expect(readFileSync(stdin, 'utf8')).toBe('url = "https://api.telegram.org/bot123456:SECRETTOKEN/sendMessage"\n');
+  });
+});
+
+describe('PR #866 review: a malformed lock-busy-since does not abort the tick (item 6)', () => {
+  it('garbage is replaced by now, and the stall notice still goes out later', async () => {
+    const w = imageWorld();
+    const busy = join(w.stateDir, 'lock-busy-since');
+    writeFileSync(busy, '100000 junk\n');
+    const holder = await holdTheLock(join(w.stateDir, 'lock'));
+    try {
+      expect(tick(w).code).toBe(0);
+      expect(readFileSync(busy, 'utf8')).toBe('100000\n');
+      advance(w, 7500);
+      tick(w);
+      expect(notes(w)).toEqual([
+        `⚠️ merge-deploy: the deploy lock has been held for 125 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
+      ]);
+    } finally {
+      holder.kill();
+    }
+  });
+});
+
+/** Holds the tick's lock in another process; resolves once it is held. */
+async function holdTheLock(lock: string): Promise<ChildProcess> {
+  const holder = spawn('flock', ['-o', lock, 'sleep', '60'], { stdio: 'ignore' });
+  for (let i = 0; i < 100; i += 1) {
+    if (spawnSync('flock', ['-n', lock, 'true']).status === 1) return holder;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+  holder.kill();
+  throw new Error('the lock holder never acquired the lock');
+}
