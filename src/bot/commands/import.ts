@@ -12,6 +12,7 @@ import { withBusyRetry } from '../../storage/busy-retry';
 import { getHistoryOwner, isCurrentHistoryOwner } from '../../storage/history-owner';
 import { noteFailure } from '../handler-failure';
 import { importCheckins, ImportAccountChangedError } from './import-checkins';
+import { isStandsCaption } from './fest';
 
 const BATCH_SIZE = 500;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -32,14 +33,11 @@ importCommand.command('import', async (ctx) => {
   await ctx.reply(ctx.t('import.prompt'));
 });
 
-// A caption that is a command addresses that command (/fest stands takes its CSV this way): the
-// document is not an export, and this composer runs before theirs, so it hands the update on.
-// A caption of /import itself is still an import.
-const COMMAND_CAPTION_RE = /^\/([A-Za-z0-9_]+)(?:@\w+)?(?:\s|$)/;
-
+// A document captioned /fest stands is that command's stand map, not an export: this composer runs
+// before /fest, so it hands the update on. Only that caption — anything else, command-like or not,
+// is still an import, so no document goes unanswered.
 importCommand.on('document', async (ctx, next) => {
-  const command = COMMAND_CAPTION_RE.exec(ctx.message.caption ?? '')?.[1];
-  if (command !== undefined && command.toLowerCase() !== 'import') return next();
+  if (isStandsCaption(ctx.message.caption)) return next();
   const doc = ctx.message.document;
   const name = doc.file_name ?? '';
 

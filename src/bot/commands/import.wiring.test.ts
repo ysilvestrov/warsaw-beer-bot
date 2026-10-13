@@ -11,7 +11,7 @@ import type { BotContext } from '../index';
 import { importCommand } from './import';
 import { createFestCommand } from './fest';
 
-// A document goes to /import unless its caption is another command: /import is registered before
+// A document goes to /import unless its caption is /fest stands: /import is registered before
 // /fest in src/index.ts, and the CSV of /fest stands came to /import and failed as an Untappd export.
 
 const BOT_INFO: UserFromGetMe = {
@@ -85,6 +85,12 @@ describe('documents with /import before /fest', () => {
   it('a document captioned /import is still an import', async () => {
     const { bot, replies } = setup();
     await bot.handleUpdate(document('notes.txt', '/import') as unknown as Update);
+    expect(replies).toEqual(['Unsupported format. Expected .csv, .json or .zip.']);
+  });
+
+  it('a document captioned with some other slash word is still an import, never left unanswered', async () => {
+    const { bot, replies } = setup();
+    await bot.handleUpdate(document('notes.txt', '/README') as unknown as Update);
     expect(replies).toEqual(['Unsupported format. Expected .csv, .json or .zip.']);
   });
 });

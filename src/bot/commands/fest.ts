@@ -37,6 +37,8 @@ export interface FestCommandDeps {
 const isGroup = (type: string | undefined): boolean => type === 'group' || type === 'supergroup';
 export const RANKING_BUTTONS = 60;
 const STANDS_CAPTION_RE = /^\/fest(?:@\w+)?\s+stands\b/i;
+/** A document captioned this way is a stand map for /fest stands, not an export for /import. */
+export const isStandsCaption = (caption: string | undefined): boolean => STANDS_CAPTION_RE.test(caption ?? '');
 
 function joinKeyboard(ctx: BotContext, teamId: number) {
   return Markup.inlineKeyboard([[Markup.button.callback(ctx.t('fest.join_button'), `fest:j:${teamId}`)]]);
@@ -219,7 +221,7 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
 
   // /fest stands with a CSV document: the caption carries the command.
   festCommand.on('document', async (ctx, next) => {
-    if (!STANDS_CAPTION_RE.test(ctx.message.caption ?? '')) return next();
+    if (!isStandsCaption(ctx.message.caption)) return next();
     const db = ctx.deps.db;
     const fest = currentOrNextFest(db, new Date());
     if (!fest) {
