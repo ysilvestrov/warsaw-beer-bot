@@ -18,11 +18,21 @@
  *   tags/<sha>    the tag <sha> → its digest
  *   local/<D>     the image is in local storage
  *   sick/<D>      `activate` of D fails (systemd cannot start it)
+ *   activated_at  the clock at the latest `activate`
+ *   fault.<name>[.<D>]  lines "FROM TO": seconds after activated_at (while D runs, for the .<D> form)
+ *                 in which the fault is on — health (no answer), health-sha (another releaseSha),
+ *                 restarts (unreadable), restarts-plus / restarts-minus (NRestarts ±1), unit (the
+ *                 unit not running), current (TEMPFAIL), foreign-image (another container image),
+ *                 unit-foreign (unit=foreign), kill (the tick is killed by its health probe, once)
+ *   clock-back    "AT DELTA": the first health probe at AT s or later moves the clock back DELTA s
+ *   swap          "AT D": the first health probe at AT s or later finds D running (someone else's activate)
+ *   state-at-activate.<n>  image-state.env as it was at the n-th `activate` call
  *
  * The fake helper (`wbb-image`) implements pull / local / audit / trial / activate / current / prune
  * against those files, so `current`, health and NRestarts always describe the same host. A test
  * overrides one answer with `reply(w, <action>, <digest | sha | '-'>, …)`: a queue of replies, one per
- * call — an exact {code, stdout, stderr} (a golden output of the real helper, `golden(name)`), or
+ * call — 'pass' (the host's own answer), an exact {code, stdout, stderr} (a golden output of the real
+ * helper, `golden(name)`), or
  * 'kill-before' / 'kill-after-write', which kill the tick itself before the action or after its first
  * host write. Every call of every seam is one line in the events log.
  *
@@ -37,6 +47,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join, resolve } from 'node:path';
 
 export const SCRIPT = resolve(__dirname, '../../deploy/image/autodeploy.sh');
+export const DB_SNAPSHOT = resolve(__dirname, '../../deploy/db-snapshot.sh');
 export const GOLDEN_DIR = resolve(__dirname, 'fixtures/wbb-image');
 export const QUIET_S = 600;
 /** The simulated clock starts at 100000 s: this UTC day. */
@@ -84,6 +95,8 @@ export interface ImageWorld {
   /** Prepended to PATH: fakes of commands the controller runs by name (sync). */
   pathBin: string;
   host: string;
+  /** The pre snapshots (WBB_SNAPSHOT_DIR). */
+  snapshots: string;
   remote: string;
   seed: string;
   base: string;
@@ -115,12 +128,12 @@ next_reply() {
   head -n 1 "$f"
   sed -i 1d "$f"
 }
-# Kills the tick: the OUTERMOST ancestor running image/autodeploy.sh (a $(…) subshell of the tick
-# has the same command line, and killing only it would let the tick carry on).
+# Kills the tick: the OUTERMOST ancestor whose argv[1] is the controller (a $(…) subshell of the
+# tick has the same command line, and killing only it would let the tick carry on).
 kill_tick() {
   local pid=$PPID tick=""
   while [ "$pid" -gt 1 ]; do
-    if tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q 'image/autodeploy\.sh'; then tick=$pid; fi
+    if [ "$(tr '\0' '\n' < "/proc/$pid/cmdline" | sed -n 2p)" = "$WBB_FAKE_TICK_SCRIPT" ]; then tick=$pid; fi
     pid=$(awk '/^PPid:/ { print $2 }' "/proc/$pid/status")
   done
   if [ -z "$tick" ]; then echo "kill_tick: no tick among the ancestors" >&2; exit 99; fi
@@ -131,7 +144,7 @@ kill_tick() {
 KILL_AFTER_WRITE=0
 apply_reply() {
   case "$1" in
-    '') return 0 ;;
+    ''|pass) return 0 ;;
     kill-before) kill_tick; exit 0 ;;
     kill-after-write) KILL_AFTER_WRITE=1; return 0 ;;
     raw:*) cat "\${1#raw:}/stdout"; cat "\${1#raw:}/stderr" >&2; exit "$(cat "\${1#raw:}/code")" ;;
@@ -140,6 +153,21 @@ apply_reply() {
 }
 wrote() { if [ "$KILL_AFTER_WRITE" = 1 ]; then kill_tick; exit 0; fi; }
 entry() { cat "$H/registry/$1"; }
+# Is fault <name> on now? Its lines are "FROM TO" in seconds since the latest activation; the
+# .<digest> form applies only while that digest runs.
+faulty() {
+  local f t from to c
+  [ -f "$H/activated_at" ] || return 1
+  t=$(( $(cat "$WBB_FAKE_CLOCK") - $(cat "$H/activated_at") ))
+  c=$(cat "$H/container" 2>/dev/null || echo none)
+  for f in "$H/fault.$1" "$H/fault.$1.$c"; do
+    [ -f "$f" ] || continue
+    while read -r from to; do
+      if [ -n "$from" ] && [ "$t" -ge "$from" ] && [ "$t" -lt "$to" ]; then return 0; fi
+    done < "$f"
+  done
+  return 1
+}
 `.replace(/\\\$/g, '$');
 
 // The root helper wbb-image, against the simulated host. argv exactly as the real one takes it.
@@ -186,6 +214,9 @@ case "$action" in
     echo "COMPAT OK $previous" ;;
   activate)
     ours "$digest"
+    n=$(( $(ls "$H" | grep -c '^state-at-activate\.') + 1 ))
+    cp "$XDG_STATE_HOME/wbb-autodeploy/image-state.env" "$H/state-at-activate.$n"
+    cat "$WBB_FAKE_CLOCK" > "$H/activated_at"
     echo "$digest" > "$H/quadlet"; wrote
     if [ -f "$H/sick/$digest" ]; then
       rm -f "$H/container" "$H/running_sha"
@@ -201,7 +232,11 @@ case "$action" in
     c=$(cat "$H/container" 2>/dev/null || echo none)
     i=none
     if [ "$c" != none ]; then read -r i _ _ < "$H/registry/$c"; fi
-    echo "CURRENT quadlet=$q container-image=$i container-digest=$c unit=$(cat "$H/unit" 2>/dev/null || echo quadlet)" ;;
+    if faulty current; then echo "TEMPFAIL: podman inspect warsaw-beer-bot timed out after 60s" >&2; exit 75; fi
+    if faulty foreign-image; then i=$(printf 'f%.0s' $(seq 1 64)); fi
+    unit=$(cat "$H/unit" 2>/dev/null || echo quadlet)
+    if faulty unit-foreign; then unit=foreign; fi
+    echo "CURRENT quadlet=$q container-image=$i container-digest=$c unit=$unit" ;;
   prune)
     q=$(cat "$H/quadlet" 2>/dev/null || echo none)
     removed=0
@@ -237,13 +272,40 @@ echo "Loaded 1 attestation from GitHub API"
 
 const FAKE_HEALTH = String.raw`
 . "$WBB_FAKE_LIB"
+if faulty kill && [ ! -f "$H/killed" ]; then touch "$H/killed"; kill_tick; exit 1; fi
+if [ -f "$H/clock-back" ] && [ -f "$H/activated_at" ]; then
+  read -r at delta < "$H/clock-back"
+  if [ $(( $(cat "$WBB_FAKE_CLOCK") - $(cat "$H/activated_at") )) -ge "$at" ]; then
+    echo $(( $(cat "$WBB_FAKE_CLOCK") - delta )) > "$WBB_FAKE_CLOCK"; rm -f "$H/clock-back"
+  fi
+fi
+# swap: "AT DIGEST" — at AT s after the latest activation someone else makes DIGEST run.
+if [ -f "$H/swap" ] && [ -f "$H/activated_at" ]; then
+  read -r at sd < "$H/swap"
+  if [ $(( $(cat "$WBB_FAKE_CLOCK") - $(cat "$H/activated_at") )) -ge "$at" ]; then
+    echo "$sd" > "$H/quadlet"; echo "$sd" > "$H/container"; read -r _ rev _ < "$H/registry/$sd"; echo "$rev" > "$H/running_sha"
+    rm -f "$H/swap"
+  fi
+fi
 [ -f "$H/container" ] && [ ! -f "$H/unhealthy" ] && [ -s "$H/running_sha" ] || exit 1
+faulty health && exit 1
+if faulty health-sha; then echo ffffffffffffffffffffffffffffffffffffffff; exit 0; fi
 cat "$H/running_sha"
+`;
+
+const FAKE_RESTARTS = String.raw`
+. "$WBB_FAKE_LIB"
+faulty restarts && exit 1
+n=$(cat "$H/nrestarts" 2>/dev/null || echo 0)
+if faulty restarts-plus; then n=$(( n + 1 )); fi
+if faulty restarts-minus; then n=$(( n - 1 )); fi
+echo "$n"
 `;
 
 const FAKE_UNIT_STATE = String.raw`
 . "$WBB_FAKE_LIB"
 if [ -f "$H/unit_state" ]; then cat "$H/unit_state"
+elif faulty unit; then printf 'ActiveState=failed\nSubState=failed\nMainPID=0\n'
 elif [ -f "$H/container" ]; then printf 'ActiveState=active\nSubState=running\nMainPID=4242\n'
 else printf 'ActiveState=inactive\nSubState=dead\nMainPID=0\n'
 fi
@@ -284,16 +346,24 @@ function writeFakes(w: ImageWorld): Record<string, string> {
     WBB_RESOLVE_CMD: stub(b, 'resolve', FAKE_RESOLVE),
     WBB_ATTEST_CMD: stub(b, 'attest', FAKE_ATTEST),
     WBB_HEALTH_CMD: stub(b, 'health', FAKE_HEALTH),
-    WBB_RESTARTS_CMD: stub(b, 'restarts', `cat "${w.host}/nrestarts" 2>/dev/null || echo 0`),
+    WBB_RESTARTS_CMD: stub(b, 'restarts', FAKE_RESTARTS),
     WBB_UNIT_STATE_CMD: stub(b, 'unit-state', FAKE_UNIT_STATE),
     WBB_BOOT_ID_CMD: stub(b, 'boot-id', `cat "${w.host}/boot_id"`),
     WBB_CHECKS_CMD: checksStub(w, 'checks', CHECKS_OK),
     WBB_PR_LABELS_CMD: stub(b, 'labels', `printf '7\\t\\n'`),
-    WBB_SNAPSHOT_CMD: stub(b, 'snapshot', `echo "snapshot $(basename "$1")" >> "${w.eventsLog}"; mkdir -p "$(dirname "$1")"; echo pre > "$1"`),
-    WBB_PRUNE_CMD: stub(b, 'prune', `echo prune >> "${w.eventsLog}"`),
-    WBB_MARK_CMD: stub(b, 'mark', `echo "mark $(basename "$1")" >> "${w.eventsLog}"; echo "\${1%-pre.db}-rollback-pre.db"`),
-    WBB_DISCARD_CMD: stub(b, 'discard', `echo "discard $(basename "$1")" >> "${w.eventsLog}"`),
-    WBB_SNAPSHOT_DIR: join(w.home, 'snapshots'),
+    // A pre snapshot as db-snapshot.sh leaves it (the file and its .sha256); marking, discarding
+    // and pruning are the REAL deploy/db-snapshot.sh on the world's snapshot directory.
+    WBB_SNAPSHOT_CMD: stub(b, 'snapshot', [
+      `echo "snapshot $(basename "$1")" >> "${w.eventsLog}"`,
+      'mkdir -p "$(dirname "$1")"; echo "pre $(basename "$1")" > "$1"',
+      'sha256sum < "$1" | cut -d" " -f1 > "$1.sha256"',
+    ].join('\n')),
+    WBB_PRUNE_CMD: stub(b, 'prune', `echo prune >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" prune "${w.snapshots}" 3`),
+    WBB_MARK_CMD: stub(b, 'mark', `echo "mark $(basename "$1")" >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" mark-rollback "$1"`),
+    WBB_DISCARD_CMD: stub(b, 'discard', `echo "discard $(basename "$1")" >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" discard "$1"`),
+    WBB_SNAPSHOT_DIR: w.snapshots,
+    WBB_FAKE_CLOCK: w.clock,
+    WBB_FAKE_TICK_SCRIPT: SCRIPT,
     WBB_INSTALLED_CHECK: stub(b, 'installed', 'echo "CURRENT: stub"; exit 0'),
   };
 }
@@ -330,7 +400,19 @@ export function runImage(w: ImageWorld, img: Image): void {
   hostSet(w, 'running_sha', img.sha);
 }
 
-export type Reply = 'kill-before' | 'kill-after-write' | { code: number; stdout?: string; stderr?: string };
+/** Turns fault `name` on from `from` to `to` s after the latest activation (of `digest` only, if given). */
+export function fault(w: ImageWorld, name: string, from: number, to: number, digest?: string): void {
+  const f = join(w.host, digest === undefined ? `fault.${name}` : `fault.${name}.${digest}`);
+  const before = existsSync(f) ? readFileSync(f, 'utf8') : '';
+  writeFileSync(f, `${before}${from} ${to}\n`);
+}
+
+/** image-state.env as the n-th (1-based) `activate` call found it. */
+export function stateAtActivate(w: ImageWorld, n: number): Record<string, string> {
+  return parseState(readFileSync(join(w.host, `state-at-activate.${n}`), 'utf8'));
+}
+
+export type Reply = 'pass' | 'kill-before' | 'kill-after-write' | { code: number; stdout?: string; stderr?: string };
 let replySeq = 0;
 
 function replyLine(w: ImageWorld, r: Reply): string {
@@ -412,6 +494,7 @@ export function imageWorld(): ImageWorld {
   const settled = imageOf(base);
   const w: ImageWorld = {
     home, dataDir, stateHome, stateDir, statePath: join(stateDir, 'image-state.env'), repo, bin, pathBin, host,
+    snapshots: join(home, 'snapshots'),
     remote, seed, base, settled, clock,
     eventsLog: join(bin, 'events.log'),
     notesLog: join(bin, 'notify.log'),
@@ -459,8 +542,12 @@ export function stateText(w: ImageWorld): string | null {
 
 /** image-state.env as a map; a line that is not KEY=value fails the test. */
 export function readState(w: ImageWorld): Record<string, string> {
+  return parseState(readFileSync(w.statePath, 'utf8'));
+}
+
+function parseState(text: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const line of readFileSync(w.statePath, 'utf8').split('\n').filter((l) => l !== '')) {
+  for (const line of text.split('\n').filter((l) => l !== '')) {
     const m = /^([A-Z_]+)=(.*)$/.exec(line);
     if (m === null) throw new Error(`not KEY=value in the state: ${line}`);
     out[m[1]] = m[2];

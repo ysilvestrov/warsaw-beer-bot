@@ -22,8 +22,9 @@
 # start. state.env (the flat deployer's) is neither read nor written. The lock is shared with
 # the flat deployer and deploy.sh, so they exclude each other.
 #
-# Exit: 0 idle / wait / noop / settled, 1 refused, 2 rolled back, 3 incident opened or state
-#       corrupt, 4 state write failed, 64 usage, 70 not implemented yet (plan Tasks 2–3).
+# Exit (plan п.16): 0 idle / wait / hold / noop / settled, 1 refused, 2 rolled back (code only),
+#       3 incident opened or state corrupt, 4 state write failed, 64 usage,
+#       70 a found window, until plan Task 3 resumes it.
 set -euo pipefail
 # notify() cuts messages by CHARACTERS. Under systemd's default C locale bash counts bytes and
 # can cut a UTF-8 character in half, which Telegram rejects.
@@ -51,9 +52,40 @@ CI_STUCK_S=3600
 # Plan п.17: the worst tick of this deployer is ~88 min (TICK_BUDGET_S=5400 with the unit's
 # TimeoutStartSec=90min, stage «в»); a lock held longer than that has a holder that will not let go.
 LOCK_STALL_S=5700
-# Plan п.17: per-step timeouts of the steps this file runs itself (the helper bounds its own).
-STEP_TIMEOUT_RESOLVE_S=40
+# Plan п.17: the tick's budget is the sum of the nested timeouts of its worst path, each call at
+# the edge of its own bound — ONE source for each, and a test sums them against TICK_BUDGET_S
+# (stage «в» sets the unit's TimeoutStartSec=90min to match).
+TICK_BUDGET_S=5400
+STEP_TIMEOUT_RESOLVE_S=40       # token + HEAD, 2 × 20
 STEP_TIMEOUT_ATTEST_S=120
+STEP_TIMEOUT_PULL_S=660         # the helper: pull 600 + inspect 60
+STEP_TIMEOUT_CURRENT_S=90       # the helper: inspect 60 + systemctl 30
+STEP_TIMEOUT_AUDIT_S=300        # the helper
+STEP_TIMEOUT_SETTLED_LOCAL_S=780  # local S + pull S + local S
+STEP_TIMEOUT_SNAPSHOT_S=300     # VACUUM INTO
+STEP_TIMEOUT_TRIAL_S=900        # the helper: 180 + 150 + 150 + 3 × rm 60 + 2 × inspect 60 + the copy
+STEP_TIMEOUT_ACTIVATE_S=240     # the helper: daemon-reload 60 + restart 180
+STEP_TIMEOUT_STARTUP_S=120
+STEP_TIMEOUT_WINDOW_S=705       # 600 + the last poll (health 5, systemctl 5 + 5, current 90)
+STEP_TIMEOUT_ROLLBACK_S=950     # 2 × (check 100 + activate 240 + start 120) + 30
+STEP_TIMEOUT_FINISH_S=60        # incident, notify, state writes
+# The window (spec §7, plan п.11).
+WINDOW_S=600
+POLL_S=10
+# Quadlet's Type=notify signals the container, not the application: after ACTIVATED wait this
+# long for /health to answer releaseSha == X with the unit running.
+STARTUP_S=$STEP_TIMEOUT_STARTUP_S
+# R6: one failed probe is a stall, not a failed deploy — a run of failures is.
+HEALTH_FAILS_MAX=3
+# This long without one fully read poll (current, NRestarts, the unit state) is a failed window:
+# it must never hang in `watching` forever.
+OBSERVE_MAX_S=300
+# Plan п.13: at most two `activate S` per rollback, this far apart after a 75.
+ROLLBACK_ATTEMPTS_MAX=2
+ROLLBACK_RETRY_S=30
+# Plan п.9: a trial REFUSED (a precondition on the host) is retried after this long.
+CANDIDATE_RETRY_S=3600
+SEAM_TIMEOUT_S=5
 KEEP_SNAPSHOTS=3
 SNAPSHOT_DIR="${WBB_SNAPSHOT_DIR:-/var/lib/warsaw-beer-bot/deploy-snapshots}"
 DB_PATH="${WBB_DB_PATH:-/var/lib/warsaw-beer-bot/bot.db}"
@@ -77,17 +109,17 @@ SLEEP_CMD="${WBB_SLEEP_CMD:-_sleep_default}"
 # ONE probe, no loop. Prints /health's releaseSha; not ok, or not 40 hex → exit 1 (plan п.5).
 _health_default() {
   local body sha
-  body=$(curl -fsS --max-time 5 "http://127.0.0.1:${1}/health" 2>/dev/null) || return 1
+  body=$(curl -fsS --max-time "$SEAM_TIMEOUT_S" "http://127.0.0.1:${1}/health" 2>/dev/null) || return 1
   case "$body" in *'"ok":true'*) ;; *) return 1 ;; esac
   sha=$(printf '%s' "$body" | sed -n 's/.*"releaseSha":"\([0-9a-f]\{40\}\)".*/\1/p')
   [ -n "$sha" ] || return 1
   printf '%s\n' "$sha"
 }
 HEALTH_CMD="${WBB_HEALTH_CMD:-_health_default}"
-_restarts_default() { systemctl show -p NRestarts --value warsaw-beer-bot; }
+_restarts_default() { timeout "$SEAM_TIMEOUT_S" systemctl show -p NRestarts --value warsaw-beer-bot; }
 RESTARTS_CMD="${WBB_RESTARTS_CMD:-_restarts_default}"
 # Plan п.11: "running" is ActiveState=active, SubState=running, MainPID != 0 (the operator reads it).
-_unit_state_default() { systemctl show warsaw-beer-bot -p ActiveState,SubState,MainPID; }
+_unit_state_default() { timeout "$SEAM_TIMEOUT_S" systemctl show warsaw-beer-bot -p ActiveState,SubState,MainPID; }
 UNIT_STATE_CMD="${WBB_UNIT_STATE_CMD:-_unit_state_default}"
 _boot_id_default() { cat /proc/sys/kernel/random/boot_id; }
 BOOT_ID_CMD="${WBB_BOOT_ID_CMD:-_boot_id_default}"
@@ -170,7 +202,7 @@ API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
 
 # DB snapshots run as the bot user through the existing `bash -lc` rule, next to bot.db.
 _as_bot() { sudo -u warsaw-beer-bot bash -lc '"$0" "$@"' "$@"; }
-_snapshot_default() { _as_bot "$SNAPSHOT_BIN" snapshot "$DB_PATH" "$1"; }
+_snapshot_default() { timeout "$STEP_TIMEOUT_SNAPSHOT_S" sudo -u warsaw-beer-bot bash -lc '"$0" "$@"' "$SNAPSHOT_BIN" snapshot "$DB_PATH" "$1"; }
 SNAPSHOT_CMD="${WBB_SNAPSHOT_CMD:-_snapshot_default}"
 _prune_default() { _as_bot "$SNAPSHOT_BIN" prune "$SNAPSHOT_DIR" "$KEEP_SNAPSHOTS"; }
 PRUNE_CMD="${WBB_PRUNE_CMD:-_prune_default}"
@@ -342,6 +374,8 @@ WINDOW_KEYS=(WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW
   WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ WINDOW_REASON)
 for _k in "${STATE_KEYS[@]}"; do printf -v "$_k" '%s' ''; done
 unset _k
+HOLDS=()
+RANGE_PRS=()
 
 is_state_key() {
   local k
@@ -730,6 +764,7 @@ image_call() {
   local action="$1" out err rc errf="$TICK_TMP/helper-stderr"
   out=$("$IMAGE_CMD" "$@" 2>"$errf") && rc=0 || rc=$?
   err=$(cat "$errf" 2>/dev/null || true)
+  IMG_ERR="$err"
   IMG_VERDICT=$(parse_verdict "$action" "$rc" "$out" "$err")
 }
 
@@ -785,14 +820,23 @@ read_current() {
   fi
 }
 
+# What `current` read is the recorded deployment, run from our Quadlet.
+production_is_record() {
+  [ "$CUR_UNIT" = quadlet ] && [ "$CUR_QUADLET" = "$DEPLOYED_DIGEST" ] \
+    && [ "$CUR_DIGEST" = "$DEPLOYED_DIGEST" ] && [ "$CUR_IMAGE" = "$DEPLOYED_ID" ]
+}
+record_mismatch() {
+  printf 'expected quadlet=%s container-image=%s container-digest=%s unit=quadlet, found quadlet=%s container-image=%s container-digest=%s unit=%s' \
+    "$DEPLOYED_DIGEST" "$DEPLOYED_ID" "$DEPLOYED_DIGEST" "$CUR_QUADLET" "$CUR_IMAGE" "$CUR_DIGEST" "$CUR_UNIT"
+}
+
 # Spec §4.1, plan п.7: equal wbb.content means X changes nothing that runs — but only if what
 # runs IS the recorded deployment. Never returns when it decides; returns to deploy otherwise.
 noop_or_continue() {
   local keeps
   [ -n "$DEPLOYED_CONTENT" ] && [ "$CAND_CONTENT" = "$DEPLOYED_CONTENT" ] || return 0
-  if [ "$CUR_UNIT" != quadlet ] || [ "$CUR_QUADLET" != "$DEPLOYED_DIGEST" ] \
-     || [ "$CUR_DIGEST" != "$DEPLOYED_DIGEST" ] || [ "$CUR_IMAGE" != "$DEPLOYED_ID" ]; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: ${X:0:7} changes nothing that runs (wbb.content ${CAND_CONTENT}), but production does not match the record: expected quadlet=${DEPLOYED_DIGEST} container-image=${DEPLOYED_ID} container-digest=${DEPLOYED_DIGEST} unit=quadlet, found quadlet=${CUR_QUADLET} container-image=${CUR_IMAGE} container-digest=${CUR_DIGEST} unit=${CUR_UNIT}. Not recording it as deployed; check the host."
+  if ! production_is_record; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: ${X:0:7} changes nothing that runs (wbb.content ${CAND_CONTENT}), but production does not match the record: $(record_mismatch). Not recording it as deployed; check the host."
     exit 0
   fi
   # Advancing DEPLOYED_SHA is the point: a hold released by a manual deploy of a noop commit
@@ -811,10 +855,444 @@ noop_or_continue() {
   exit 0
 }
 
-# Plan Task 2 replaces this stub: audit, the settled image local, pre, trial, window, activate.
+# --- the path to production (plan п.9–14) -----------------------------------------------------------
+# Every key of an open window (spec §7.1). Cleared together when the window ends in any way.
+clear_window() {
+  local k
+  for k in "${WINDOW_KEYS[@]}"; do printf -v "$k" '%s' ''; done
+  ROLLBACK_ATTEMPTS=""
+}
+
+# Plan п.11: "running" is ActiveState=active, SubState=running and MainPID != 0 — `current` reads
+# the container's ids, which a stopped container keeps. 0 running, 1 not running, 2 could not read.
+unit_running() {
+  local out line as="" ss="" pid=""
+  out=$("$UNIT_STATE_CMD" 2>/dev/null) || return 2
+  while IFS= read -r line; do
+    case "$line" in
+      ActiveState=*) as="${line#*=}" ;;
+      SubState=*) ss="${line#*=}" ;;
+      MainPID=*) pid="${line#*=}" ;;
+    esac
+  done <<< "$out"
+  if [ -z "$as" ] || [ -z "$ss" ] || ! [[ $pid =~ ^[0-9]+$ ]]; then return 2; fi
+  if [ "$as" = active ] && [ "$ss" = running ] && [ "$pid" != 0 ]; then return 0; fi
+  return 1
+}
+# /health's releaseSha, or exit 1.
+read_health() {
+  local sha
+  sha=$("$HEALTH_CMD" "$PORT" 2>/dev/null) || return 1
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || return 1
+  printf '%s\n' "$sha"
+}
+# systemd's NRestarts, or exit 1.
+read_restarts() {
+  local r
+  r=$("$RESTARTS_CMD" 2>/dev/null) || return 1
+  [[ $r =~ ^(0|[1-9][0-9]{0,17})$ ]] || return 1
+  printf '%s\n' "$r"
+}
+
+# Plan п.14: the pre snapshot of a failed window is evidence for a human. mark-rollback RENAMES it
+# and prints the new name; that name — not the old WINDOW_PRE — is what is retained. Sets PRE_NOTE.
+retain_pre() {
+  local out marked
+  case "$WINDOW_PRE" in
+    '') PRE_NOTE="none (the window had no pre snapshot)"; return 0 ;;
+    *-rollback-pre.db) PRE_NOTE="$WINDOW_PRE (kept until a human removes it: rm $WINDOW_PRE $WINDOW_PRE.sha256)"; return 0 ;;
+  esac
+  if out=$("$MARK_CMD" "$WINDOW_PRE" 2>&1) && marked=$(tail -n 1 <<< "$out") && [ -n "$marked" ] \
+     && [[ $marked != *' '* ]]; then
+    WINDOW_PRE="$marked"
+    RETAINED_PRE="${RETAINED_PRE:+$RETAINED_PRE }$marked"
+    PRE_NOTE="$marked (kept until a human removes it: rm $marked $marked.sha256)"
+  else
+    PRE_NOTE="NOT marked (${out//$'\n'/ }) — prune may delete $WINDOW_PRE"
+  fi
+}
+
+# Spec §7.3: production needs a human. ONE write, before the window is cleared: LAST_FAILED_SHA,
+# INCIDENT and the retained pre together (plan п.13). Never returns.
+open_incident() {
+  local reason="${1//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE"
+  retain_pre
+  LAST_FAILED_SHA="$x"
+  INCIDENT="$x $d $reason"
+  write_state
+  clear_window
+  write_state
+  notify "🔥 merge-deploy INCIDENT: ${x:0:7} (${d}) — ${reason}. Nothing was rolled back automatically$([ "$mode" = manual ] && printf ' (a manual window)'); the database is untouched.
+Pre-deploy snapshot: ${PRE_NOTE}
+Nothing deploys until a human restores production and runs: bash deploy/deploy.sh --resolve-incident --settled <sha>"
+  exit 3
+}
+
+# What `current`, the unit and /health say about the settled image S: 0 it runs and answers,
+# 1 it does not, 3 the unit is not our Quadlet.
+settled_is_running() {
+  local kind q i d u urc=0
+  image_call current
+  read -r kind q i d u <<< "$IMG_VERDICT"
+  [ "$kind" = CURRENT ] || return 1
+  if [ "$u" = foreign ]; then return 3; fi
+  [ "$u" = quadlet ] && [ "$q" = "$SETTLED_DIGEST" ] && [ "$d" = "$SETTLED_DIGEST" ] && [ "$i" = "$SETTLED_ID" ] || return 1
+  unit_running || urc=$?
+  [ "$urc" = 0 ] || return 1
+  [ "$(read_health || true)" = "$SETTLED_SHA" ] || return 1
+}
+
+# Up to STARTUP_S for S to run and answer. 0 yes, 1 no; the unit turning foreign is an incident.
+wait_for_settled() {
+  local start rc
+  start=$(now)
+  while :; do
+    rc=0
+    settled_is_running || rc=$?
+    if [ "$rc" = 0 ]; then return 0; fi
+    if [ "$rc" = 3 ]; then open_incident "the unit is no longer our Quadlet (unit=foreign) during the rollback"; fi
+    if [ $(( $(now) - start )) -ge "$STARTUP_S" ]; then return 1; fi
+    "$SLEEP_CMD" "$POLL_S"
+  done
+}
+
+# Spec §1 п.5: the settled image runs again on the same database. Never returns.
+rolled_back() {
+  local x="$WINDOW_SHA" old="$WINDOW_OLD" reason="$WINDOW_REASON" pre="$WINDOW_PRE"
+  DEPLOYED_SHA="$old"
+  LAST_SEEN_DEPLOYED_SHA="$old"
+  DEPLOYED_DIGEST="$SETTLED_DIGEST"
+  DEPLOYED_ID="$SETTLED_ID"
+  DEPLOYED_CONTENT="$SETTLED_CONTENT"
+  clear_window
+  write_state
+  notify "🔥 merge-deploy ROLLED BACK ${x:0:7} → ${SETTLED_SHA:0:7} (code only, DB untouched): ${reason}.
+Whatever ${x:0:7} migrated or wrote is still in the database.
+Pre-deploy snapshot kept: ${pre} (remove it by hand once reconciled: rm ${pre} ${pre}.sha256)"
+  exit 2
+}
+
+# Plan п.13 steps 3–5: before EVERY attempt, the fact first — S already running and answering
+# finishes the rollback without restarting it again. The attempt counter is in the state and
+# written BEFORE each `activate S`, so no interruption lets S be restarted more than twice.
+rollback_loop() {
+  local rc
+  while :; do
+    rc=0
+    settled_is_running || rc=$?
+    if [ "$rc" = 3 ]; then open_incident "the unit is no longer our Quadlet (unit=foreign) during the rollback"; fi
+    if [ "$rc" = 0 ]; then rolled_back; fi
+    if [ "${ROLLBACK_ATTEMPTS:-0}" -ge "$ROLLBACK_ATTEMPTS_MAX" ]; then
+      open_incident "the rollback to ${SETTLED_SHA:0:7} did not bring it up after ${ROLLBACK_ATTEMPTS} attempts (${WINDOW_REASON})"
+    fi
+    ROLLBACK_ATTEMPTS=$(( ${ROLLBACK_ATTEMPTS:-0} + 1 ))
+    write_state
+    image_call activate --digest "$SETTLED_DIGEST"
+    if [ "$IMG_VERDICT" = "ACTIVATED $SETTLED_DIGEST" ]; then
+      if wait_for_settled; then rolled_back; fi
+    else
+      echo "activate ${SETTLED_DIGEST}: ${IMG_VERDICT}"
+      "$SLEEP_CMD" "$ROLLBACK_RETRY_S"
+    fi
+  done
+}
+
+# Plan п.13: the window failed. auto → code-only rollback; manual → incident. Never returns.
+window_failed() {
+  local reason="${1//$'\n'/ }"
+  if [ "$WINDOW_MODE" = manual ]; then open_incident "the manual window failed: ${reason}"; fi
+  # The FIRST write: whatever happens below, X is not retried.
+  LAST_FAILED_SHA="$WINDOW_SHA"
+  WINDOW_PHASE=rolling-back
+  WINDOW_REASON="$reason"
+  ROLLBACK_ATTEMPTS=0
+  write_state
+  notify "⚠️ merge-deploy ${WINDOW_SHA:0:7} failed inside its window: ${reason} — rolling back to ${SETTLED_SHA:0:7} (code only; the database is not touched)."
+  retain_pre
+  write_state
+  rollback_loop
+}
+
+# The window's start or a fresh one: lost evidence is neither a pass nor a failure (plan п.11).
+start_watching() {
+  WINDOW_PHASE=watching
+  WINDOW_START=$(now)
+  WINDOW_LAST_READ="$WINDOW_START"
+  WINDOW_FAILS=0
+  WINDOW_NRESTARTS=$(read_restarts || true)
+  write_state
+}
+new_window() {
+  start_watching
+  notify "⚠️ merge-deploy ${WINDOW_SHA:0:7}: the window lost its evidence ($1) — watching a full ${WINDOW_S}s window again from now."
+}
+
+# Spec §7.1: settled — D becomes the rollback target. Never returns.
+settle() {
+  local x="$WINDOW_SHA" d="$WINDOW_DIGEST" prs="${RANGE_PRS[*]:-}"
+  PREVIOUS_SHA="$WINDOW_OLD"
+  DEPLOYED_SHA="$x"
+  LAST_SEEN_DEPLOYED_SHA="$x"
+  SETTLED_SHA="$x"
+  SETTLED_DIGEST="$d"
+  SETTLED_ID="$WINDOW_ID"
+  SETTLED_CONTENT="$WINDOW_CONTENT"
+  clear_window
+  write_state
+  image_call prune --keep "$d"
+  case "$IMG_VERDICT" in PRUNED\ *) ;; *) echo "WARNING: image prune: ${IMG_VERDICT}" ;; esac
+  "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
+  notify "✅ merge-deploy ${x:0:7} is live and settled${prs:+ — $prs}."
+  exit 0
+}
+
+# Plan п.11: a poll every POLL_S reads health, NRestarts, the unit state and `current`, and its
+# outcome is in the state before the next one (WINDOW_FAILS, WINDOW_LAST_READ), so a killed tick
+# loses none of it. $1: 1 when the application has already been seen up. Never returns.
+watch_window() {
+  local started="$1" t_now t hs hok r urc kind q i d u cur full sick
+  while :; do
+    t_now=$(now)
+    if [ "$t_now" -lt "$WINDOW_START" ] || [ "$t_now" -lt "$WINDOW_LAST_READ" ]; then
+      new_window "the clock went back: now ${t_now}, window start ${WINDOW_START}, last read ${WINDOW_LAST_READ}"
+      continue
+    fi
+    t=$(( t_now - WINDOW_START ))
+    hs=$(read_health) && hok=1 || hok=0
+    r=$(read_restarts) || r=""
+    urc=0
+    unit_running || urc=$?
+    image_call current
+    read -r kind q i d u <<< "$IMG_VERDICT"
+    cur=0
+    if [ "$kind" = CURRENT ]; then cur=1; fi
+    # A poll is read in full when current, NRestarts and the unit state all answered — whatever
+    # they say; recorded before any verdict, so the state says what this poll saw.
+    full=0
+    if [ -n "$r" ] && [ "$urc" != 2 ] && [ "$cur" = 1 ]; then full=1; WINDOW_LAST_READ="$t_now"; fi
+    if [ "$cur" = 1 ] && [ "$u" = foreign ]; then
+      open_incident "the unit is no longer our Quadlet (unit=foreign) at +${t}s of the window of ${WINDOW_SHA:0:7}"
+    fi
+    if [ "$cur" = 1 ] && { [ "$q" != "$WINDOW_DIGEST" ] || { [ "$d" != none ] && { [ "$d" != "$WINDOW_DIGEST" ] || [ "$i" != "$WINDOW_ID" ]; }; }; }; then
+      window_failed "production runs another image (quadlet=${q} container-image=${i} container-digest=${d}) at +${t}s"
+    fi
+    if [ -n "$r" ]; then
+      if [ -z "$WINDOW_NRESTARTS" ]; then
+        WINDOW_NRESTARTS="$r"
+      elif [ "$r" -gt "$WINDOW_NRESTARTS" ]; then
+        window_failed "service restarted (NRestarts ${WINDOW_NRESTARTS} -> ${r}) at +${t}s"
+      elif [ "$r" -lt "$WINDOW_NRESTARTS" ]; then
+        new_window "NRestarts went down in the same boot (${WINDOW_NRESTARTS} -> ${r})"
+        continue
+      fi
+    fi
+    # A failed health: no answer, the unit not running, or no container at all.
+    sick=0
+    if [ "$hok" = 0 ] || [ "$urc" = 1 ] || { [ "$cur" = 1 ] && [ "$d" = none ]; }; then sick=1; fi
+    if [ "$sick" = 1 ]; then
+      if [ "$started" = 1 ]; then WINDOW_FAILS=$(( WINDOW_FAILS + 1 )); fi
+    elif [ "$hs" != "$WINDOW_SHA" ]; then
+      if [ "$started" = 1 ]; then window_failed "/health answers releaseSha ${hs:0:7}, not ${WINDOW_SHA:0:7}, at +${t}s"; fi
+    elif [ "$urc" = 0 ]; then
+      started=1
+      WINDOW_FAILS=0
+    fi
+    if [ "$started" = 0 ] && [ "$t" -ge "$STARTUP_S" ]; then
+      window_failed "not healthy within ${STARTUP_S}s"
+    fi
+    if [ "$WINDOW_FAILS" -ge "$HEALTH_FAILS_MAX" ]; then
+      window_failed "health check failed ${WINDOW_FAILS} times in a row (last at +${t}s)"
+    fi
+    write_state
+    if [ $(( t_now - WINDOW_LAST_READ )) -ge "$OBSERVE_MAX_S" ]; then
+      window_failed "could not observe production for $(( t_now - WINDOW_LAST_READ ))s (current, NRestarts or the unit state unreadable)"
+    fi
+    # Settled only on a poll that was read in full and is clean, at t >= WINDOW_S.
+    if [ "$t" -ge "$WINDOW_S" ] && [ "$full" = 1 ] && [ "$started" = 1 ] && [ "$sick" = 0 ] \
+       && [ "$hs" = "$WINDOW_SHA" ] && [ "$urc" = 0 ]; then
+      settle
+    fi
+    "$SLEEP_CMD" "$POLL_S"
+  done
+}
+
+# The window was written but nothing changed production: it is cancelled, the pre discarded.
+cancel_window() {
+  local pre="$WINDOW_PRE"
+  "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
+  clear_window
+  write_state
+  once_a_day LAST_ASSESS_NOTICE "$1"
+  exit 0
+}
+
+# Plan п.9, the activate rows.
+activate_candidate() {
+  local kind q i d u why
+  image_call activate --digest "$D"
+  case "$IMG_VERDICT" in
+    "ACTIVATED $D")
+      DEPLOYED_SHA="$X"
+      LAST_SEEN_DEPLOYED_SHA="$X"
+      DEPLOYED_DIGEST="$D"
+      DEPLOYED_ID="$CAND_ID"
+      DEPLOYED_CONTENT="$CAND_CONTENT"
+      start_watching
+      watch_window 0
+      ;;
+    ACTIVATE_FAILED\ *)
+      window_failed "the activation failed: ${IMG_VERDICT#ACTIVATE_FAILED }"
+      ;;
+    REFUSED\ *)
+      why="${IMG_VERDICT#REFUSED }"
+      image_call current
+      read -r kind q i d u <<< "$IMG_VERDICT"
+      if [ "$kind" = CURRENT ] && [ "$u" = foreign ]; then
+        open_incident "the unit is not our Quadlet (unit=foreign); the activation was refused"
+      fi
+      cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
+      ;;
+    *)
+      # 75 or anything else: whether production changed is not known. The window stays
+      # `activating`; the next tick looks at what runs (spec §7.2 rows 1–3).
+      notify "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
+      exit 0
+      ;;
+  esac
+}
+
+# Plan п.10: the rollback target S is local and is what the state says it is — checked without
+# the network; only when it is missing is it pulled (the network is up: D was just pulled).
+settled_is_local() {
+  local kind d i c x
+  image_call local --digest "$SETTLED_DIGEST"
+  if [ "${IMG_VERDICT%% *}" = NOT_LOCAL ]; then
+    image_call pull --sha "$SETTLED_SHA" --digest "$SETTLED_DIGEST"
+    read -r kind d i c x <<< "$IMG_VERDICT"
+    if [ "$kind" != PULLED ] || [ "$d" != "$SETTLED_DIGEST" ] || [ "$x" != "$SETTLED_SHA" ]; then return 1; fi
+    image_call local --digest "$SETTLED_DIGEST"
+  fi
+  read -r kind d i c x <<< "$IMG_VERDICT"
+  [ "$kind" = LOCAL ] && [ "$d" = "$SETTLED_DIGEST" ] && [ "$i" = "$SETTLED_ID" ] && [ "$x" = "$SETTLED_SHA" ]
+}
+
+# The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
+# activate, the window watched. Never returns.
 deploy_pipeline() {
-  echo "deploy_pipeline: Task 2 — not implemented yet; ${X:0:7} (${D}) is not deployed" >&2
-  exit 70
+  local pre name boot kind err
+  if ! production_is_record; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
+    exit 0
+  fi
+  # Spec §4.2: the advisory is a verdict on X; anything else is "could not verify".
+  image_call audit --digest "$D"
+  case "$IMG_VERDICT" in
+    "CLEAN $D") ;;
+    "ADVISORY $D"|"ADVISORY $D"$'\n'*)
+      refuse "$X" "npm audit --omit=dev in its image reports a high or critical advisory.
+$(tail -n +2 <<< "$IMG_VERDICT")" ;;
+    *)
+      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the audit of ${X:0:7} (${D}) could not run: ${IMG_VERDICT%%$'\n'*} — NOT a finding; retrying next tick."
+      exit 0 ;;
+  esac
+  if ! settled_is_local; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the settled image ${SETTLED_DIGEST} is not usable as the rollback target: ${IMG_VERDICT%%$'\n'*} (expected id ${SETTLED_ID}, revision ${SETTLED_SHA}). Not deploying ${X:0:7}; retrying next tick."
+    exit 0
+  fi
+  if ! PORT=$("$API_PORT_CMD"); then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not resolve API_PORT — not deploying ${X:0:7}."
+    exit 0
+  fi
+  if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — not deploying ${X:0:7}; retrying next tick."
+    exit 0
+  fi
+
+  # The trial runs on a pre snapshot of production, by NAME (the helper takes no paths).
+  name="$(date -u -d "@$(now)" +%Y%m%dT%H%M%SZ)-${X:0:7}-pre.db"
+  pre="${SNAPSHOT_DIR}/${name}"
+  if ! err=$("$SNAPSHOT_CMD" "$pre" 2>&1); then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${X:0:7}.
+${err}"
+    exit 0
+  fi
+  image_call trial --digest "$D" --previous "$SETTLED_DIGEST" --snapshot "$name"
+  kind="${IMG_VERDICT%% *}"
+  if [ "$IMG_VERDICT" != "OK $SETTLED_DIGEST" ]; then
+    # No deploy happened: this pre must not count among the settled ones.
+    "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
+  fi
+  case "$kind:$IMG_VERDICT" in
+    "OK:OK $SETTLED_DIGEST") ;;
+    FAILED:*)
+      refuse "$X" "the trial on a copy of production failed: ${IMG_VERDICT#FAILED }
+$(tail -n 20 <<< "$IMG_ERR")" ;;
+    COMPAT_FAILED:*)
+      # Spec §6.3: proven incompatibility — a hold, not a failed SHA. It concerns exactly this
+      # pair of images: a new head or a new settled image clears it.
+      CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
+      CANDIDATE_HELD_WHY="${IMG_VERDICT#COMPAT_FAILED }"
+      LAST_HOLD_NOTICE=$(today)
+      write_state
+      notify "⏸ merge-deploy: ${X:0:7} is HELD — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated, so a code-only rollback is not possible: ${CANDIDATE_HELD_WHY}
+$(tail -n 20 <<< "$IMG_ERR")
+Deploy it by hand, without an automatic rollback: bash deploy/deploy.sh --ack-incompatible"
+      exit 0 ;;
+    REFUSED:*)
+      # A precondition (rights, the snapshot, an old S) is fixed on the host, not by a commit:
+      # not a hold of X, just not before an hour has passed.
+      CANDIDATE_RETRY_X="$X"
+      CANDIDATE_RETRY_AT=$(( $(now) + CANDIDATE_RETRY_S ))
+      write_state
+      once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: the trial of ${X:0:7} was refused: ${IMG_VERDICT#REFUSED }
+$(tail -n 20 <<< "$IMG_ERR")
+It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded against the commit."
+      exit 0 ;;
+    *)
+      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick."
+      exit 0 ;;
+  esac
+
+  # Spec §7.1: the window is in the state BEFORE anything changes production.
+  WINDOW_SHA="$X"
+  WINDOW_DIGEST="$D"
+  WINDOW_ID="$CAND_ID"
+  WINDOW_CONTENT="$CAND_CONTENT"
+  WINDOW_OLD="$DEPLOYED_SHA"
+  WINDOW_PREV_DIGEST="$SETTLED_DIGEST"
+  WINDOW_MODE=auto
+  WINDOW_PHASE=activating
+  WINDOW_PRE="$pre"
+  WINDOW_BOOT="$boot"
+  write_state
+  activate_candidate
+}
+
+# Plan п.9: a candidate held for COMPAT FAILED stays held only for the exact pair it was proven
+# on — head X, its digest D, the settled S. Quietly, with a reminder once a day.
+candidate_held() {
+  [ -n "$CANDIDATE_HELD" ] || return 0
+  if [ "$CANDIDATE_HELD" != "$X $D $SETTLED_DIGEST" ]; then
+    CANDIDATE_HELD=""
+    CANDIDATE_HELD_WHY=""
+    write_state
+    return 0
+  fi
+  once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: ${X:0:7} is still HELD: ${CANDIDATE_HELD_WHY}. Deploy it by hand, without an automatic rollback: bash deploy/deploy.sh --ack-incompatible"
+  echo "main $X is held (COMPAT FAILED against ${SETTLED_DIGEST})"
+  exit 0
+}
+
+# Plan п.9: a trial REFUSED for X waits CANDIDATE_RETRY_S, then X is tried afresh.
+candidate_retry() {
+  [ -n "$CANDIDATE_RETRY_X" ] || return 0
+  if [ "$CANDIDATE_RETRY_X" = "$X" ] && [ "$NOW" -lt "$CANDIDATE_RETRY_AT" ]; then
+    echo "the trial of $X was refused; retrying after ${CANDIDATE_RETRY_AT}"
+    exit 0
+  fi
+  CANDIDATE_RETRY_X=""
+  CANDIDATE_RETRY_AT=""
+  write_state
 }
 
 # Plan Task 3 replaces this stub: a tick that finds a window finishes it first (spec §7.2).
@@ -929,7 +1407,9 @@ Re-running the failed job releases it; nothing else to do here."
     ;;
 esac
 
+candidate_retry
 resolve_digest
+candidate_held
 attest_image
 pull_candidate
 read_current
