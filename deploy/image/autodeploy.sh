@@ -48,43 +48,74 @@ CORRUPT_NOTICE="$STATE_DIR/image-state-corrupt-notice"
 NOTIFY_LIMIT=3500
 QUIET_S=600
 CI_STUCK_S=3600
-# Plan п.17: the worst tick of this deployer is ~88 min (TICK_BUDGET_S=5400 with the unit's
-# TimeoutStartSec=90min, stage «в»); a lock held longer than that has a holder that will not let go.
-LOCK_STALL_S=5700
-# Plan п.17: the tick's budget is the sum of the nested timeouts of its worst path, each call at
-# the edge of its own bound — ONE source for each, and a test sums them against TICK_BUDGET_S
-# (stage «в» sets the unit's TimeoutStartSec=90min to match).
-TICK_BUDGET_S=5400
+# --- timeouts and the tick's budget (plan п.17) ------------------------------------------ BEGIN
+# Every external call is bounded by `timeout` (or curl --max-time) with ONE of these; a timeout is
+# "could not verify", never a verdict. A test checks that each is used by the code it bounds and
+# that WORST_PATH_S, the worst tick built from them below, stays under TICK_BUDGET_S.
+STEP_TIMEOUT_GIT_S=120          # git clone, git fetch (each)
+STEP_TIMEOUT_GH_S=60            # gh api: check runs, PR labels (each call)
+STEP_TIMEOUT_INSTALLED_S=30     # installed-current.sh
 STEP_TIMEOUT_RESOLVE_S=40       # token + HEAD, 2 × 20
 STEP_TIMEOUT_ATTEST_S=120
 STEP_TIMEOUT_PULL_S=660         # the helper: pull 600 + inspect 60
+STEP_TIMEOUT_LOCAL_S=60         # the helper: inspect
 STEP_TIMEOUT_CURRENT_S=90       # the helper: inspect 60 + systemctl 30
 STEP_TIMEOUT_AUDIT_S=300        # the helper
-STEP_TIMEOUT_SETTLED_LOCAL_S=780  # local S + pull S + local S
-STEP_TIMEOUT_SNAPSHOT_S=300     # VACUUM INTO
 STEP_TIMEOUT_TRIAL_S=900        # the helper: 180 + 150 + 150 + 3 × rm 60 + 2 × inspect 60 + the copy
 STEP_TIMEOUT_ACTIVATE_S=240     # the helper: daemon-reload 60 + restart 180
-STEP_TIMEOUT_STARTUP_S=120
-STEP_TIMEOUT_WINDOW_S=705       # 600 + the last poll (health 5, systemctl 5 + 5, current 90)
-STEP_TIMEOUT_ROLLBACK_S=950     # 2 × (check 100 + activate 240 + start 120) + 30
-STEP_TIMEOUT_FINISH_S=60        # incident, notify, state writes
+STEP_TIMEOUT_PRUNE_IMAGES_S=300 # the helper: podman images + rmi
+STEP_TIMEOUT_READ_ENV_S=30      # sudo -u bot read-env.sh (API_PORT, the notifier's token and chat)
+STEP_TIMEOUT_SNAPSHOT_S=300     # VACUUM INTO
+STEP_TIMEOUT_SNAPSHOT_OP_S=60   # db-snapshot.sh mark-rollback / discard / prune
+STEP_TIMEOUT_NOTIFY_S=10        # the Telegram POST
+STEP_TIMEOUT_SEAM_S=5           # one probe: /health, systemctl show
+STEP_TIMEOUT_STARTUP_S=120      # ACTIVATED → /health answers X with the unit running
 # The window (spec §7, plan п.11).
 WINDOW_S=600
 POLL_S=10
-# Quadlet's Type=notify signals the container, not the application: after ACTIVATED wait this
-# long for /health to answer releaseSha == X with the unit running.
-STARTUP_S=$STEP_TIMEOUT_STARTUP_S
-# R6: one failed probe is a stall, not a failed deploy — a run of failures is.
-HEALTH_FAILS_MAX=3
 # This long without one fully read poll (current, NRestarts, the unit state) is a failed window:
 # it must never hang in `watching` forever.
 OBSERVE_MAX_S=300
 # Plan п.13: at most two `activate S` per rollback, this far apart after a 75.
 ROLLBACK_ATTEMPTS_MAX=2
 ROLLBACK_RETRY_S=30
+# The worst tick, every call at the edge of its bound (plan п.17), from the loops as they are:
+# - a poll is health + NRestarts + the unit state + `current`; the window settles on the first
+#   clean poll at t >= WINDOW_S, or fails OBSERVE_MAX_S after the last fully read one: the last
+#   poll before that, the sleep, and one more poll;
+# - a rollback attempt is the fact (`current`, the unit, health) — waited for up to STARTUP_S while
+#   unreadable — then `activate S`, then up to STARTUP_S for S, then the retry sleep; two attempts
+#   and the last fact;
+# - three messages (failed, rolled back or incident, one lost-evidence notice);
+# - PR labels are one call per commit of the range: counted once here (a merge is one commit
+#   ahead of production in the common case; a long range lengthens the tick by GH per commit);
+# - the failed path (rollback) is the longer one: a settled tick runs the image and snapshot prunes
+#   (PRUNE_IMAGES + SNAPSHOT_OP) instead of the rollback.
+POLL_WORST_S=$(( 3 * STEP_TIMEOUT_SEAM_S + STEP_TIMEOUT_CURRENT_S ))
+FACT_WORST_S=$(( 2 * STEP_TIMEOUT_SEAM_S + STEP_TIMEOUT_CURRENT_S ))
+CHECK_WORST_S=$(( STEP_TIMEOUT_STARTUP_S + POLL_S + FACT_WORST_S ))
+WINDOW_WORST_S=$(( WINDOW_S + OBSERVE_MAX_S + 2 * POLL_WORST_S + POLL_S ))
+ROLLBACK_WORST_S=$(( ROLLBACK_ATTEMPTS_MAX * (CHECK_WORST_S + STEP_TIMEOUT_ACTIVATE_S + CHECK_WORST_S + ROLLBACK_RETRY_S) + CHECK_WORST_S ))
+NOTIFY_WORST_S=$(( 2 * STEP_TIMEOUT_READ_ENV_S + STEP_TIMEOUT_NOTIFY_S ))
+WORST_PATH_S=$(( 2 * STEP_TIMEOUT_GIT_S + STEP_TIMEOUT_INSTALLED_S + 2 * STEP_TIMEOUT_GH_S
+  + STEP_TIMEOUT_RESOLVE_S + STEP_TIMEOUT_ATTEST_S + STEP_TIMEOUT_PULL_S + STEP_TIMEOUT_CURRENT_S
+  + STEP_TIMEOUT_AUDIT_S + 2 * STEP_TIMEOUT_LOCAL_S + STEP_TIMEOUT_PULL_S + STEP_TIMEOUT_READ_ENV_S
+  + STEP_TIMEOUT_SNAPSHOT_S + STEP_TIMEOUT_TRIAL_S + STEP_TIMEOUT_ACTIVATE_S + WINDOW_WORST_S
+  + STEP_TIMEOUT_SNAPSHOT_OP_S + ROLLBACK_WORST_S + 3 * NOTIFY_WORST_S ))
+# The unit's TimeoutStartSec (stage «в») must be at least this.
+TICK_BUDGET_S=7200
+# --- timeouts and the tick's budget ------------------------------------------------------- END
+# Quadlet's Type=notify signals the container, not the application: after ACTIVATED wait this
+# long for /health to answer releaseSha == X with the unit running.
+STARTUP_S=$STEP_TIMEOUT_STARTUP_S
+# A lock held longer than the longest legitimate tick has a holder that will not let go.
+LOCK_STALL_S=$(( TICK_BUDGET_S + 300 ))
+# R6: one failed probe is a stall, not a failed deploy — a run of failures is.
+HEALTH_FAILS_MAX=3
 # Plan п.9: a trial REFUSED (a precondition on the host) is retried after this long.
 CANDIDATE_RETRY_S=3600
-SEAM_TIMEOUT_S=5
+# F5: `activate D` gets this many tries per window; then a human looks.
+ACTIVATE_ATTEMPTS_MAX=3
 KEEP_SNAPSHOTS=3
 SNAPSHOT_DIR="${WBB_SNAPSHOT_DIR:-/var/lib/warsaw-beer-bot/deploy-snapshots}"
 DB_PATH="${WBB_DB_PATH:-/var/lib/warsaw-beer-bot/bot.db}"
@@ -108,30 +139,42 @@ SLEEP_CMD="${WBB_SLEEP_CMD:-_sleep_default}"
 # ONE probe, no loop. Prints /health's releaseSha; not ok, or not 40 hex → exit 1 (plan п.5).
 _health_default() {
   local body sha
-  body=$(curl -fsS --max-time "$SEAM_TIMEOUT_S" "http://127.0.0.1:${1}/health" 2>/dev/null) || return 1
+  body=$(curl -fsS --max-time "$STEP_TIMEOUT_SEAM_S" "http://127.0.0.1:${1}/health" 2>/dev/null) || return 1
   case "$body" in *'"ok":true'*) ;; *) return 1 ;; esac
   sha=$(printf '%s' "$body" | sed -n 's/.*"releaseSha":"\([0-9a-f]\{40\}\)".*/\1/p')
   [ -n "$sha" ] || return 1
   printf '%s\n' "$sha"
 }
 HEALTH_CMD="${WBB_HEALTH_CMD:-_health_default}"
-_restarts_default() { timeout "$SEAM_TIMEOUT_S" systemctl show -p NRestarts --value warsaw-beer-bot; }
+_restarts_default() { timeout "$STEP_TIMEOUT_SEAM_S" systemctl show -p NRestarts --value warsaw-beer-bot; }
 RESTARTS_CMD="${WBB_RESTARTS_CMD:-_restarts_default}"
 # Plan п.11: "running" is ActiveState=active, SubState=running, MainPID != 0 (the operator reads it).
-_unit_state_default() { timeout "$SEAM_TIMEOUT_S" systemctl show warsaw-beer-bot -p ActiveState,SubState,MainPID; }
+_unit_state_default() { timeout "$STEP_TIMEOUT_SEAM_S" systemctl show warsaw-beer-bot -p ActiveState,SubState,MainPID; }
 UNIT_STATE_CMD="${WBB_UNIT_STATE_CMD:-_unit_state_default}"
 _boot_id_default() { cat /proc/sys/kernel/random/boot_id; }
 BOOT_ID_CMD="${WBB_BOOT_ID_CMD:-_boot_id_default}"
 
 # The root helper (spec §5): one sudoers rule per verb, never a password prompt.
-_image_default() { sudo -n "$IMAGE_BIN" "$@"; }
+_helper_timeout() {
+  case "$1" in
+    pull) echo "$STEP_TIMEOUT_PULL_S" ;;
+    local) echo "$STEP_TIMEOUT_LOCAL_S" ;;
+    audit) echo "$STEP_TIMEOUT_AUDIT_S" ;;
+    trial) echo "$STEP_TIMEOUT_TRIAL_S" ;;
+    activate) echo "$STEP_TIMEOUT_ACTIVATE_S" ;;
+    current) echo "$STEP_TIMEOUT_CURRENT_S" ;;
+    prune) echo "$STEP_TIMEOUT_PRUNE_IMAGES_S" ;;
+    *) echo "$STEP_TIMEOUT_SEAM_S" ;;
+  esac
+}
+_image_default() { timeout "$(_helper_timeout "$1")" sudo -n "$IMAGE_BIN" "$@"; }
 IMAGE_CMD="${WBB_IMAGE_CMD:-_image_default}"
 
 # Plan п.6: tag <sha> → digest, anonymously from GHCR's registry API. Trusted for NOTHING: the
 # attestation and `pull` (.Digest == D, revision == X) are what make D believable.
 # Prints sha256:<64 hex>; exit 3 = no such tag (404); anything else = could not read.
 _resolve_default() {
-  local token headers status digest each=$(( STEP_TIMEOUT_RESOLVE_S / 2 ))
+  local token headers status digest each=$(( $STEP_TIMEOUT_RESOLVE_S / 2 ))
   token=$(curl -fsS --max-time "$each" "https://ghcr.io/token?scope=repository:${GH_REPO}:pull" \
     | sed -n 's/.*"token":"\([^"]*\)".*/\1/p') || return 1
   [ -n "$token" ] || return 1
@@ -162,19 +205,19 @@ ATTEST_CMD="${WBB_ATTEST_CMD:-_attest_default}"
 # GitHub, read as the operator's `gh`. One line per check run:
 # name<TAB>status<TAB>conclusion<TAB>check suite id (plan п.8).
 _checks_default() {
-  gh api "repos/${GH_REPO}/commits/$1/check-runs" --paginate \
+  timeout "$STEP_TIMEOUT_GH_S" gh api "repos/${GH_REPO}/commits/$1/check-runs" --paginate \
     --jq '.check_runs[] | [.name, .status, (.conclusion // ""), (.check_suite.id | tostring)] | @tsv'
 }
 CHECKS_CMD="${WBB_CHECKS_CMD:-_checks_default}"
 # One line per PR that contains the commit: number<TAB>label,label,...
 _pr_labels_default() {
-  gh api "repos/${GH_REPO}/commits/$1/pulls" \
+  timeout "$STEP_TIMEOUT_GH_S" gh api "repos/${GH_REPO}/commits/$1/pulls" \
     --jq '.[] | "\(.number)\t\(.labels | map(.name) | join(","))"'
 }
 PR_LABELS_CMD="${WBB_PR_LABELS_CMD:-_pr_labels_default}"
 
 _read_env_default() {
-  sudo -u warsaw-beer-bot bash -lc '"$0" /etc/warsaw-beer-bot/.env "$1"' "$READ_ENV_BIN" "$1"
+  timeout "$STEP_TIMEOUT_READ_ENV_S" sudo -u warsaw-beer-bot bash -lc '"$0" /etc/warsaw-beer-bot/.env "$1"' "$READ_ENV_BIN" "$1"
 }
 READ_ENV_CMD="${WBB_READ_ENV_CMD:-_read_env_default}"
 _notify_default() {
@@ -186,7 +229,7 @@ _notify_default() {
     echo "WARNING: notifier has no token or chat id; cannot report: $1" >&2
     return 1
   fi
-  curl -fsS --max-time 10 -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
+  curl -fsS --max-time "$STEP_TIMEOUT_NOTIFY_S" -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" >/dev/null
 }
@@ -200,7 +243,7 @@ _api_port_default() {
 API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
 
 # DB snapshots run as the bot user through the existing `bash -lc` rule, next to bot.db.
-_as_bot() { sudo -u warsaw-beer-bot bash -lc '"$0" "$@"' "$@"; }
+_as_bot() { timeout "$STEP_TIMEOUT_SNAPSHOT_OP_S" sudo -u warsaw-beer-bot bash -lc '"$0" "$@"' "$@"; }
 _snapshot_default() { timeout "$STEP_TIMEOUT_SNAPSHOT_S" sudo -u warsaw-beer-bot bash -lc '"$0" "$@"' "$SNAPSHOT_BIN" snapshot "$DB_PATH" "$1"; }
 SNAPSHOT_CMD="${WBB_SNAPSHOT_CMD:-_snapshot_default}"
 _prune_default() { _as_bot "$SNAPSHOT_BIN" prune "$SNAPSHOT_DIR" "$KEEP_SNAPSHOTS"; }
@@ -364,7 +407,7 @@ STATE_KEYS=(
   DEPLOYED_DIGEST DEPLOYED_ID DEPLOYED_CONTENT SETTLED_SHA SETTLED_DIGEST SETTLED_ID SETTLED_CONTENT
   WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
   WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ
-  WINDOW_REASON ROLLBACK_ATTEMPTS
+  WINDOW_REASON ROLLBACK_ATTEMPTS ACTIVATE_ATTEMPTS PENDING_PRE
   CANDIDATE_HELD CANDIDATE_HELD_WHY CANDIDATE_RETRY_X CANDIDATE_RETRY_AT
   RETAINED_PRE
   INCIDENT
@@ -398,7 +441,7 @@ value_ok() {
       [[ $v =~ ^sha256:[0-9a-f]{64}$ ]] ;;
     DEPLOYED_ID|SETTLED_ID|WINDOW_ID|DEPLOYED_CONTENT|SETTLED_CONTENT|WINDOW_CONTENT)
       [[ $v =~ ^[0-9a-f]{64}$ ]] ;;
-    MAIN_SEEN_S|WINDOW_START|WINDOW_NRESTARTS|WINDOW_FAILS|WINDOW_LAST_READ|ROLLBACK_ATTEMPTS|CANDIDATE_RETRY_AT)
+    MAIN_SEEN_S|WINDOW_START|WINDOW_NRESTARTS|WINDOW_FAILS|WINDOW_LAST_READ|ROLLBACK_ATTEMPTS|ACTIVATE_ATTEMPTS|CANDIDATE_RETRY_AT)
       [[ $v =~ ^(0|[1-9][0-9]{0,17})$ ]] ;;
     LAST_HOLD_NOTICE|LAST_STALE_NOTICE|LAST_ASSESS_NOTICE|LAST_INCIDENT_NOTICE)
       [[ $v =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] ;;
@@ -408,7 +451,7 @@ value_ok() {
     CANDIDATE_HELD) [[ $v =~ $_RE_CANDIDATE_HELD ]] ;;
     INCIDENT) [[ $v =~ $_RE_INCIDENT ]] ;;
     # Free text (a path, a reason): one line by construction; it must say something.
-    WINDOW_PRE|WINDOW_REASON|CANDIDATE_HELD_WHY|RETAINED_PRE) [ -n "$v" ] ;;
+    WINDOW_PRE|WINDOW_REASON|CANDIDATE_HELD_WHY|RETAINED_PRE|PENDING_PRE) [ -n "$v" ] ;;
     *) return 1 ;;
   esac
 }
@@ -459,6 +502,20 @@ check_state() {
     _requires "$w" WINDOW_PHASE || return 1
   done
   _requires ROLLBACK_ATTEMPTS WINDOW_PHASE || return 1
+  _requires ACTIVATE_ATTEMPTS WINDOW_PHASE || return 1
+  # What each phase stands on (a window is written whole, then grows phase by phase).
+  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_PRE WINDOW_BOOT || return 1
+  case "$WINDOW_PHASE" in
+    watching)
+      _requires WINDOW_PHASE WINDOW_START WINDOW_LAST_READ WINDOW_FAILS WINDOW_NRESTARTS || return 1 ;;
+    rolling-back)
+      # A rollback can begin in `activating` (ACTIVATE FAILED), before any watching.
+      _requires WINDOW_PHASE WINDOW_REASON ROLLBACK_ATTEMPTS || return 1
+      if [ "$WINDOW_MODE" != auto ]; then
+        STATE_PROBLEM="WINDOW_PHASE is rolling-back but WINDOW_MODE is $WINDOW_MODE (a manual window never rolls back)"
+        return 1
+      fi ;;
+  esac
   _requires CANDIDATE_HELD_WHY CANDIDATE_HELD || return 1
   _together CANDIDATE_RETRY_X CANDIDATE_RETRY_AT || return 1
 }
@@ -469,6 +526,8 @@ check_state() {
 read_state() {
   local content line key value n=0 seen=" "
   STATE_PROBLEM=""
+  # A symlink, even a dangling one, is not a missing file: never a first start.
+  if [ -L "$STATE" ]; then STATE_PROBLEM="the path is a symlink"; return 1; fi
   [ -e "$STATE" ] || return 0
   if [ ! -f "$STATE" ]; then STATE_PROBLEM="not a regular file"; return 1; fi
   if ! tr -d '\000' < "$STATE" | cmp -s - "$STATE"; then STATE_PROBLEM="the file holds a NUL byte"; return 1; fi
@@ -560,7 +619,7 @@ refuse() {
 installed_is_stale() {
   [ -n "$INSTALLED_CHECK_BIN" ] || return 1
   [ -x "$INSTALLED_CHECK_BIN" ] || return 1
-  ! STALE_REPORT=$("$INSTALLED_CHECK_BIN" "$REPO" origin/main \
+  ! STALE_REPORT=$(timeout "$STEP_TIMEOUT_INSTALLED_S" "$INSTALLED_CHECK_BIN" "$REPO" origin/main \
       "deploy/image/autodeploy.sh=$0" \
       "deploy/read-env.sh=$READ_ENV_BIN" \
       "deploy/db-snapshot.sh=$SNAPSHOT_BIN" \
@@ -860,6 +919,7 @@ clear_window() {
   local k
   for k in "${WINDOW_KEYS[@]}"; do printf -v "$k" '%s' ''; done
   ROLLBACK_ATTEMPTS=""
+  ACTIVATE_ATTEMPTS=""
 }
 
 # Plan п.11: "running" is ActiveState=active, SubState=running and MainPID != 0 — `current` reads
@@ -894,31 +954,42 @@ read_restarts() {
 }
 
 # Plan п.14: the pre snapshot of a failed window is evidence for a human. mark-rollback RENAMES it
-# and prints the new name; that name — not the old WINDOW_PRE — is what is retained. Sets PRE_NOTE.
+# and prints the new name; that name — not the old WINDOW_PRE — is what is retained. Only stdout
+# counts, and only the one name the rename can produce. A tick that died between the rename and
+# its write left exactly that: the expected name exists and the original is gone. Sets PRE_NOTE.
 retain_pre() {
-  local out marked
+  local out expected
   case "$WINDOW_PRE" in
     '') PRE_NOTE="none (the window had no pre snapshot)"; return 0 ;;
     *-rollback-pre.db) PRE_NOTE="$WINDOW_PRE (kept until a human removes it: rm $WINDOW_PRE $WINDOW_PRE.sha256)"; return 0 ;;
   esac
-  if out=$("$MARK_CMD" "$WINDOW_PRE" 2>&1) && marked=$(tail -n 1 <<< "$out") && [ -n "$marked" ] \
-     && [[ $marked != *' '* ]]; then
-    WINDOW_PRE="$marked"
-    RETAINED_PRE="${RETAINED_PRE:+$RETAINED_PRE }$marked"
-    PRE_NOTE="$marked (kept until a human removes it: rm $marked $marked.sha256)"
-  else
-    PRE_NOTE="NOT marked (${out//$'\n'/ }) — prune may delete $WINDOW_PRE"
+  expected="${WINDOW_PRE%-pre.db}-rollback-pre.db"
+  if [ ! -e "$WINDOW_PRE" ] && [ -e "$expected" ]; then
+    echo "the pre snapshot was already marked: $expected"
+  elif ! out=$("$MARK_CMD" "$WINDOW_PRE" 2>/dev/null) || [ "$(tail -n 1 <<< "$out")" != "$expected" ]; then
+    PRE_NOTE="NOT marked (mark-rollback did not answer ${expected}) — prune may delete $WINDOW_PRE"
+    return 0
   fi
+  WINDOW_PRE="$expected"
+  case " $RETAINED_PRE " in
+    *" $expected "*) ;;
+    *) RETAINED_PRE="${RETAINED_PRE:+$RETAINED_PRE }$expected" ;;
+  esac
+  PRE_NOTE="$expected (kept until a human removes it: rm $expected $expected.sha256)"
 }
 
-# Spec §7.3: production needs a human. ONE write, before the window is cleared: LAST_FAILED_SHA,
-# INCIDENT and the retained pre together (plan п.13). Never returns.
+# Spec §7.3: production needs a human. The FIRST write is the incident itself (and, when X is to
+# blame, LAST_FAILED_SHA), with the window still in the state — so nothing after it, a kill
+# included, can let the window settle or roll back. Then the pre is marked, and the second write
+# keeps it and clears the window. $1: 1 when the failure is X's (a failed window, a failed
+# rollback); 0 when it is the host's (a foreign unit, an unknown Quadlet, activations that never
+# complete). Never returns.
 open_incident() {
-  local reason="${1//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE"
-  retain_pre
-  LAST_FAILED_SHA="$x"
+  local blame="$1" reason="${2//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE"
+  if [ "$blame" = 1 ]; then LAST_FAILED_SHA="$x"; fi
   INCIDENT="$x $d $reason"
   write_state
+  retain_pre
   clear_window
   write_state
   notify "🔥 merge-deploy INCIDENT: ${x:0:7} (${d}) — ${reason}. Nothing was rolled back automatically$([ "$mode" = manual ] && printf ' (a manual window)'); the database is untouched.
@@ -928,17 +999,31 @@ Nothing deploys until a human restores production and runs: bash deploy/deploy.s
 }
 
 # What `current`, the unit and /health say about the settled image S: 0 it runs and answers,
-# 1 it does not, 3 the unit is not our Quadlet.
+# 1 it does not, 2 could not be read (`current` or the unit state), 3 the unit is not our Quadlet.
 settled_is_running() {
   local kind q i d u urc=0
   image_call current
   read -r kind q i d u <<< "$IMG_VERDICT"
-  [ "$kind" = CURRENT ] || return 1
+  [ "$kind" = CURRENT ] || return 2
   if [ "$u" = foreign ]; then return 3; fi
   [ "$u" = quadlet ] && [ "$q" = "$SETTLED_DIGEST" ] && [ "$d" = "$SETTLED_DIGEST" ] && [ "$i" = "$SETTLED_ID" ] || return 1
   unit_running || urc=$?
+  if [ "$urc" = 2 ]; then return 2; fi
   [ "$urc" = 0 ] || return 1
   [ "$(read_health || true)" = "$SETTLED_SHA" ] || return 1
+}
+# The fact before an attempt: an unreadable answer is neither "S runs" nor "S does not run" — it is
+# waited for, up to STARTUP_S, without counting an attempt. Returns as settled_is_running.
+settled_fact() {
+  local start rc
+  start=$(now)
+  while :; do
+    rc=0
+    settled_is_running || rc=$?
+    if [ "$rc" != 2 ]; then return "$rc"; fi
+    if [ $(( $(now) - start )) -ge "$STARTUP_S" ]; then return 2; fi
+    "$SLEEP_CMD" "$POLL_S"
+  done
 }
 
 # Up to STARTUP_S for S to run and answer. 0 yes, 1 no; the unit turning foreign is an incident.
@@ -949,7 +1034,7 @@ wait_for_settled() {
     rc=0
     settled_is_running || rc=$?
     if [ "$rc" = 0 ]; then return 0; fi
-    if [ "$rc" = 3 ]; then open_incident "the unit is no longer our Quadlet (unit=foreign) during the rollback"; fi
+    if [ "$rc" = 3 ]; then open_incident 0 "the unit is no longer our Quadlet (unit=foreign) during the rollback"; fi
     if [ $(( $(now) - start )) -ge "$STARTUP_S" ]; then return 1; fi
     "$SLEEP_CMD" "$POLL_S"
   done
@@ -957,7 +1042,7 @@ wait_for_settled() {
 
 # Spec §1 п.5: the settled image runs again on the same database. Never returns.
 rolled_back() {
-  local x="$WINDOW_SHA" old="$WINDOW_OLD" reason="$WINDOW_REASON" pre="$WINDOW_PRE"
+  local x="$WINDOW_SHA" old="$WINDOW_OLD" reason="$WINDOW_REASON" pre="${PRE_NOTE:-$WINDOW_PRE}"
   DEPLOYED_SHA="$old"
   LAST_SEEN_DEPLOYED_SHA="$old"
   DEPLOYED_DIGEST="$SETTLED_DIGEST"
@@ -967,7 +1052,7 @@ rolled_back() {
   write_state
   notify "🔥 merge-deploy ROLLED BACK ${x:0:7} → ${SETTLED_SHA:0:7} (code only, DB untouched): ${reason}.
 Whatever ${x:0:7} migrated or wrote is still in the database.
-Pre-deploy snapshot kept: ${pre} (remove it by hand once reconciled: rm ${pre} ${pre}.sha256)"
+Pre-deploy snapshot: ${pre}"
   exit 2
 }
 
@@ -978,11 +1063,14 @@ rollback_loop() {
   local rc
   while :; do
     rc=0
-    settled_is_running || rc=$?
-    if [ "$rc" = 3 ]; then open_incident "the unit is no longer our Quadlet (unit=foreign) during the rollback"; fi
+    settled_fact || rc=$?
+    if [ "$rc" = 3 ]; then open_incident 0 "the unit is no longer our Quadlet (unit=foreign) during the rollback"; fi
     if [ "$rc" = 0 ]; then rolled_back; fi
+    if [ "$rc" = 2 ]; then
+      open_incident 1 "could not read whether ${SETTLED_SHA:0:7} runs for ${STARTUP_S}s during the rollback (${WINDOW_REASON})"
+    fi
     if [ "${ROLLBACK_ATTEMPTS:-0}" -ge "$ROLLBACK_ATTEMPTS_MAX" ]; then
-      open_incident "the rollback to ${SETTLED_SHA:0:7} did not bring it up after ${ROLLBACK_ATTEMPTS} attempts (${WINDOW_REASON})"
+      open_incident 1 "the rollback to ${SETTLED_SHA:0:7} did not bring it up after ${ROLLBACK_ATTEMPTS} attempts (${WINDOW_REASON})"
     fi
     ROLLBACK_ATTEMPTS=$(( ${ROLLBACK_ATTEMPTS:-0} + 1 ))
     write_state
@@ -999,7 +1087,7 @@ rollback_loop() {
 # Plan п.13: the window failed. auto → code-only rollback; manual → incident. Never returns.
 window_failed() {
   local reason="${1//$'\n'/ }"
-  if [ "$WINDOW_MODE" = manual ]; then open_incident "the manual window failed: ${reason}"; fi
+  if [ "$WINDOW_MODE" = manual ]; then open_incident 1 "the manual window failed: ${reason}"; fi
   # The FIRST write: whatever happens below, X is not retried.
   LAST_FAILED_SHA="$WINDOW_SHA"
   WINDOW_PHASE=rolling-back
@@ -1013,12 +1101,22 @@ window_failed() {
 }
 
 # The window's start or a fresh one: lost evidence is neither a pass nor a failure (plan п.11).
+# A watched window stands on an NRestarts base (F7): it is read before `watching` is written,
+# and a base that cannot be read for OBSERVE_MAX_S is a window that cannot be observed.
 start_watching() {
+  local r start
+  start=$(now)
+  until r=$(read_restarts); do
+    if [ $(( $(now) - start )) -ge "$OBSERVE_MAX_S" ]; then
+      window_failed "could not observe production: NRestarts unreadable for $(( $(now) - start ))s at the start of the window"
+    fi
+    "$SLEEP_CMD" "$POLL_S"
+  done
   WINDOW_PHASE=watching
   WINDOW_START=$(now)
   WINDOW_LAST_READ="$WINDOW_START"
   WINDOW_FAILS=0
-  WINDOW_NRESTARTS=$(read_restarts || true)
+  WINDOW_NRESTARTS="$r"
   write_state
 }
 new_window() {
@@ -1070,7 +1168,7 @@ watch_window() {
     full=0
     if [ -n "$r" ] && [ "$urc" != 2 ] && [ "$cur" = 1 ]; then full=1; WINDOW_LAST_READ="$t_now"; fi
     if [ "$cur" = 1 ] && [ "$u" = foreign ]; then
-      open_incident "the unit is no longer our Quadlet (unit=foreign) at +${t}s of the window of ${WINDOW_SHA:0:7}"
+      open_incident 0 "the unit is no longer our Quadlet (unit=foreign) at +${t}s of the window of ${WINDOW_SHA:0:7}"
     fi
     if [ "$cur" = 1 ] && { [ "$q" != "$WINDOW_DIGEST" ] || { [ "$d" != none ] && { [ "$d" != "$WINDOW_DIGEST" ] || [ "$i" != "$WINDOW_ID" ]; }; }; }; then
       window_failed "production runs another image (quadlet=${q} container-image=${i} container-digest=${d}) at +${t}s"
@@ -1125,9 +1223,21 @@ cancel_window() {
   exit 0
 }
 
-# Plan п.9, the activate rows.
+# Plan п.9, the activate rows. Each `activate D` is counted in the state BEFORE it runs: a window
+# whose activation never completes (75 after 75, or REFUSED with the Quadlet file naming D) stops
+# at ACTIVATE_ATTEMPTS_MAX and is a human's — what runs is unknown, not X's fault.
 activate_candidate() {
   local kind q i d u why
+  if [ "${ACTIVATE_ATTEMPTS:-0}" -ge "$ACTIVATE_ATTEMPTS_MAX" ]; then
+    image_call current
+    read -r kind q i d u <<< "$IMG_VERDICT"
+    if [ "$kind" = CURRENT ]; then
+      open_incident 0 "the activation of ${X:0:7} did not complete after ${ACTIVATE_ATTEMPTS} attempts; production: quadlet=${q} container-digest=${d} unit=${u}"
+    fi
+    open_incident 0 "the activation of ${X:0:7} did not complete after ${ACTIVATE_ATTEMPTS} attempts; what production runs could not be read (${IMG_VERDICT})"
+  fi
+  ACTIVATE_ATTEMPTS=$(( ${ACTIVATE_ATTEMPTS:-0} + 1 ))
+  write_state
   image_call activate --digest "$D"
   case "$IMG_VERDICT" in
     "ACTIVATED $D")
@@ -1143,18 +1253,30 @@ activate_candidate() {
       window_failed "the activation failed: ${IMG_VERDICT#ACTIVATE_FAILED }"
       ;;
     REFUSED\ *)
+      # Cancelled only when production is provably S, as before the window.
       why="${IMG_VERDICT#REFUSED }"
       image_call current
       read -r kind q i d u <<< "$IMG_VERDICT"
-      if [ "$kind" = CURRENT ] && [ "$u" = foreign ]; then
-        open_incident "the unit is not our Quadlet (unit=foreign); the activation was refused"
+      if [ "$kind" != CURRENT ]; then
+        once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}) and what production runs could not be read: ${IMG_VERDICT}. The window stays open; the next tick looks again."
+        exit 0
       fi
-      cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
+      if [ "$u" = foreign ]; then
+        open_incident 0 "the unit is not our Quadlet (unit=foreign); the activation was refused"
+      fi
+      if [ "$q" = "$WINDOW_PREV_DIGEST" ] && [ "$d" = "$WINDOW_PREV_DIGEST" ]; then
+        cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
+      fi
+      if [ "$q" = "$WINDOW_DIGEST" ]; then
+        once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}), but the Quadlet file already names it; the window stays activating and the next tick activates again."
+        exit 0
+      fi
+      open_incident 0 "the activation of ${X:0:7} was refused and the Quadlet file names ${q}, neither ${X:0:7} nor the settled image"
       ;;
     *)
       # 75 or anything else: whether production changed is not known. The window stays
       # `activating`; the next tick looks at what runs (spec §7.2 rows 1–3).
-      notify "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
+      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
       exit 0
       ;;
   esac
@@ -1210,7 +1332,14 @@ $(tail -n +2 <<< "$IMG_VERDICT")" ;;
   # The trial runs on a pre snapshot of production, by NAME (the helper takes no paths).
   name="$(date -u -d "@$(now)" +%Y%m%dT%H%M%SZ)-${X:0:7}-pre.db"
   pre="${SNAPSHOT_DIR}/${name}"
+  # Named in the state BEFORE it exists: a tick that dies before the window is written leaves a
+  # pre no settled window owns, and the next tick discards it.
+  PENDING_PRE="$pre"
+  write_state
   if ! err=$("$SNAPSHOT_CMD" "$pre" 2>&1); then
+    "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
+    PENDING_PRE=""
+    write_state
     once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${X:0:7}.
 ${err}"
     exit 0
@@ -1220,6 +1349,8 @@ ${err}"
   if [ "$IMG_VERDICT" != "OK $SETTLED_DIGEST" ]; then
     # No deploy happened: this pre must not count among the settled ones.
     "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
+    PENDING_PRE=""
+    write_state
   fi
   case "$kind:$IMG_VERDICT" in
     "OK:OK $SETTLED_DIGEST") ;;
@@ -1263,6 +1394,7 @@ It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded agai
   WINDOW_PHASE=activating
   WINDOW_PRE="$pre"
   WINDOW_BOOT="$boot"
+  PENDING_PRE=""
   write_state
   activate_candidate
 }
@@ -1318,7 +1450,7 @@ resume_window() {
   fi
   # Row 10: whatever the phase, a unit that is not our Quadlet is a human's.
   if [ "$u" = foreign ]; then
-    open_incident "the unit is not our Quadlet (unit=foreign) in the ${WINDOW_PHASE} window"
+    open_incident 0 "the unit is not our Quadlet (unit=foreign) in the ${WINDOW_PHASE} window"
   fi
   case "$WINDOW_PHASE" in
     activating)
@@ -1327,7 +1459,7 @@ resume_window() {
         cancel_window "⚠️ merge-deploy: the deploy of ${X:0:7} was interrupted before its activation; production still runs the settled ${SETTLED_SHA:0:7}, so the window is cancelled and ${X:0:7} is tried again next tick."
       fi
       if [ "$q" != "$WINDOW_DIGEST" ]; then
-        open_incident "the Quadlet file names ${q}, neither ${X:0:7} nor the settled image, in an activating window"
+        open_incident 0 "the Quadlet file names ${q}, neither ${X:0:7} nor the settled image, in an activating window"
       fi
       # Row 3: D already runs — no second restart; the window starts now.
       if [ "$d" = "$WINDOW_DIGEST" ] && [ "$i" = "$WINDOW_ID" ]; then
@@ -1354,6 +1486,12 @@ resume_window() {
         new_window "a reboot: the boot id changed"
         watch_window 0
       fi
+      # F2: a gap with no fully read poll as long as OBSERVE_MAX_S is lost evidence — nobody
+      # watched — neither a pass nor a failure: a full window from now.
+      if [ $(( $(now) - WINDOW_LAST_READ )) -ge "$OBSERVE_MAX_S" ]; then
+        new_window "nobody watched for $(( $(now) - WINDOW_LAST_READ ))s"
+        watch_window 0
+      fi
       # Row 4: the same boot — the window goes on from its recorded start; past the start-up
       # time a failed health counts at once.
       started=0
@@ -1364,6 +1502,9 @@ resume_window() {
       # Row 7: LAST_FAILED_SHA is already recorded; the pre is marked if the dead tick had not.
       retain_pre
       write_state
+      # An `activate S` may have been under way when the tick died: S gets its start-up time
+      # before another attempt is spent (F4).
+      if [ "${ROLLBACK_ATTEMPTS:-0}" -ge 1 ] && wait_for_settled; then rolled_back; fi
       rollback_loop
       ;;
   esac
@@ -1381,13 +1522,19 @@ Nothing deploys until a human resolves it: bash deploy/deploy.sh --resolve-incid
   exit 0
 fi
 resume_window
+# F10: a pre snapshot whose window was never written was never trialled into a deploy.
+if [ -n "$PENDING_PRE" ]; then
+  "$DISCARD_CMD" "$PENDING_PRE" >/dev/null 2>&1 || echo "WARNING: could not discard $PENDING_PRE"
+  PENDING_PRE=""
+  write_state
+fi
 if [ ! -d "$REPO/.git" ]; then
-  git clone -q "$REPO_URL" "$REPO" || {
+  timeout "$STEP_TIMEOUT_GIT_S" git clone -q "$REPO_URL" "$REPO" || {
     once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git clone of $REPO_URL failed."
     exit 1
   }
 fi
-if ! git -C "$REPO" fetch -q --prune origin; then
+if ! timeout "$STEP_TIMEOUT_GIT_S" git -C "$REPO" fetch -q --prune origin; then
   once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git fetch failed."
   exit 1
 fi

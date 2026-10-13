@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, CHECKS_OK, DAY1, GOLDEN_DIR, SCRIPT,
@@ -656,6 +656,14 @@ describe('(і) the state: parsed, validated, written atomically', () => {
 
   const good = (w: ImageWorld) => Object.entries(settledState(w.settled)).map(([k, v]) => `${k}=${v}\n`).join('');
   const window = (w: ImageWorld) => `WINDOW_SHA=${w.base}\nWINDOW_MODE=auto\nWINDOW_PHASE=activating\n`;
+  /** A whole window of the given phase, every key it stands on. */
+  const fullWindow = (w: ImageWorld, phase: string, extra: string[] = []) => [
+    `WINDOW_SHA=${w.base}`, `WINDOW_DIGEST=${w.settled.digest}`, `WINDOW_ID=${w.settled.id}`, `WINDOW_CONTENT=${w.settled.content}`,
+    `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
+    'WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_START=100000', `WINDOW_BOOT=${BOOT_ID}`,
+    'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
+  ].join('\n');
+  const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
   const CORRUPT: Array<[string, (w: ImageWorld) => string, string]> = [
     ['an unknown key', (w) => `${good(w)}DEPLOYED_TAG=v1\n`, 'line 9: unknown key DEPLOYED_TAG'],
     ['a duplicated key', (w) => `${good(w)}DEPLOYED_SHA=${w.base}\n`, 'line 9: duplicate key DEPLOYED_SHA'],
@@ -672,6 +680,16 @@ describe('(і) the state: parsed, validated, written atomically', () => {
       'WINDOW_PHASE has a value that is not of its format'],
     ['an integer with a leading zero', (w) => `${good(w)}MAIN_SEEN_SHA=${w.base}\nMAIN_SEEN_S=0100000\n`,
       'MAIN_SEEN_S has a value that is not of its format'],
+    // F7: what each phase stands on.
+    ['an activating window without WINDOW_PRE', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PRE=.*\n/m, ''),
+      'WINDOW_PHASE is set but WINDOW_PRE is not'],
+    ['a watching window without WINDOW_LAST_READ', (w) => `${good(w)}${fullWindow(w, 'watching')}`.replace(/^WINDOW_LAST_READ=.*\n/m, ''),
+      'WINDOW_PHASE is set but WINDOW_LAST_READ is not'],
+    ['a rolling-back window without ROLLBACK_ATTEMPTS', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ['WINDOW_REASON=a reason'])}`,
+      'WINDOW_PHASE is set but ROLLBACK_ATTEMPTS is not'],
+    ['a manual window rolling back', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ROLLING)}`.replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
+      'WINDOW_PHASE is rolling-back but WINDOW_MODE is manual (a manual window never rolls back)'],
+    ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
   ];
 
   it.each(CORRUPT)('STATE CORRUPT on %s: nothing runs, the file is untouched, 🔥 once a day, exit 3', (_name, build, problem) => {
@@ -685,6 +703,23 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     expect([events(w), clonedMain(w), stateText(w)]).toEqual([[], w.base, text]);
     expect(notes(w)).toEqual([
       `🔥 merge-deploy: STATE CORRUPT — ${w.statePath}: ${problem}. Nothing runs until a human repairs the file; it is never taken for a first start.`,
+    ]);
+  });
+
+  it.each([
+    ['a symlink to a valid state', (w: ImageWorld, real: string) => symlinkSync(real, w.statePath)],
+    ['a dangling symlink', (w: ImageWorld, real: string) => { symlinkSync(real, w.statePath); rmSync(real); }],
+  ])('STATE CORRUPT on %s: never a first start (F7)', (_name, link) => {
+    const w = imageWorld();
+    const real = join(w.home, 'elsewhere.env');
+    writeFileSync(real, readFileSync(w.statePath, 'utf8'));
+    rmSync(w.statePath);
+    link(w, real);
+    noopCandidate(w);
+    expect(tick(w).code).toBe(3);
+    expect([events(w), clonedMain(w)]).toEqual([[], w.base]);
+    expect(notes(w)).toEqual([
+      `🔥 merge-deploy: STATE CORRUPT — ${w.statePath}: the path is a symlink. Nothing runs until a human repairs the file; it is never taken for a first start.`,
     ]);
   });
 
@@ -876,20 +911,21 @@ describe('(а) a stalled lock', () => {
     throw new Error('the lock holder never acquired the lock');
   }
 
-  it('says nothing for 5699 s, then reports a held lock once a day', async () => {
+  // LOCK_STALL_S = TICK_BUDGET_S (7200) + 300.
+  it('says nothing for 7499 s, then reports a held lock once a day', async () => {
     const w = imageWorld();
     const before = stateText(w);
     const holder = await holdLock(join(w.stateDir, 'lock'));
     try {
       expect(tick(w).code).toBe(0);
-      advance(w, 5699);
+      advance(w, 7499);
       tick(w);
       expect(notes(w)).toEqual([]);
       advance(w, 1);
       tick(w);
       tick(w);
       expect(notes(w)).toEqual([
-        `⚠️ merge-deploy: the deploy lock has been held for 95 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
+        `⚠️ merge-deploy: the deploy lock has been held for 125 min — no tick can run. A stuck manual deploy.sh? Check: fuser -v ${join(w.stateDir, 'lock')}`,
       ]);
       expect([stateText(w), events(w)]).toEqual([before, []]);
     } finally {
@@ -911,7 +947,7 @@ describe('(а) a stalled lock', () => {
 
   it('treats a busy-since record older than two stall periods as stale', async () => {
     const w = imageWorld();
-    writeFileSync(join(w.stateDir, 'lock-busy-since'), String(100000 - 11400));
+    writeFileSync(join(w.stateDir, 'lock-busy-since'), String(100000 - 15000));
     const holder = await holdLock(join(w.stateDir, 'lock'));
     try {
       tick(w);
@@ -990,6 +1026,9 @@ describe('(ї) verdict parsers on the real helper\'s golden outputs', () => {
       'UNKNOWN exit 0: CURRENT quadlet=none container-image=none container-digest=none unit=user\n'],
     ['NOT LOCAL with exit 0', 'local', 0, `NOT LOCAL ${D}\n`, '', `UNKNOWN exit 0: NOT LOCAL ${D}\n`],
     ['a prune', 'prune', 0, `PRUNED 2 skipped 0 kept ${D}\n`, '', `PRUNED 2 skipped 0 kept ${D}\n`],
+    // F8: `timeout` exits 124 — could not verify, never a verdict.
+    ['a timed-out activate', 'activate', 124, '', '', 'UNKNOWN exit 124: no output\n'],
+    ['a timed-out trial after its first steps', 'trial', 124, 'TRIAL OK: schema 46 -> 47\n', '', 'UNKNOWN exit 124: TRIAL OK: schema 46 -> 47\n'],
   ])('%s', (_name, action, code, stdout, stderr, expected) => {
     expect(parse(action, code, stdout, stderr)).toBe(expected);
   });

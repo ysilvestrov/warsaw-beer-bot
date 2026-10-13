@@ -581,6 +581,22 @@ export function syncs(w: ImageWorld): string[] {
   return lines(w.syncLog);
 }
 
+/** Every state write, in order: the temporary file's content at its fsync, as a map. */
+export function writes(w: ImageWorld): Array<Record<string, string>> {
+  return syncs(w)
+    .filter((l) => l.startsWith(`sync -- ${w.statePath}.tmp | tmp=`))
+    .map((l) => parseState(l.slice(l.indexOf('| tmp=') + '| tmp='.length).split(';').join('\n')));
+}
+
+/** A MARK_CMD that marks with the real db-snapshot.sh, then kills the tick before it can record the new name. */
+export function markThenKill(w: ImageWorld): string {
+  return stub(w.bin, 'mark-then-kill', [
+    `echo "mark $(basename "$1")" >> "${w.eventsLog}"`,
+    `bash "${DB_SNAPSHOT}" mark-rollback "$1"`,
+    '. "$WBB_FAKE_LIB"; kill_tick',
+  ].join('\n'));
+}
+
 /** One entry per notify call, full text. */
 export function notes(w: ImageWorld): string[] {
   return existsSync(w.notesLog)

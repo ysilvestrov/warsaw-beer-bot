@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
   events, fault, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply, runImage,
-  seedState, settledState, short, stub, syncs, tick, type Image, type ImageWorld, type Reply,
+  markThenKill, seedState, settledState, short, stub, tick, writes, type Image, type ImageWorld, type Reply,
 } from './image-autodeploy-harness';
 
 // A resumed window is polled to its end inside one tick (up to 61 polls).
@@ -124,7 +124,8 @@ describe('§7.2 row 2: activating, the Quadlet file names D, D does not run', ()
     reply(w, 'activate', img.digest, 'kill-after-write');
     expect(tick(w).code).toBe(null);
     const r: Rec = { w, x, img, s: w.settled, preName: `19700102T035640Z-${short(x)}-pre.db`, pre: join(w.snapshots, `19700102T035640Z-${short(x)}-pre.db`) };
-    expect([readState(w), hostRead(w, 'quadlet'), hostRead(w, 'container')]).toEqual([activating(r), img.digest, w.settled.digest]);
+    expect([readState(w), hostRead(w, 'quadlet'), hostRead(w, 'container')])
+      .toEqual([{ ...activating(r), ACTIVATE_ATTEMPTS: '1' }, img.digest, w.settled.digest]);
     expect(tick(w).code).toBe(0);
     expect(events(w).filter((e) => e === `image activate --digest ${img.digest}`).length).toBe(2);
     expect(readState(w).SETTLED_SHA).toBe(x);
@@ -154,7 +155,7 @@ describe('§7.2 row 3: activating, D already runs', () => {
     reply(w, 'activate', img.digest, 'kill-after');
     expect(tick(w).code).toBe(null);
     const r: Rec = { w, x, img, s: w.settled, preName: `19700102T035640Z-${short(x)}-pre.db`, pre: join(w.snapshots, `19700102T035640Z-${short(x)}-pre.db`) };
-    expect([readState(w), hostRead(w, 'container')]).toEqual([activating(r), img.digest]);
+    expect([readState(w), hostRead(w, 'container')]).toEqual([{ ...activating(r), ACTIVATE_ATTEMPTS: '1' }, img.digest]);
     expect(tick(w).code).toBe(0);
     expect(events(w).filter((e) => e === `image activate --digest ${img.digest}`).length).toBe(1);
     expect(readState(w)).toEqual(settledX(r));
@@ -284,7 +285,7 @@ describe('§7.2 row 7: interrupted during the rollback', () => {
     expect(tick(w).code).toBe(null);
     const r: Rec = { w, x, img, s: w.settled, preName: `19700102T035640Z-${short(x)}-pre.db`, pre: join(w.snapshots, `19700102T035640Z-${short(x)}-pre.db`) };
     expect(readState(w)).toEqual(rollingBack(r, {
-      WINDOW_PRE: marked(r), RETAINED_PRE: marked(r), ROLLBACK_ATTEMPTS: '1', WINDOW_FAILS: '3', WINDOW_LAST_READ: '100920',
+      WINDOW_PRE: marked(r), RETAINED_PRE: marked(r), ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1', WINDOW_FAILS: '3', WINDOW_LAST_READ: '100920',
       WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)',
     }));
     expect(tick(w).code).toBe(2);
@@ -294,17 +295,18 @@ describe('§7.2 row 7: interrupted during the rollback', () => {
 });
 
 describe('§7.2 row 8: the rollback did not bring S up', () => {
-  it('(н) ROLLBACK_ATTEMPTS=2 already: INCIDENT without a third `activate S`; then nothing runs', () => {
+  it('(н) ROLLBACK_ATTEMPTS=2 already: S gets its start-up time, then INCIDENT without a third `activate S`; then nothing runs', () => {
     const r = recoveryWorld();
     seedState(r.w, rollingBack(r, { ROLLBACK_ATTEMPTS: '2' }));
     runImage(r.w, r.img);
     expect(tick(r.w).code).toBe(3);
-    expect(events(r.w)).toEqual(['image current', `mark ${r.preName}`, 'image current']);
+    // The wait for S (0..120 s, 13 reads), then the fact before the would-be third attempt.
+    expect(events(r.w)).toEqual(['image current', `mark ${r.preName}`, ...polls(13), 'image current']);
     const reason = `the rollback to ${short(r.s.sha)} did not bring it up after 2 attempts (health check failed 3 times in a row (last at +290s))`;
     expect(readState(r.w)).toEqual(incidentState(r, reason));
     expect(notes(r.w)).toEqual([incidentNote(r, reason)]);
     expect(tick(r.w).code).toBe(0);
-    expect(events(r.w).length).toBe(3);
+    expect(events(r.w).length).toBe(16);
   });
 
   it('one attempt left and S cannot start: one `activate S`, then INCIDENT', () => {
@@ -313,7 +315,8 @@ describe('§7.2 row 8: the rollback did not bring S up', () => {
     runImage(r.w, r.img);
     hostSet(r.w, `sick/${r.s.digest}`, '');
     expect(tick(r.w).code).toBe(3);
-    expect(events(r.w)).toEqual(['image current', `mark ${r.preName}`, 'image current', `image activate --digest ${r.s.digest}`, 'image current']);
+    expect(events(r.w)).toEqual(['image current', `mark ${r.preName}`, ...polls(13), 'image current',
+      `image activate --digest ${r.s.digest}`, 'image current']);
     expect(readState(r.w).INCIDENT).toBe(`${r.x} ${r.img.digest} the rollback to ${short(r.s.sha)} did not bring it up after 2 attempts (health check failed 3 times in a row (last at +290s))`);
   });
 
@@ -362,33 +365,127 @@ describe('§7.2 row 8: the rollback did not bring S up', () => {
 });
 
 describe('§7.2 row 9: a manual window after a reboot fails — (і)', () => {
-  it('no rollback: mark-rollback, then LAST_FAILED_SHA, INCIDENT and RETAINED_PRE in one write; exit 3', () => {
+  const reason = 'the manual window failed: not healthy within 120s';
+  function failingManual(): Rec {
     const r = recoveryWorld();
     seedState(r.w, watching(r, { WINDOW_MODE: 'manual' }));
     runImage(r.w, r.img);
     hostSet(r.w, 'boot_id', OTHER_BOOT);
     fault(r.w, 'health', 0, 99999, r.img.digest);
+    return r;
+  }
+
+  it('no rollback: the incident is written first with the window, then the pre is marked and kept; exit 3', () => {
+    const r = failingManual();
     expect(tick(r.w).code).toBe(3);
     expect(events(r.w)).toEqual(['image current', ...polls(13), `mark ${r.preName}`]);
-    const reason = 'the manual window failed: not healthy within 120s';
     expect(readState(r.w)).toEqual(incidentState(r, reason));
-    // The first write that names the failed SHA is the one that also opens the incident and keeps the pre,
-    // with the window still in it.
-    const first = syncs(r.w).find((l) => l.includes('LAST_FAILED_SHA=')) ?? '';
-    expect(['INCIDENT=', 'RETAINED_PRE=', 'WINDOW_MODE=manual', 'WINDOW_PHASE=watching'].map((k) => first.includes(k))).toEqual([true, true, true, true]);
+    // F1: the first write that names X failed opens the incident, with the window still in it (the pre not
+    // yet marked); the next one keeps the marked pre and clears the window.
+    const all = writes(r.w);
+    const first = all.findIndex((st) => st.LAST_FAILED_SHA !== undefined);
+    expect(all.slice(first)).toEqual([
+      { ...watching(r, { WINDOW_MODE: 'manual', WINDOW_START: '100900', WINDOW_LAST_READ: '101020', WINDOW_BOOT: OTHER_BOOT }),
+        LAST_FAILED_SHA: r.x, INCIDENT: `${r.x} ${r.img.digest} ${reason}` },
+      incidentState(r, reason),
+    ]);
     expect(notes(r.w)[1]).toBe(incidentNote(r, reason, ' (a manual window)'));
+  });
+
+  it('F1: killed between the mark and the second write — the incident blocks; the window never settles', () => {
+    const r = failingManual();
+    expect(tick(r.w, { WBB_MARK_CMD: markThenKill(r.w) }).code).toBe(null);
+    expect([readState(r.w).INCIDENT, readState(r.w).WINDOW_PHASE]).toEqual([`${r.x} ${r.img.digest} ${reason}`, 'watching']);
+    // The bot recovers; a resumed window would now settle it.
+    hostSet(r.w, `fault.health.${r.img.digest}`, null);
+    const before = events(r.w).length;
+    expect(tick(r.w).code).toBe(0);
+    expect([events(r.w).length, readState(r.w).SETTLED_SHA]).toEqual([before, r.s.sha]);
   });
 });
 
 describe('§7.2 row 10: the unit is not our Quadlet', () => {
-  it.each(['activating', 'watching', 'rolling-back'])('%s: no activate, no prune, INCIDENT, exit 3', (phase) => {
+  // F3: not X's fault — no LAST_FAILED_SHA is added (a rolling-back window already carries its own).
+  it.each([
+    ['activating', activating, (_r: Rec) => undefined],
+    ['watching', watching, (_r: Rec) => undefined],
+    ['rolling-back', rollingBack, (r: Rec) => r.x],
+  ])('%s: no activate, no prune, INCIDENT, exit 3', (phase, state, failed) => {
     const r = recoveryWorld();
-    const states: Record<string, Record<string, string>> = { activating: activating(r), watching: watching(r), 'rolling-back': rollingBack(r) };
-    seedState(r.w, states[phase]);
+    seedState(r.w, state(r));
     hostSet(r.w, 'unit', 'foreign');
     expect(tick(r.w).code).toBe(3);
     expect(events(r.w)).toEqual(['image current', `mark ${r.preName}`]);
-    expect(readState(r.w).INCIDENT).toBe(`${r.x} ${r.img.digest} the unit is not our Quadlet (unit=foreign) in the ${phase} window`);
+    expect([readState(r.w).INCIDENT, readState(r.w).LAST_FAILED_SHA])
+      .toEqual([`${r.x} ${r.img.digest} the unit is not our Quadlet (unit=foreign) in the ${phase} window`, failed(r)]);
+  });
+
+  it('F3: a Quadlet file naming neither image is an incident without blame', () => {
+    const r = recoveryWorld();
+    seedState(r.w, activating(r));
+    hostSet(r.w, 'quadlet', `sha256:${'7'.repeat(64)}`);
+    expect(tick(r.w).code).toBe(3);
+    expect([readState(r.w).INCIDENT, readState(r.w).LAST_FAILED_SHA]).toEqual([
+      `${r.x} ${r.img.digest} the Quadlet file names sha256:${'7'.repeat(64)}, neither ${short(r.x)} nor the settled image, in an activating window`,
+      undefined,
+    ]);
+  });
+});
+
+describe('F2: a gap nobody watched is lost evidence', () => {
+  it('a watching window found OBSERVE_MAX_S or more after its last read starts afresh: ⚠️, a full window, no failure', () => {
+    const r = recoveryWorld();
+    seedState(r.w, watching(r));
+    runImage(r.w, r.img);
+    writeFileSync(join(r.w.bin, 'clock'), '101300');
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w)).toEqual(['image current', ...polls(61), ...settledEnd(r)]);
+    expect([readState(r.w), clock(r.w)]).toEqual([settledX(r), '101900']);
+    expect(notes(r.w)[0]).toBe(
+      `⚠️ merge-deploy ${short(r.x)}: the window lost its evidence (nobody watched for 410s) — watching a full 600s window again from now.`);
+  });
+
+  it('a gap just under it goes on from the recorded start', () => {
+    const r = recoveryWorld();
+    seedState(r.w, watching(r));
+    runImage(r.w, r.img);
+    writeFileSync(join(r.w.bin, 'clock'), '101189');
+    expect(tick(r.w).code).toBe(0);
+    expect([readState(r.w), clock(r.w), notes(r.w)]).toEqual([settledX(r), '101209', [`✅ merge-deploy ${short(r.x)} is live and settled.`]]);
+  });
+});
+
+describe('F5 and F6: an activation that does not complete', () => {
+  const t75: Reply = { code: 75, stderr: 'TEMPFAIL: systemctl restart timed out after 180s\n' };
+
+  it('each `activate D` is counted before it runs; after three, an incident without blame — what runs is named', () => {
+    const r = recoveryWorld();
+    seedState(r.w, { ...activating(r), ACTIVATE_ATTEMPTS: '1' });
+    hostSet(r.w, 'quadlet', r.img.digest);
+    reply(r.w, 'activate', r.img.digest, t75, t75);
+    expect(tick(r.w).code).toBe(0);
+    expect(tick(r.w).code).toBe(0);
+    expect([readState(r.w).ACTIVATE_ATTEMPTS, readState(r.w).WINDOW_PHASE, notes(r.w).length]).toEqual(['3', 'activating', 1]);
+    expect(tick(r.w).code).toBe(3);
+    expect(events(r.w).filter((e) => e.startsWith('image activate')).length).toBe(2);
+    expect([readState(r.w).INCIDENT, readState(r.w).LAST_FAILED_SHA, readState(r.w).ACTIVATE_ATTEMPTS]).toEqual([
+      `${r.x} ${r.img.digest} the activation of ${short(r.x)} did not complete after 3 attempts; production: quadlet=${r.img.digest} container-digest=${r.s.digest} unit=quadlet`,
+      undefined, undefined,
+    ]);
+  });
+
+  it('REFUSED while the Quadlet file names D: the window stays activating, the pre is kept', () => {
+    const r = recoveryWorld();
+    seedState(r.w, activating(r));
+    hostSet(r.w, 'quadlet', r.img.digest);
+    reply(r.w, 'activate', r.img.digest, { code: 2, stderr: 'REFUSED: daemon-reload left a foreign unit; the previous Quadlet file is restored\n' });
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w)).toEqual(['image current', `image activate --digest ${r.img.digest}`, 'image current']);
+    expect(readState(r.w)).toEqual({ ...activating(r), ACTIVATE_ATTEMPTS: '1', LAST_ASSESS_NOTICE: DAY1 });
+    expect(notes(r.w)).toEqual([
+      `⚠️ merge-deploy: the activation of ${short(r.x)} was refused (daemon-reload left a foreign unit; the previous Quadlet file is restored), `
+      + 'but the Quadlet file already names it; the window stays activating and the next tick activates again.',
+    ]);
   });
 });
 

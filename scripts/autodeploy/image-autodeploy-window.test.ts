@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, SCRIPT,
   advance, events, fault, golden, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply,
-  seedState, settledState, short, stateAtActivate, tick, type Image, type ImageWorld, type Reply,
+  markThenKill, seedState, settledState, short, stateAtActivate, stub, tick, type Image, type ImageWorld, type Reply,
 } from './image-autodeploy-harness';
 
 // A deploy tick polls a whole simulated 10-minute window (61 polls, ~6 processes each).
@@ -45,7 +46,8 @@ const toActivate = ({ x, img, s, pre }: Deploy) => [
 ];
 const polls = (n: number) => Array<string>(n).fill('image current');
 /** After a failed window: pre marked, then the fact checked before the one `activate S`, then S seen up. */
-const rollbackEvents = ({ s, pre }: Deploy) => ['mark ' + pre, 'image current', `image activate --digest ${s.digest}`, 'image current'];
+const rollbackEvents = ({ s, pre }: Deploy, factChecks = 1) =>
+  ['mark ' + pre, ...polls(factChecks), `image activate --digest ${s.digest}`, 'image current'];
 
 const marked = (d: Deploy) => join(d.w.snapshots, d.pre.replace(/-pre\.db$/, '-rollback-pre.db'));
 const clock = (w: ImageWorld) => readFileSync(join(w.bin, 'clock'), 'utf8').trim();
@@ -60,12 +62,12 @@ const failedNote = (d: Deploy, reason: string) =>
 const rolledBackNote = (d: Deploy, reason: string) =>
   `🔥 merge-deploy ROLLED BACK ${short(d.x)} → ${short(d.s.sha)} (code only, DB untouched): ${reason}.\n`
   + `Whatever ${short(d.x)} migrated or wrote is still in the database.\n`
-  + `Pre-deploy snapshot kept: ${marked(d)} (remove it by hand once reconciled: rm ${marked(d)} ${marked(d)}.sha256)`;
+  + `Pre-deploy snapshot: ${marked(d)} (kept until a human removes it: rm ${marked(d)} ${marked(d)}.sha256)`;
 
 /** A failed window rolled back by one `activate S`: the facts every rollback test shares. */
-function expectRolledBack(d: Deploy, code: number | null, reason: string, pollsBefore: number): void {
+function expectRolledBack(d: Deploy, code: number | null, reason: string, pollsBefore: number, factChecks = 1): void {
   expect(code).toBe(2);
-  expect(events(d.w)).toEqual([...toActivate(d), ...polls(pollsBefore), ...rollbackEvents(d)]);
+  expect(events(d.w)).toEqual([...toActivate(d), ...polls(pollsBefore), ...rollbackEvents(d, factChecks)]);
   expect(readState(d.w)).toEqual(settledAt(d.s, d.x, { LAST_FAILED_SHA: d.x, RETAINED_PRE: marked(d) }));
   expect(notes(d.w)).toEqual([failedNote(d, reason), rolledBackNote(d, reason)]);
   expect(hostRead(d.w, 'quadlet')).toBe(d.s.digest);
@@ -96,7 +98,7 @@ describe('(б) the window is in the state before production changes', () => {
   const windowState = (d: Deploy) => settledAt(d.s, d.x, {
     WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content,
     WINDOW_OLD: d.w.base, WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating',
-    WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID,
+    WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1',
   });
 
   it('a tick killed before `activate D` leaves exactly the window, PHASE=activating, and S in the Quadlet', () => {
@@ -154,10 +156,6 @@ describe('(в) the helper\'s verdicts, row by row (plan п.9)', () => {
     ['trial exit 70 is "could not verify"', 'trial', () => [{ code: 70, stderr: 'Traceback (most recent call last):\n' }], (d) => ({
       code: 0, discards: [`discard ${d.pre}`], activateD: 0, activateS: 0,
       note: `⚠️ merge-deploy: the trial of ${short(d.x)} could not judge it: UNKNOWN exit 70: Traceback (most recent call last): — NOT a finding; retrying next tick.` })],
-    ['activate ACTIVATE FAILED (golden) fails the window; S still runs, so it is not restarted', 'activate', () => [golden('activate-failed')], (d) => ({
-      code: 2, failed: d.x, discards: [], activateD: 1, activateS: 0,
-      note: failedNote(d, 'the activation failed: ACTIVATE FAILED: restart exited 1: Job for warsaw-beer-bot.service failed because the control process exited with error code. '
-        + 'See "systemctl status warsaw-beer-bot.service" and "journalctl -xeu warsaw-beer-bot.service" for details.') })],
     ['activate TEMPFAIL leaves the window activating', 'activate', () => [t75], (d) => ({
       code: 0, discards: [], activateD: 1, activateS: 0,
       note: `⚠️ merge-deploy: the activation of ${short(d.x)} (${GD}) could not be confirmed: TEMPFAIL systemctl restart timed out after 180s. `
@@ -183,6 +181,23 @@ describe('(в) the helper\'s verdicts, row by row (plan п.9)', () => {
     }).toEqual(outcome(d));
   });
 
+  // The real host after a failed restart: the Quadlet file names D and no container runs (the fake's
+  // `activate` of a sick digest), so S is activated again.
+  it('activate ACTIVATE FAILED fails the window and activates S again', () => {
+    const d = deployWorld({ goldenDigest: true });
+    hostSet(d.w, `sick/${GD}`, '');
+    const r = tick(d.w);
+    expect({
+      code: r.code,
+      failed: readState(d.w).LAST_FAILED_SHA,
+      activations: events(d.w).filter((e) => e.startsWith('image activate')),
+      note: notes(d.w)[0],
+    }).toEqual({
+      code: 2, failed: d.x, activations: [`image activate --digest ${GD}`, `image activate --digest ${d.s.digest}`],
+      note: failedNote(d, 'the activation failed: ACTIVATE FAILED: restart exited 1: Job for warsaw-beer-bot.service failed because the control process exited with error code.'),
+    });
+  });
+
   it('activate TEMPFAIL keeps PHASE=activating and production unrecorded', () => {
     const d = deployWorld({ goldenDigest: true });
     reply(d.w, 'activate', GD, t75);
@@ -198,7 +213,7 @@ describe('(в) the helper\'s verdicts, row by row (plan п.9)', () => {
     const pre = join(d.w.snapshots, d.pre.replace(/-pre\.db$/, '-rollback-pre.db'));
     expect(r.code).toBe(3);
     expect(readState(d.w)).toEqual(settledAt(d.s, d.x, {
-      LAST_FAILED_SHA: d.x, RETAINED_PRE: pre, INCIDENT: `${d.x} ${GD} the unit is not our Quadlet (unit=foreign); the activation was refused`,
+      RETAINED_PRE: pre, INCIDENT: `${d.x} ${GD} the unit is not our Quadlet (unit=foreign); the activation was refused`,
     }));
     expect(notes(d.w)).toEqual([
       `🔥 merge-deploy INCIDENT: ${short(d.x)} (${GD}) — the unit is not our Quadlet (unit=foreign); the activation was refused. `
@@ -325,9 +340,10 @@ describe('(є) the code-only rollback', () => {
       WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content, WINDOW_OLD: d.w.base,
       WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'rolling-back', WINDOW_PRE: marked(d), WINDOW_START: '100600',
       WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '100920',
-      WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1',
+      WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1',
     });
-    expect(events(d.w).filter((e) => /^(restore|post|service)/.test(e))).toEqual([]);
+    // Nothing touches the database: no restore, no post snapshot, no service stop — the helper and the pre's mark only.
+    expect(events(d.w)).toEqual([...toActivate(d), ...polls(33), ...rollbackEvents(d)]);
     const before = events(d.w).length;
     advance(d.w, 600);
     expect(tick(d.w).code).toBe(0);
@@ -411,7 +427,7 @@ describe('(л) a window that cannot be observed fails', () => {
     const d = deployWorld();
     fault(d.w, 'current', 300, 600, d.img.digest);
     expectRolledBack(d, tick(d.w).code,
-      'could not observe production for 300s (current, NRestarts or the unit state unreadable)', 60);
+      'could not observe production for 300s (current, NRestarts or the unit state unreadable)', 60, 2);
   });
 
   it('290 s without one does not', () => {
@@ -502,15 +518,114 @@ describe('(о) a noop commit released by hand, then a real release that fails', 
 });
 
 describe('(п) the tick\'s budget', () => {
-  it('the nested step timeouts of the worst path add up to less than TICK_BUDGET_S (90 min)', () => {
-    const src = readFileSync(SCRIPT, 'utf8');
-    const steps = [...src.matchAll(/^STEP_TIMEOUT_([A-Z_]+)_S=(\d+)/gm)].map((m) => [m[1], Number(m[2])] as const);
-    const budget = Number(/^TICK_BUDGET_S=(\d+)$/m.exec(src)?.[1]);
-    expect(steps.map(([name]) => name)).toEqual([
-      'RESOLVE', 'ATTEST', 'PULL', 'CURRENT', 'AUDIT', 'SETTLED_LOCAL', 'SNAPSHOT', 'TRIAL', 'ACTIVATE', 'STARTUP', 'WINDOW',
-      'ROLLBACK', 'FINISH',
+  const src = readFileSync(SCRIPT, 'utf8');
+  const block = src.slice(src.indexOf('# --- timeouts and the tick\'s budget (plan'), src.indexOf('# --- timeouts and the tick\'s budget ---'));
+  const lockStall = /^LOCK_STALL_S=.*$/m.exec(src)?.[0] ?? '';
+  const value = (name: string) =>
+    Number(execFileSync('bash', ['-c', `${block}\n${lockStall}\necho "$${name}"`], { encoding: 'utf8' }).trim());
+  const steps = [...block.matchAll(/^(STEP_TIMEOUT_[A-Z_]+_S)=\d+/gm)].map((m) => m[1]);
+
+  it('every STEP_TIMEOUT bounds a call: each is used outside the budget block', () => {
+    const code = src.slice(0, src.indexOf('# --- timeouts and the tick\'s budget (plan'))
+      + src.slice(src.indexOf('# --- timeouts and the tick\'s budget ---'));
+    expect(steps.filter((n) => !code.includes(`$${n}`))).toEqual([]);
+    expect(steps.length).toBe(18);
+  });
+
+  it('the worst tick, built from those bounds and the loops, fits TICK_BUDGET_S', () => {
+    expect([value('WINDOW_WORST_S'), value('ROLLBACK_WORST_S'), value('WORST_PATH_S'), value('TICK_BUDGET_S')])
+      .toEqual([1120, 1690, 6930, 7200]);
+    expect(value('WORST_PATH_S') < value('TICK_BUDGET_S')).toBe(true);
+    expect(value('LOCK_STALL_S')).toBe(7500);
+  });
+
+  it('the helper runs under `timeout` with its action\'s bound (the real default seam, a fake sudo)', () => {
+    const w = imageWorld();
+    const x = push(w, { 'docs/x.md': 'a\n' }, 'docs');
+    const img = publish(w, imageOf(x, w.settled.content));
+    const log = join(w.bin, 'sudo.log');
+    stub(w.pathBin, 'sudo', [
+      `echo "$(tr '\\0' ' ' < /proc/$PPID/cmdline)" >> "${log}"`,
+      '[ "$1" = -n ] && shift',
+      'exec "$@"',
+    ].join('\n'));
+    const over = { WBB_IMAGE_CMD: '', WBB_IMAGE_BIN: join(w.bin, 'wbb-image') };
+    ready(w, over);
+    expect(tick(w, over).code).toBe(0);
+    const helper = join(w.bin, 'wbb-image');
+    expect(readFileSync(log, 'utf8').split('\n').filter((l) => l !== '').map((l) => l.trim())).toEqual([
+      `timeout 660 sudo -n ${helper} pull --sha ${x} --digest ${img.digest}`,
+      `timeout 90 sudo -n ${helper} current`,
+      `timeout 300 sudo -n ${helper} prune --keep ${w.settled.digest}`,
     ]);
-    const sum = steps.reduce((total, [, s]) => total + s, 0);
-    expect([sum, budget, sum < budget]).toEqual([5265, 5400, true]);
+  });
+});
+
+describe('F4: an unreadable fact is waited for, not counted as an attempt', () => {
+  it('`current` unreadable for 80 s at the rollback: no attempt spent, `activate S` once it reads', () => {
+    const d = deployWorld();
+    fault(d.w, 'health', 300, 99999, d.img.digest);
+    fault(d.w, 'current', 320, 400, d.img.digest);
+    expect(tick(d.w).code).toBe(2);
+    expect(events(d.w).slice(-12)).toEqual(rollbackEvents(d, 9));
+    expect(stateAtActivate(d.w, 2).ROLLBACK_ATTEMPTS).toBe('1');
+  });
+
+  it('unreadable for STARTUP_S: an incident, no `activate S`', () => {
+    const d = deployWorld();
+    fault(d.w, 'health', 300, 99999, d.img.digest);
+    fault(d.w, 'current', 320, 99999, d.img.digest);
+    expect(tick(d.w).code).toBe(3);
+    expect(events(d.w).filter((e) => e.startsWith('image activate'))).toEqual([`image activate --digest ${d.img.digest}`]);
+    expect([readState(d.w).LAST_FAILED_SHA, readState(d.w).INCIDENT]).toEqual([d.x,
+      `${d.x} ${d.img.digest} could not read whether ${short(d.s.sha)} runs for 120s during the rollback (health check failed 3 times in a row (last at +320s))`]);
+  });
+});
+
+describe('F7: a watched window stands on an NRestarts base', () => {
+  it('NRestarts unreadable for 300 s from the start: the window fails as unobservable', () => {
+    const d = deployWorld();
+    fault(d.w, 'restarts', 0, 99999, d.img.digest);
+    const reason = 'could not observe production: NRestarts unreadable for 300s at the start of the window';
+    expect(tick(d.w).code).toBe(2);
+    expect(events(d.w)).toEqual([...toActivate(d), ...rollbackEvents(d)]);
+    expect(notes(d.w)).toEqual([failedNote(d, reason), rolledBackNote(d, reason)]);
+  });
+});
+
+describe('F9: the retained pre is the name the rename produced', () => {
+  it('a tick killed between the rename and its write: the next one finds the renamed file and keeps it', () => {
+    const d = deployWorld();
+    fault(d.w, 'health', 300, 99999, d.img.digest);
+    expect(tick(d.w, { WBB_MARK_CMD: markThenKill(d.w) }).code).toBe(null);
+    expect([readState(d.w).WINDOW_PRE, readState(d.w).RETAINED_PRE]).toEqual([join(d.w.snapshots, d.pre), undefined]);
+    const before = events(d.w).length;
+    expect(tick(d.w).code).toBe(2);
+    expect(events(d.w).slice(before)).toEqual(['image current', 'image current', `image activate --digest ${d.s.digest}`, 'image current']);
+    expect(readState(d.w).RETAINED_PRE).toBe(marked(d));
+  });
+
+  it('a mark that answers another name is not believed: nothing is retained, the note says so', () => {
+    const d = deployWorld();
+    fault(d.w, 'health', 300, 99999, d.img.digest);
+    const liar = stub(d.w.bin, 'mark-liar', `echo "mark $(basename "$1")" >> "${d.w.eventsLog}"; echo /elsewhere/x-rollback-pre.db`);
+    expect(tick(d.w, { WBB_MARK_CMD: liar }).code).toBe(2);
+    expect(readState(d.w).RETAINED_PRE).toBe(undefined);
+    expect(notes(d.w)[1].split('\n')[2]).toBe(
+      `Pre-deploy snapshot: NOT marked (mark-rollback did not answer ${marked(d)}) — prune may delete ${join(d.w.snapshots, d.pre)}`);
+  });
+});
+
+describe('F10: a pre snapshot no window owns is discarded by the next tick', () => {
+  it('a tick killed during the trial leaves PENDING_PRE; the next discards it, clears it, and deploys afresh', () => {
+    const d = deployWorld();
+    reply(d.w, 'trial', d.img.digest, 'kill-before');
+    expect(tick(d.w).code).toBe(null);
+    expect([readState(d.w).PENDING_PRE, readState(d.w).WINDOW_PHASE]).toEqual([join(d.w.snapshots, d.pre), undefined]);
+    const before = events(d.w).length;
+    expect(tick(d.w).code).toBe(0);
+    expect(events(d.w)[before]).toBe(`discard ${d.pre}`);
+    expect([readState(d.w).PENDING_PRE, readState(d.w).SETTLED_SHA]).toEqual([undefined, d.x]);
+    expect(readdirSync(d.w.snapshots).filter((f) => f.endsWith('.db'))).toEqual([d.pre]);
   });
 });
