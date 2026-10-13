@@ -217,7 +217,7 @@ export const uk: Messages = {
   'fest.stand_floor_only': '{floor} пов.',
   'fest.status_on_tap': '🟢 чекін {mins} хв тому ({count})',
   'fest.status_not_seen': '⚪ не бачили за годину',
-  'fest.status_unknown': '❔ невідомо — ми не бачили всю годину',
+  'fest.section_unknown': '❔ без статусу: {count} — ми не бачили всю годину',
   'fest.section_gone': 'Ця секція вже не в рейтингу — надішліть /fest ще раз.',
   'fest.history_header': '<b>Повнота історії</b> (чекінів у боті / у профілі Untappd):',
   'fest.history_line': '{initials}: {inBot} / {total}',

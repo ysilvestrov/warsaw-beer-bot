@@ -217,7 +217,7 @@ export const pl: Messages = {
   'fest.stand_floor_only': '{floor} piętro',
   'fest.status_on_tap': '🟢 check-in {mins} min temu ({count})',
   'fest.status_not_seen': '⚪ nie widziano w ciągu godziny',
-  'fest.status_unknown': '❔ nie wiadomo — nie widzieliśmy całej godziny',
+  'fest.section_unknown': '❔ bez statusu: {count} — nie widzieliśmy całej godziny',
   'fest.section_gone': 'Tej sekcji nie ma już w rankingu — wyślij /fest ponownie.',
   'fest.history_header': '<b>Kompletność historii</b> (check-inów w bocie / w profilu Untappd):',
   'fest.history_line': '{initials}: {inBot} / {total}',

@@ -210,7 +210,7 @@ export interface Messages {
   'fest.stand_floor_only': string;
   'fest.status_on_tap': string;
   'fest.status_not_seen': string;
-  'fest.status_unknown': string;
+  'fest.section_unknown': string;
   'fest.section_gone': string;
   'fest.lines_more': string;
   'fest.take_usage': string;

@@ -48,8 +48,9 @@ export function standLabel(t: Translator, stand: FestStand | undefined): string 
   return stand.stand ?? t('fest.stand_floor_only', { floor: stand.floor! });
 }
 
-export function statusLabel(t: Translator, s: TapStatus | undefined, now: Date): string {
-  if (!s || s.kind === 'unknown') return t('fest.status_unknown');
+/** The line under a beer, or null when the status says nothing (unknown): the section head counts those. */
+export function statusLabel(t: Translator, s: TapStatus | undefined, now: Date): string | null {
+  if (!s || s.kind === 'unknown') return null;
   if (s.kind === 'not_seen') return t('fest.status_not_seen');
   const mins = Math.max(0, Math.round((now.getTime() - Date.parse(s.lastAt)) / 60000));
   return t('fest.status_on_tap', { mins, count: s.count });
@@ -77,12 +78,19 @@ export function formatSection(t: Translator, view: FestView, key: string, now: D
   const rank = view.ranking.find((r) => sectionKey(r.section) === key);
   if (!rank) return null;
   const stand = standLabel(t, view.stands.get(rank.section));
-  const head = [`<b>${escapeHtml(rank.section)}</b>${stand ? ` · ${escapeHtml(stand)}` : ''}`, ''];
+  // One "no status" line for the section instead of the same line under every beer (rank.unknown is
+  // the ❔ count the ranking shows, so the two screens agree).
+  const head = [
+    `<b>${escapeHtml(rank.section)}</b>${stand ? ` · ${escapeHtml(stand)}` : ''}`,
+    ...(rank.unknown > 0 ? [t('fest.section_unknown', { count: rank.unknown })] : []),
+    '',
+  ];
   const items = rank.targets.map((target) => {
     const beer = view.beerNames.get(target.beerId);
     const name = beer ? beer.name : `#${target.beerId}`;
     const rating = target.rating !== null ? ` · ⭐ ${target.rating.toFixed(2)}` : '';
-    return `${escapeHtml(name)}${rating}\n   ${statusLabel(t, view.statusByBeer.get(target.beerId), now)}`;
+    const status = statusLabel(t, view.statusByBeer.get(target.beerId), now);
+    return `${escapeHtml(name)}${rating}${status === null ? '' : `\n   ${status}`}`;
   });
   return fitMessage(t, head, items);
 }

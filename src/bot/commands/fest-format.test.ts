@@ -66,15 +66,42 @@ describe('formatSection', () => {
     ].join('\n'));
   });
 
+  it('puts one no-status line under the head and none under an unknown beer, nor under one with no status at all', () => {
+    const target = (beerId: number, rating: number | null) => ({ beerId, section: 'PINTA', reasons: ['rating' as const], rating, style: null });
+    const v = view({
+      ranking: [{ section: 'PINTA', onTap: 1, unknown: 2, total: 4, targets: [target(1, 4.1), target(3, null), target(2, 3.85), target(9, 3.9)] }],
+      beerNames: new Map([[1, { name: 'Motueka', brewery: 'PINTA' }], [2, { name: 'Nelson', brewery: 'PINTA' }], [3, { name: 'Beskidy', brewery: 'PINTA' }], [9, { name: 'Rakau', brewery: 'PINTA' }]]),
+    });
+    expect(formatSection(t, v, sectionKey('PINTA'), NOW)).toBe([
+      '<b>PINTA</b> · 2 пов., B14',
+      '❔ без статусу: 2 — ми не бачили всю годину',
+      '',
+      'Motueka · ⭐ 4.10',
+      '   🟢 чекін 12 хв тому (4)',
+      'Beskidy',
+      'Nelson · ⭐ 3.85',
+      '   ⚪ не бачили за годину',
+      'Rakau · ⭐ 3.90',
+    ].join('\n'));
+  });
+
+  it('a section where nothing is known is the beer names under one no-status line', () => {
+    expect(formatSection(t, view(), sectionKey('Verdant <&>'), NOW)).toBe([
+      '<b>Verdant &lt;&amp;&gt;</b>',
+      '❔ без статусу: 1 — ми не бачили всю годину',
+      '',
+      'Beskidy',
+    ].join('\n'));
+  });
+
   it('is null for a key no ranked section has', () => {
     expect(formatSection(t, view(), 'deadbeef00', NOW)).toBeNull();
   });
 });
 
 describe('labels', () => {
-  it('unknown and missing statuses read the same', () => {
-    expect([statusLabel(t, undefined, NOW), statusLabel(t, { kind: 'unknown' }, NOW)])
-      .toEqual(['❔ невідомо — ми не бачили всю годину', '❔ невідомо — ми не бачили всю годину']);
+  it('unknown and missing statuses have no line of their own', () => {
+    expect([statusLabel(t, undefined, NOW), statusLabel(t, { kind: 'unknown' }, NOW)]).toEqual([null, null]);
   });
 
   it('a stand without floor or number is empty; a floor alone is shown', () => {

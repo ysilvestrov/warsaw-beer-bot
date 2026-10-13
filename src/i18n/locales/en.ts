@@ -217,7 +217,7 @@ export const en: Messages = {
   'fest.stand_floor_only': 'floor {floor}',
   'fest.status_on_tap': '🟢 checked in {mins} min ago ({count})',
   'fest.status_not_seen': '⚪ not seen in the last hour',
-  'fest.status_unknown': '❔ unknown — we did not see the whole hour',
+  'fest.section_unknown': '❔ no status: {count} — we did not see the whole hour',
   'fest.section_gone': 'That section is no longer ranked — send /fest again.',
   'fest.history_header': '<b>History completeness</b> (check-ins in the bot / on the Untappd profile):',
   'fest.history_line': '{initials}: {inBot} / {total}',
