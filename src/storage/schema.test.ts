@@ -40,6 +40,7 @@ function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
 function dropV39AuditColumns(db: ReturnType<typeof openDb>): void {
   restoreV40History(db);
   // Replays of v39 or earlier must also undo all later column additions.
+  db.exec('ALTER TABLE fests DROP COLUMN target_name_patterns');
   db.exec('ALTER TABLE fests DROP COLUMN target_min_abv');
   db.exec('ALTER TABLE untappd_had DROP COLUMN user_rating');
   db.exec('ALTER TABLE user_profiles DROP COLUMN untappd_link_revision');
@@ -62,6 +63,7 @@ describe('schema migrations', () => {
     db.exec('ALTER TABLE untappd_had DROP COLUMN user_rating');
     db.exec('ALTER TABLE user_profiles DROP COLUMN untappd_link_revision');
     db.exec('ALTER TABLE fests DROP COLUMN target_min_abv'); // v48 re-runs after the rewind below
+    db.exec('ALTER TABLE fests DROP COLUMN target_name_patterns'); // and so does v49
     db.prepare('DELETE FROM schema_version WHERE version = 40').run();
     seedBeer(db, 1);
     db.prepare('INSERT INTO user_profiles (telegram_id, untappd_username) VALUES (42, ?)').run('beerfan');
@@ -151,12 +153,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..48 on a fresh db, with no gaps', () => {
+  it('records every migration 1..49 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 48 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 49 }, (_, i) => i + 1));
     db.close();
   });
 

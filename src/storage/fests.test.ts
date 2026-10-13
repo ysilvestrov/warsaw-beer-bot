@@ -38,7 +38,14 @@ describe('migration 42 — festival mode', () => {
       target_min_rating: 3.8,
       target_min_abv: null,
       target_style_patterns: ['Imperial', 'Wild Ale', 'Sour', 'Lambic', 'Eisbock', 'Barleywine', 'Wheatwine'],
+      target_name_patterns: [],
     });
+  });
+
+  it('migration 49 is recorded, and name patterns the operator sets are read back as a list', () => {
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 49').get()).toEqual({ version: 49 });
+    const info = db.prepare(`UPDATE fests SET target_name_patterns = '["WFP","Festiwal"]' WHERE slug = 'wfp22'`).run();
+    expect([info.changes, getFestBySlug(db, 'wfp22')!.target_name_patterns]).toEqual([1, ['WFP', 'Festiwal']]);
   });
 
   it('migration 48 is recorded, and a strength threshold the operator sets is read back', () => {

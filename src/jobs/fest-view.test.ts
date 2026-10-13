@@ -70,6 +70,19 @@ describe('buildFestView', () => {
     expect([view.targets.map((t) => [t.beerId, t.reasons]), view.unrated]).toEqual([[[11, ['rating']], [13, ['abv']], [12, ['style']]], []]);
   });
 
+  it('with the festival\'s name patterns set, an untried festival special is a Target by name', () => {
+    const { db, festId, teamId } = setup();
+    db.prepare(
+      `INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery, style, rating_global, abv)
+       VALUES (14, 6000014, 'Hyperjuice WFP 22', 'Brew', 'hyperjuice wfp 22', 'brew', 'Lager - Pale', NULL, 5.5)`,
+    ).run();
+    upsertMenuItem(db, festId, 14, 'PINTA', '2026-10-15T10:00:00.000Z');
+    expect(buildFestView(db, { festId, teamId, now: NOW }).unrated.map((u) => u.beer_id)).toEqual([14]);
+    db.prepare(`UPDATE fests SET target_name_patterns = '["wfp"]' WHERE id = ?`).run(festId);
+    const view = buildFestView(db, { festId, teamId, now: NOW });
+    expect([view.targets.map((t) => [t.beerId, t.reasons]), view.unrated]).toEqual([[[11, ['rating']], [14, ['name']], [12, ['style']]], []]);
+  });
+
   it('marks a Target on tap from a stadium check-in and puts its section first', () => {
     const { db, festId, teamId } = setup();
     insertVenueCheckins(db, [{ checkin_id: 1, venue_id: 2167060, bid: 6000012, untappd_user: 'x', checkin_at: '2026-10-15T17:50:00.000Z' }], 'laptop', NOW.toISOString());

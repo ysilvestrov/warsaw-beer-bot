@@ -228,6 +228,7 @@ export const en: Messages = {
   'fest.reason_rating': '⭐ {rating}',
   'fest.reason_style': '🧪 style',
   'fest.reason_abv': '💪 strong',
+  'fest.reason_name': '🎪 festival special',
   'fest.reason_manual': '✋ manual',
   'fest.remove_button': '➖ {name}',
   'fest.add_usage': 'Send part of a beer or brewery name: /fest add motueka',

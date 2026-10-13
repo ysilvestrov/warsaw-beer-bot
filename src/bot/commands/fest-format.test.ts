@@ -107,9 +107,9 @@ describe('formatTargets', () => {
       ],
       targets: [
         { beerId: 1, section: 'PINTA', reasons: ['rating', 'manual'], rating: 4.1, style: null },
-        { beerId: 3, section: 'Verdant <&>', reasons: ['style', 'abv'], rating: null, style: 'Stout - Imperial / Double' },
+        { beerId: 3, section: 'Verdant <&>', reasons: ['style', 'abv', 'name'], rating: null, style: 'Stout - Imperial / Double' },
       ],
-      unrated: [{ beer_id: 2, section: 'PINTA', rating_global: null, style: 'Lager - Pale', abv: null }],
+      unrated: [{ beer_id: 2, section: 'PINTA', name: 'Nelson', rating_global: null, style: 'Lager - Pale', abv: null }],
     });
     expect(formatTargets(t, v)).toBe([
       '<b>Повнота історії</b> (чекінів у боті / у профілі Untappd):',
@@ -118,7 +118,7 @@ describe('formatTargets', () => {
       '',
       '<b>Target-и: 2</b>',
       '• Motueka — PINTA · ⭐ 4.10 · ✋ вручну',
-      '• Beskidy — Verdant · 🧪 стиль · 💪 міцне',
+      '• Beskidy — Verdant · 🧪 стиль · 💪 міцне · 🎪 фестивальне',
       '',
       '<b>Непите без рейтингу: 1</b> (не Target, але й не відкинуте)',
       '• Nelson — Lager - Pale',
@@ -182,7 +182,7 @@ describe('Telegram message limit', () => {
   });
 
   it('lists how many unrated beers are beyond the shown 40', () => {
-    const unrated = Array.from({ length: 41 }, (_, i) => ({ beer_id: 5000 + i, section: 'S', rating_global: null, style: 'Lager', abv: null }));
+    const unrated = Array.from({ length: 41 }, (_, i) => ({ beer_id: 5000 + i, section: 'S', name: 'Lager', rating_global: null, style: 'Lager', abv: null }));
     const lines = formatTargets(t, view({ members: [], targets: [], unrated })).split('\n');
     expect(lines[lines.length - 1]).toBe('…і ще 1');
   });

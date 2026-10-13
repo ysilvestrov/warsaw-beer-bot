@@ -1046,6 +1046,15 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE fests ADD COLUMN target_min_abv REAL;
     `,
   },
+  {
+    version: 49,
+    // Festival Target by name: substrings of the beer name that mark a beer brewed for the
+    // festival (a JSON array, like the style patterns). '[]' — the festival has no such rule.
+    // No value is seeded: the operator sets it.
+    sql: `
+      ALTER TABLE fests ADD COLUMN target_name_patterns TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

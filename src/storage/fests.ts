@@ -9,6 +9,8 @@ export interface Fest {
   /** null: no strength rule. Set by the operator, like the style patterns. */
   target_min_abv: number | null;
   target_style_patterns: string[];
+  /** Substrings of the beer name that mark a festival special; empty: no such rule. */
+  target_name_patterns: string[];
 }
 
 export interface FestSession {
@@ -27,12 +29,17 @@ export interface FestVenue {
 // the first tick needs history from before the doors open (spec §6.1).
 export const POLL_MARGIN_MS = 30 * 60 * 1000;
 
-interface FestRow extends Omit<Fest, 'target_style_patterns'> {
+interface FestRow extends Omit<Fest, 'target_style_patterns' | 'target_name_patterns'> {
   target_style_patterns: string;
+  target_name_patterns: string;
 }
 
 function toFest(row: FestRow): Fest {
-  return { ...row, target_style_patterns: JSON.parse(row.target_style_patterns) as string[] };
+  return {
+    ...row,
+    target_style_patterns: JSON.parse(row.target_style_patterns) as string[],
+    target_name_patterns: JSON.parse(row.target_name_patterns) as string[],
+  };
 }
 
 export function getFestBySlug(db: DB, slug: string): Fest | null {

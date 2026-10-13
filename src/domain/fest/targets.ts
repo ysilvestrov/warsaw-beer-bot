@@ -1,11 +1,12 @@
 // Festival Target list (spec §5): menu beers nobody in the team has had that are worth the
-// queue — by rating, by a festival style pattern or by strength — adjusted by the team's manual
-// overrides.
+// queue — by rating, by a festival style pattern, by strength or by a festival name pattern —
+// adjusted by the team's manual overrides.
 // Pure: the caller supplies the menu, each member's tried set and the overrides.
 
 export interface TargetMenuItem {
   beer_id: number;
   section: string;
+  name: string;
   rating_global: number | null;
   style: string | null;
   /** The catalogue stores an unknown strength as null or 0; neither qualifies, whatever the threshold. */
@@ -18,9 +19,14 @@ export interface TargetCriteria {
   minAbv: number | null;
   /** Case-insensitive substrings of the raw Untappd style ("Stout - Imperial / Double"). */
   stylePatterns: string[];
+  /**
+   * Case-insensitive substrings of the beer name: how a festival marks the beers brewed for it
+   * ("WFP"). A blank pattern is ignored — it would match every name.
+   */
+  namePatterns: string[];
 }
 
-export type TargetReason = 'rating' | 'style' | 'abv' | 'manual';
+export type TargetReason = 'rating' | 'style' | 'abv' | 'name' | 'manual';
 
 export interface Target {
   beerId: number;
@@ -46,6 +52,7 @@ export function computeTargets(input: {
   // a Target list, it is the menu.
   if (input.triedByMember.length === 0) return { targets: [], unrated: [] };
   const patterns = input.criteria.stylePatterns.map((p) => p.toLowerCase());
+  const namePatterns = input.criteria.namePatterns.map((p) => p.trim().toLowerCase()).filter((p) => p !== '');
   const targets: Target[] = [];
   const unrated: TargetMenuItem[] = [];
 
@@ -60,6 +67,8 @@ export function computeTargets(input: {
     // 0 is the catalogue's "unknown strength", not a strength: it qualifies under no threshold.
     const abv = item.abv !== null && item.abv > 0 ? item.abv : null;
     if (untried && input.criteria.minAbv !== null && abv !== null && abv >= input.criteria.minAbv) reasons.push('abv');
+    const name = item.name.toLowerCase();
+    if (untried && namePatterns.some((p) => name.includes(p))) reasons.push('name');
     if (override === 'add') reasons.push('manual');
 
     if (reasons.length > 0) {

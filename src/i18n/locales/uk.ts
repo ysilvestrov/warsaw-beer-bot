@@ -228,6 +228,7 @@ export const uk: Messages = {
   'fest.reason_rating': '⭐ {rating}',
   'fest.reason_style': '🧪 стиль',
   'fest.reason_abv': '💪 міцне',
+  'fest.reason_name': '🎪 фестивальне',
   'fest.reason_manual': '✋ вручну',
   'fest.remove_button': '➖ {name}',
   'fest.add_usage': 'Напишіть частину назви пива або броварні: /fest add motueka',

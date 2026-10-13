@@ -4,10 +4,11 @@ const criteria = {
   minRating: 3.8,
   minAbv: null,
   stylePatterns: ['Imperial', 'Wild Ale', 'Sour', 'Lambic', 'Eisbock', 'Barleywine', 'Wheatwine'],
+  namePatterns: [] as string[],
 };
 
-const item = (beer_id: number, rating_global: number | null, style: string | null, section = 'PINTA', abv: number | null = 5): TargetMenuItem =>
-  ({ beer_id, section, rating_global, style, abv });
+const item = (beer_id: number, rating_global: number | null, style: string | null, section = 'PINTA', abv: number | null = 5, name = 'Atak Chmielu'): TargetMenuItem =>
+  ({ beer_id, section, name, rating_global, style, abv });
 
 const run = (menu: TargetMenuItem[], triedByMember: Set<number>[] = [new Set()], overrides = new Map<number, 'add' | 'remove'>()) =>
   computeTargets({ menu, triedByMember, overrides, criteria });
@@ -33,7 +34,7 @@ describe('computeTargets', () => {
   });
 
   it('matches style patterns case-insensitively', () => {
-    const r = computeTargets({ menu: [item(1, null, 'Stout - Imperial / Double')], triedByMember: [new Set()], overrides: new Map(), criteria: { minRating: 5, minAbv: null, stylePatterns: ['imperial'] } });
+    const r = computeTargets({ menu: [item(1, null, 'Stout - Imperial / Double')], triedByMember: [new Set()], overrides: new Map(), criteria: { minRating: 5, minAbv: null, stylePatterns: ['imperial'], namePatterns: [] } });
     expect(r.targets.map((t) => t.reasons)).toEqual([['style']]);
   });
 
@@ -113,6 +114,66 @@ describe('computeTargets', () => {
 
     it('a manual remove drops a Target by strength', () => {
       expect(runAbv([item(1, 3.0, 'IPA - Belgian', 'PINTA', 9)], [new Set()], new Map([[1, 'remove']]))).toEqual({ targets: [], unrated: [] });
+    });
+  });
+
+  describe('by name', () => {
+    const named = (beer_id: number, name: string, rating: number | null = null) => item(beer_id, rating, 'Lager - Pale', 'Green Head', 5.5, name);
+    const runName = (menu: TargetMenuItem[], namePatterns = ['WFP'], triedByMember: Set<number>[] = [new Set()], overrides = new Map<number, 'add' | 'remove'>()) =>
+      computeTargets({ menu, triedByMember, overrides, criteria: { ...criteria, namePatterns } });
+
+    it('a festival special with no rating is a Target by name; its neighbour stays unrated', () => {
+      const plain = named(2, 'Hyperjuice Mango');
+      expect(runName([named(1, '8. HYPERJUICE WFP 22'), plain])).toEqual({
+        targets: [{ beerId: 1, section: 'Green Head', reasons: ['name'], rating: null, style: 'Lager - Pale' }],
+        unrated: [plain],
+      });
+    });
+
+    it('matches name patterns case-insensitively, in either direction', () => {
+      const r = runName([named(1, 'Stargazer wfp Speciality 1'), named(2, 'KRASNOLÓD WFP 2026')], ['Wfp']);
+      expect(r.targets.map((t) => [t.beerId, t.reasons])).toEqual([[1, ['name']], [2, ['name']]]);
+    });
+
+    it('any one of several patterns is enough', () => {
+      const r = runName([named(1, 'Festiwalowe 22'), named(2, 'Pils WFP'), named(3, 'Pils')], ['WFP', 'Festiwal']);
+      expect(r.targets.map((t) => t.beerId)).toEqual([1, 2]);
+    });
+
+    it('the pattern is looked for in the name only, not in the section or style', () => {
+      const elsewhere = item(1, null, 'WFP Ale', 'WFP Brewery', 5, 'Pils');
+      expect(runName([elsewhere])).toEqual({ targets: [], unrated: [elsewhere] });
+    });
+
+    it('with no name patterns a festival special gets no name reason', () => {
+      const special = named(1, 'HYPERJUICE WFP 22');
+      expect(run([special])).toEqual({ targets: [], unrated: [special] });
+    });
+
+    it('a blank pattern is ignored rather than matching every name', () => {
+      const plain = named(1, 'Hyperjuice Mango');
+      expect(runName([plain, named(2, 'Pils WFP')], ['', '  ', ' WFP '])).toEqual({
+        targets: [{ beerId: 2, section: 'Green Head', reasons: ['name'], rating: null, style: 'Lager - Pale' }],
+        unrated: [plain],
+      });
+    });
+
+    it('the name reason comes after rating, style and strength, before a manual add', () => {
+      const r = computeTargets({
+        menu: [item(1, 4.2, 'Barleywine - Other', 'Brokreacja', 12, 'SWEET TEMPTATION WFP SPECIALITY 1')],
+        triedByMember: [new Set()],
+        overrides: new Map([[1, 'add']]),
+        criteria: { ...criteria, minAbv: 8, namePatterns: ['WFP'] },
+      });
+      expect(r.targets[0].reasons).toEqual(['rating', 'style', 'abv', 'name', 'manual']);
+    });
+
+    it('a festival special one member has had is not a Target', () => {
+      expect(runName([named(1, 'Pils WFP', 3.0)], ['WFP'], [new Set(), new Set([1])])).toEqual({ targets: [], unrated: [] });
+    });
+
+    it('a manual remove drops a Target by name', () => {
+      expect(runName([named(1, 'Pils WFP')], ['WFP'], [new Set()], new Map([[1, 'remove']]))).toEqual({ targets: [], unrated: [] });
     });
   });
 });
