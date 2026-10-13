@@ -346,7 +346,7 @@
 - [ ] Тести спершу:
   - (а) Щасливий шлях — точні події:
     - `checks X` → `resolve X` → `attest D X` → `image pull X D` → `image current` → `image audit D`;
-    - `image pull S_sha S` → `snapshot …-pre.db` → `image trial D S …` → `image activate D`;
+    - `image local --digest S` (п.10; `pull S` лише коли не локальний) → `snapshot …-pre.db` → `image trial D S …` → `image activate D`;
     - опитування → `image prune --keep D` → `prune`.
     
     Стан: `DEPLOYED_*` = `SETTLED_*` = X/D/I/C, `PREVIOUS_SHA=base`, без `WINDOW_*`.

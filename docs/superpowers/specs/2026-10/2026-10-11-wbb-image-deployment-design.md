@@ -189,6 +189,15 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 - вікно (пишеться **до** будь-якої зміни production): `WINDOW_SHA`, `WINDOW_DIGEST`, `WINDOW_PREV_DIGEST` (ціль відкату = settled на момент старту вікна), `WINDOW_MODE=auto|manual`, `WINDOW_PHASE=activating|watching|rolling-back`, `WINDOW_PRE` (знімок), `WINDOW_START`, `WINDOW_BOOT` (boot_id), `WINDOW_NRESTARTS`;
 - `INCIDENT=<sha> <digest> <причина>` — відкритий інцидент.
 
+Доповнено ядром стадії «б» (план `docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md`, рішення 3–4):
+- `DEPLOYED_CONTENT`/`SETTLED_CONTENT` — мітка `wbb.content` запущеного/settled образу (noop §4.1);
+- вікно: `WINDOW_ID`, `WINDOW_CONTENT`, `WINDOW_OLD` (гейтова база до вікна), `WINDOW_FAILS` (поспіль невдалі health), `WINDOW_LAST_READ` (час останнього повністю прочитаного опитування), `WINDOW_REASON`, `ROLLBACK_ATTEMPTS` (пишеться до кожного `activate S`);
+- `CANDIDATE_HELD=<X> <D> <S>`/`CANDIDATE_HELD_WHY` — доведена `COMPAT FAILED` для цієї пари образів; `CANDIDATE_RETRY_X`/`CANDIDATE_RETRY_AT` — `trial REFUSED`, повтор через годину;
+- `RETAINED_PRE` — позначені `mark-rollback` знімки провальних вікон (імена, які надрукував скрипт);
+- `LAST_INCIDENT_NOTICE`.
+
+Файл розбирається (ніколи не виконується), і перед будь-якою дією перевіряються формат, дублікати й узгодженість полів; пошкоджений файл — `STATE CORRUPT` (вихід 3, нуль дій), ніколи не перший запуск. Запис атомарний із `fsync`.
+
 Режим вікна записаний у стані, тож після reboot чи падіння tick-а він той самий: `manual` ніколи не стає автоматичним відкатом.
 
 ### 7.2 Таблиця відновлення
@@ -207,6 +216,8 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 | Відкат не підняв S | — | `INCIDENT`, повідомлення 🔥 з причиною | **Ні**, до `--resolve-incident` |
 | Провал у вікні, `manual` | — | Без відкату; `INCIDENT`, знімок `WINDOW_PRE` утримується (§9), повідомлення: ручне відновлення | **Ні** |
 | Юніт не з Quadlet (`unit=foreign`) | Будь-яка фаза | Нічого не робити; `INCIDENT` | **Ні** |
+| `activating`, Quadlet-файл не називає ні S, ні D | — | `INCIDENT` (хтось інший змінив Quadlet; ядро «б» не вгадує) | **Ні** |
+| `current` чи порт API нечитані | будь-яка | Чекати, нічого не міняти; повідомлення раз на добу | Так, після прочитаного |
 
 **Unverified більше немає.** Чинний R2 позначав реліз `unverified`, бо без вікна неможливо було знати, чи вже стартував новий код поверх напівзаписаного `/opt`. Тут кожен обрив або повторюється, або дивиться вікно заново — образ незмінний. Реліз стає базою (`SETTLED_*`) лише після повного вікна; ціль відкату — завжди `SETTLED_DIGEST`, ніколи «попередній задеплоєний».
 
@@ -293,6 +304,8 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 | Бот бачить потрібні файли хоста | Кожен шлях-літерал у `src/` має `Volume=` | Перелік §3.2 + smoke у CI | сильний для літералів; шляхи з `.env` — preflight (усі в `/var/lib/warsaw-beer-bot`) |
 | Статус показує Node бота | Версія Node, на якій працює бот | `process.versions.node` у контейнері | сильний |
 | Pre-знімок — стан БД на момент T | `VACUUM INTO` + sha256 | `db-snapshot.sh` | сильний |
+| Noop просуває `DEPLOYED_SHA` | Гейтова база X еквівалентна запущеному runtime | `wbb.content` рівні + `current` = запущений `DEPLOYED_DIGEST/ID` + holds перевірені **до** noop; фізична identity (`DEPLOYED_DIGEST/ID/CONTENT`, `SETTLED_*`) не змінюється | сильний для перелічених випадків |
+| База `NRestarts` вікна | Рестарт, що стався, поки ніхто не дивився, буде видно | База в стані після `ACTIVATED`; нижча за базу в тому ж boot чи годинник назад — нове вікно, не прохід | середній до репетиції «в» (чи `daemon-reload` регенерованого юніта зберігає лічильник) |
 | Знімок інциденту не зникає | Pre незакритого інциденту утримується | `mark-rollback` + `prune` його пропускає (чинне) | сильний |
 | Хелпер працює лише з нашими образами | Не тягне й не запускає чужого | Строгий argv, формати SHA/digest, `RepoDigests` і мітка `revision`; тести хелпера | сильний (у межах коду хелпера) |
 | Свіжість Node/base | Security-патчі доходять | Dependabot `docker` + merge | **слабкий за природою** (процес, не механізм); свідома ціна §9 |

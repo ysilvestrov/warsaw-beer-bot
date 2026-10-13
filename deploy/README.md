@@ -531,7 +531,7 @@ ADVISORY`, `ACTIVATE FAILED` — a restart of D that systemd reports failed); 2 
 precondition, not a verdict); 3 `local` only, `NOT LOCAL <D>` (a normal answer, not an error); 64 usage; 70 internal error; 75 could not judge now, retry (podman, a
 timeout, no registry, `START TIMEOUT` of D, `START KILLED` — the OOM killer, a snapshot whose sha256
 does not match). Exit 1 covers both kinds of verdict the deployer must tell apart — a failed SHA
-(`TRIAL`/`START FAILED`, `ACTIVATE FAILED`) and a hold (`COMPAT FAILED`, `AUDIT ADVISORY`) — so the
+(`TRIAL`/`START FAILED`, `ACTIVATE FAILED`, `AUDIT ADVISORY`) and a hold (`COMPAT FAILED`) — so the
 caller branches on the verdict line, never on the code alone. S that does not answer in time is
 `COMPAT FAILED: START TIMEOUT …`: D has just started on the same copy under the same confinement.
 
@@ -546,6 +546,20 @@ Install (and later check) from a clean checkout of `main` — nothing is enabled
 sudo bash deploy/install-image.sh            # visudo -cf + quadlet -dryrun of the template first
 sudo bash deploy/install-image.sh --check    # 0 when every installed copy matches this checkout
 ```
+
+### Image controller (stage «б»: in the repo, not installed)
+
+`deploy/image/autodeploy.sh` is the merge-deploy controller for images (plan
+`docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md`). Nothing runs it yet:
+the timer still runs the installed copy of `deploy/autodeploy.sh` (flat tree) until stage «в» moves
+this file over it. Its state is `~/.local/state/wbb-autodeploy/image-state.env` (parsed and
+validated, never sourced; a damaged file stops it with `STATE CORRUPT`). It reads the helper's
+verdict per action — `audit` from its first stdout line, `trial` from its last — and never by exit
+code alone: `AUDIT ADVISORY`, `TRIAL FAILED`, `START FAILED` and `ACTIVATE FAILED` mark the SHA
+failed; `COMPAT FAILED` holds that pair of images for a human (`deploy.sh --ack-incompatible`, the next
+plan); `REFUSED` from `trial` retries after an hour; anything else is "could not verify".
+Rollback is code only, to the last settled image; the pre snapshot of any failed window is kept
+(`mark-rollback`).
 
 ## Runtime artifact (history: replaced by the image above)
 
