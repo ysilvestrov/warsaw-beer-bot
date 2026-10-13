@@ -32,7 +32,14 @@ importCommand.command('import', async (ctx) => {
   await ctx.reply(ctx.t('import.prompt'));
 });
 
-importCommand.on('document', async (ctx) => {
+// A caption that is a command addresses that command (/fest stands takes its CSV this way): the
+// document is not an export, and this composer runs before theirs, so it hands the update on.
+// A caption of /import itself is still an import.
+const COMMAND_CAPTION_RE = /^\/([A-Za-z0-9_]+)(?:@\w+)?(?:\s|$)/;
+
+importCommand.on('document', async (ctx, next) => {
+  const command = COMMAND_CAPTION_RE.exec(ctx.message.caption ?? '')?.[1];
+  if (command !== undefined && command.toLowerCase() !== 'import') return next();
   const doc = ctx.message.document;
   const name = doc.file_name ?? '';
 
