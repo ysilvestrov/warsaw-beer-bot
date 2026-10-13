@@ -5,9 +5,11 @@ import { resolve } from 'node:path';
 import { isHoldPath, checkHold } from './deploy-hold-check';
 
 const AUTODEPLOY = resolve(__dirname, '../../deploy/autodeploy.sh');
+const IMAGE_AUTODEPLOY = resolve(__dirname, '../../deploy/image/autodeploy.sh');
 const CLI = resolve(__dirname, 'deploy-hold-check.ts');
 
-const TABLE: Array<[string, boolean]> = [
+// Held alike by the flat controller and the image controller.
+const TABLE_COMMON: Array<[string, boolean]> = [
   ['deploy/sudoers.d/warsaw-beer-bot', true],
   ['deploy/litestream.yml', true],
   ['deploy/litestream.service', true],
@@ -33,19 +35,47 @@ const TABLE: Array<[string, boolean]> = [
   ['docs/x.md', false],
 ];
 
+// The image deployer's own installed copies (plan 2026-10-12-wbb-image-transition-b-core, "Рішення" п.12):
+// held by the image controller and here; the flat controller does not know them (п.1).
+const TABLE_IMAGE: Array<[string, boolean]> = [
+  ['deploy/image/autodeploy.sh', true],
+  ['deploy/image/helper/wbb_image.py', true],
+  ['deploy/image/helper/bounded.py', true],
+  ['deploy/image/helper/wbb-image.sh', true],
+  ['deploy/image/helper/test_wbb_image.py', true],
+  ['deploy/image/warsaw-beer-bot.container', true],
+  ['deploy/image/deploy.sh', false],
+  ['deploy/image/Dockerfile', false],
+  ['deploy/image/start-check.cjs', false],
+  ['deploy/image/offline-telegram.cjs', false],
+];
+
+/** HOLD or PASS from path_is_held() of the controller `script`. */
+function bashVerdict(script: string, path: string): string {
+  const fn = execFileSync('sed', ['-n', '/^path_is_held() {/,/^}/p', script], { encoding: 'utf8' });
+  return spawnSync('bash', ['-c', `${fn}\npath_is_held "$1" && echo HOLD || echo PASS`, '_', path],
+    { encoding: 'utf8' }).stdout.trim();
+}
+
 describe('isHoldPath', () => {
-  it.each(TABLE)('%s → %s', (path, held) => {
+  it.each([...TABLE_COMMON, ...TABLE_IMAGE])('%s → %s', (path, held) => {
     expect(isHoldPath(path)).toBe(held);
   });
 
-  // The deployer's bash predicate is the authority; this copy exists only so
-  // the merger sees the hold before pressing the button. Two lists that drift
-  // apart make the title lie, so every row is asked of both.
-  it.each(TABLE)('agrees with path_is_held in deploy/autodeploy.sh for %s', (path) => {
-    const fn = execFileSync('sed', ['-n', '/^path_is_held() {/,/^}/p', AUTODEPLOY], { encoding: 'utf8' });
-    const verdict = spawnSync('bash', ['-c', `${fn}\npath_is_held "$1" && echo HOLD || echo PASS`, '_', path],
-      { encoding: 'utf8' }).stdout.trim();
-    expect(verdict).toBe(isHoldPath(path) ? 'HOLD' : 'PASS');
+  // The deployers' bash predicates are the authority; this copy exists only so the merger sees the
+  // hold before pressing the button. Lists that drift apart make the title lie, so every row is
+  // asked of each predicate it belongs to.
+  it.each(TABLE_COMMON)('agrees with path_is_held in deploy/autodeploy.sh for %s', (path, held) => {
+    expect(bashVerdict(AUTODEPLOY, path)).toBe(held ? 'HOLD' : 'PASS');
+  });
+
+  it.each([...TABLE_COMMON, ...TABLE_IMAGE])('agrees with path_is_held in deploy/image/autodeploy.sh for %s', (path, held) => {
+    expect(bashVerdict(IMAGE_AUTODEPLOY, path)).toBe(held ? 'HOLD' : 'PASS');
+  });
+
+  // Stage «б»: the installed flat controller keeps deploying; the image deployer's files are not its holds.
+  it.each(TABLE_IMAGE)('deploy/autodeploy.sh does not hold the image deployer\'s %s', (path) => {
+    expect(bashVerdict(AUTODEPLOY, path)).toBe('PASS');
   });
 });
 

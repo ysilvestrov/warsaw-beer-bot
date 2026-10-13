@@ -102,6 +102,7 @@ describe('deploy rsync payload', () => {
       'deploy/db-snapshot.sh',
       'deploy/deploy.sh',
       'deploy/image/Dockerfile',
+      'deploy/image/autodeploy.sh',
       'deploy/image/helper/bounded.py',
       'deploy/image/helper/test_bounded.py',
       'deploy/image/helper/test_wbb_image.py',
