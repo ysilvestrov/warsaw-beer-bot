@@ -1061,13 +1061,17 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 50,
     // A cancelled glass (spec: fest queue): its number, so the next glass never takes it again — a
-    // label with that number may already be out. The queue row and its print job are deleted; who
-    // cancelled is not stored. A table, not a column on fest_queue: a code-only rollback then sees
-    // the queue without the cancelled glasses instead of printing them again. Idempotent.
+    // label with that number may already be out — and its fest_queue row id, which is the print job's
+    // key: fest_queue.id has no AUTOINCREMENT, so SQLite would hand a deleted top id to the next glass,
+    // and a station's late report on the cancelled job would mark that glass printed. The queue row
+    // and its print job are deleted; who cancelled is not stored. A table, not a column on
+    // fest_queue: a code-only rollback then sees the queue without the cancelled glasses instead of
+    // printing them again. Idempotent.
     sql: `
       CREATE TABLE IF NOT EXISTS fest_glass_removed (
         team_id    INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
         glass_no   INTEGER NOT NULL,
+        queue_id   INTEGER NOT NULL UNIQUE,
         removed_at TEXT NOT NULL,
         PRIMARY KEY (team_id, glass_no)
       );

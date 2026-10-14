@@ -19,15 +19,22 @@
   Без номера або з не-числом — підказка `fest.drop_usage`.
 - Скасувати може **будь-який учасник** команди (ролей у команді немає; сусід виправляє за вас).
   Не учасник — `fest.not_member`, як для «Взяв».
-- Час не обмежений: скасування нічого не ставить у чергу, тож стара кнопка після фесту шкоди не
-  робить.
+- Кнопка діє без обмеження в часі: скасування нічого не ставить у чергу, тож стара кнопка після
+  фесту шкоди не робить. Команда діє, поки `/fest` бачить фест (як усі `/fest …`, до 30 хв після
+  останньої сесії) — після фесту скасовувати вже нічого (cross-review, знахідка 2: виправлено текст,
+  не код).
 
 ### Що відбувається
 
 Одна IMMEDIATE-транзакція `removeGlass(db, { teamId, glassNo, at })`:
 
 1. рядок `fest_queue` команди з цим `glass_no` і його `fest_print_jobs` видаляються;
-2. номер записується в нову таблицю `fest_glass_removed (team_id, glass_no, removed_at)`.
+2. номер і `id` рядка записуються в нову таблицю `fest_glass_removed (team_id, glass_no, queue_id, removed_at)`.
+
+`id` рядка — ключ завдання друку, а `fest_queue.id` оголошено без `AUTOINCREMENT`: SQLite віддав би
+видалений верхній `id` наступному келиху, і пізній звіт станції `printed` про скасоване завдання
+позначив би надрукованою наліпку нового келиха (cross-review, знахідка 1, відтворено тестом).
+Тому `takeBeer` вставляє `id` явно — `MAX` по `fest_queue.id` і `fest_glass_removed.queue_id` + 1.
 
 Результат: `{ kind: 'removed', name, printed }` (`printed` — статус завдання друку був `printed`),
 `{ kind: 'already' }` (номер є в `fest_glass_removed`) або `{ kind: 'missing' }`.
@@ -79,7 +86,7 @@ pl і en — ті самі думки. Відповідь на кнопку — 
 ### Міграція
 
 v50: `CREATE TABLE IF NOT EXISTS fest_glass_removed (team_id INTEGER NOT NULL REFERENCES
-fest_teams(id) ON DELETE CASCADE, glass_no INTEGER NOT NULL, removed_at TEXT NOT NULL,
+fest_teams(id) ON DELETE CASCADE, glass_no INTEGER NOT NULL, queue_id INTEGER NOT NULL UNIQUE, removed_at TEXT NOT NULL,
 PRIMARY KEY (team_id, glass_no))` — чистий expand. Особи не зберігаються (хто скасував — не пишемо).
 
 ## Заявка → доказ

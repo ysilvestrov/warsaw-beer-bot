@@ -42,8 +42,12 @@ export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: n
       `SELECT MAX(COALESCE((SELECT MAX(glass_no) FROM fest_queue WHERE team_id = ?), 0),
                   COALESCE((SELECT MAX(glass_no) FROM fest_glass_removed WHERE team_id = ?), 0)) + 1 AS next`,
     ).get(p.teamId, p.teamId) as { next: number };
+    // The row id is the print job's key, so it is never reused either: SQLite would give a deleted top
+    // id again (no AUTOINCREMENT), and a station's late report on the cancelled job would land here.
     const id = Number(db.prepare(
-      'INSERT INTO fest_queue (team_id, glass_no, beer_id, added_by, added_at) VALUES (?, ?, ?, ?, ?)',
+      `INSERT INTO fest_queue (id, team_id, glass_no, beer_id, added_by, added_at)
+       VALUES (MAX(COALESCE((SELECT MAX(id) FROM fest_queue), 0),
+                   COALESCE((SELECT MAX(queue_id) FROM fest_glass_removed), 0)) + 1, ?, ?, ?, ?, ?)`,
     ).run(p.teamId, next, p.beerId, p.addedBy, at).lastInsertRowid);
     db.prepare("INSERT INTO fest_print_jobs (queue_id, status, attempts, updated_at) VALUES (?, 'queued', 0, ?)").run(id, at);
     return { id, glassNo: next, repeated: false };
@@ -61,7 +65,7 @@ export type RemoveGlassResult =
   | { kind: 'missing' };
 
 // A glass taken by mistake (spec: cancelling a glass): the queue row and its print job go, its number
-// is tombstoned so takeBeer never gives it again. `printed` is the label's state at this moment — a
+// and row id are tombstoned so takeBeer never gives either again. `printed` is the label's state at this moment — a
 // station may still be printing it. Whether a check-in already closed the glass is the caller's check.
 export function removeGlass(db: DB, p: { teamId: number; glassNo: number; at: string }): RemoveGlassResult {
   const at = new Date(p.at).toISOString();
@@ -78,7 +82,8 @@ export function removeGlass(db: DB, p: { teamId: number; glassNo: number; at: st
     }
     // Its print job goes with it: fest_print_jobs.queue_id is ON DELETE CASCADE, and openDb turns foreign keys on.
     db.prepare('DELETE FROM fest_queue WHERE id = ?').run(row.id);
-    db.prepare('INSERT INTO fest_glass_removed (team_id, glass_no, removed_at) VALUES (?, ?, ?)').run(p.teamId, p.glassNo, at);
+    db.prepare('INSERT INTO fest_glass_removed (team_id, glass_no, queue_id, removed_at) VALUES (?, ?, ?, ?)')
+      .run(p.teamId, p.glassNo, row.id, at);
     return { kind: 'removed', name: row.name, printed: row.status === 'printed' };
   }).immediate();
 }

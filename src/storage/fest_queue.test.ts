@@ -128,8 +128,19 @@ describe('removeGlass', () => {
       .toEqual({ kind: 'removed', name: 'Bravo', printed: false });
     expect(queueFor(db, teamA).map((r) => r.glass_no)).toEqual([2]);
     expect(db.prepare('SELECT queue_id FROM fest_print_jobs').all()).toEqual([{ queue_id: second.id }]);
-    expect(db.prepare('SELECT team_id, glass_no, removed_at FROM fest_glass_removed').all())
-      .toEqual([{ team_id: teamA, glass_no: 1, removed_at: '2026-10-15T16:01:00.000Z' }]);
+    expect(db.prepare('SELECT team_id, glass_no, queue_id, removed_at FROM fest_glass_removed').all())
+      .toEqual([{ team_id: teamA, glass_no: 1, queue_id: 1, removed_at: '2026-10-15T16:01:00.000Z' }]);
+  });
+
+  it('the row id of a cancelled glass is never given to another glass, in any team', () => {
+    const { db, teamA, teamB } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    takeBeer(db, { teamId: teamA, beerId: 12, addedBy: 1, at: AT });
+    removeGlass(db, { teamId: teamA, glassNo: 2, at: AT });
+    expect([
+      takeBeer(db, { teamId: teamB, beerId: 11, addedBy: 1, at: AT }).id,
+      takeBeer(db, { teamId: teamA, beerId: 12, addedBy: 1, at: AT }).id,
+    ]).toEqual([3, 4]);
   });
 
   it('says whether the label was already printed', () => {

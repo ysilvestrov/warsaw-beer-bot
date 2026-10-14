@@ -84,6 +84,16 @@ describe('print station API', () => {
     expect([await list.json(), late.status]).toEqual([{ jobs: [] }, 404]);
   });
 
+  it("a late report on a cancelled glass does not land on the next glass's label", async () => {
+    const { db, app, station, glassId } = setup();
+    const { team_id: teamId } = db.prepare('SELECT team_id FROM fest_queue WHERE id = ?').get(glassId) as { team_id: number };
+    removeGlass(db, { teamId, glassNo: 1, at: '2026-10-15T18:01:00.000Z' });
+    const next = takeBeer(db, { teamId, beerId: 11, addedBy: 1, at: '2026-10-15T18:02:00.000Z' });
+    const late = await app.request(`/fest-print/jobs/${glassId}/printed`, { method: 'POST', headers: bearer(station) });
+    expect([next.id === glassId, late.status, db.prepare('SELECT status FROM fest_print_jobs').all()])
+      .toEqual([false, 404, [{ status: 'queued' }]]);
+  });
+
   it('the job list is never cached', async () => {
     const { app, station } = setup();
     const res = await app.request('/fest-print/jobs', { headers: bearer(station) });
