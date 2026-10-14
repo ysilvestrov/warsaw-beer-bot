@@ -43,7 +43,7 @@ describe('print jobs', () => {
     markPrinted(db, teamA, a.id, NOW);
     markFailed(db, teamA, b.id, 'x'.repeat(300), NOW);
     expect(pendingJobs(db, teamA)).toEqual([
-      { id: b.id, glassNo: 2, beerName: 'Bravo', initials: 'YS', status: 'failed', attempts: 1, error: 'x'.repeat(200) },
+      { id: b.id, glassNo: 2, beerName: 'Bravo', brewery: 'Brew', initials: 'YS', status: 'failed', attempts: 1, error: 'x'.repeat(200) },
     ]);
   });
 

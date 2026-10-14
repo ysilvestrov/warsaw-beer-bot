@@ -13,6 +13,8 @@ export interface PrintJob {
   id: number;
   glassNo: number;
   beerName: string;
+  /** The beer's brewery, printed above its name: names alone are often too generic to find the glass. */
+  brewery: string;
   initials: string;
   status: PrintStatus;
   attempts: number;
@@ -38,7 +40,7 @@ export function stationTeam(db: DB, token: string, now: string): number | null {
 /** Labels still to print for the team: queued ones and failed ones (to retry), by glass number. */
 export function pendingJobs(db: DB, teamId: number): PrintJob[] {
   return db.prepare(
-    `SELECT q.id, q.glass_no AS glassNo, b.name AS beerName, COALESCE(m.initials, '?') AS initials,
+    `SELECT q.id, q.glass_no AS glassNo, b.name AS beerName, b.brewery AS brewery, COALESCE(m.initials, '?') AS initials,
             j.status, j.attempts, j.error
        FROM fest_print_jobs j
        JOIN fest_queue q ON q.id = j.queue_id

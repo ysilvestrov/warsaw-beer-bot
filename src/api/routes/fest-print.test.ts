@@ -37,7 +37,7 @@ describe('print station API', () => {
     const { app, station, glassId } = setup();
     const res = await app.request('/fest-print/jobs', { headers: bearer(station) });
     expect([res.status, await res.json()]).toEqual([200, {
-      jobs: [{ id: glassId, glassNo: 1, beerName: 'Bravo', initials: 'YS', status: 'queued', attempts: 0, error: null }],
+      jobs: [{ id: glassId, glassNo: 1, beerName: 'Bravo', brewery: 'Brew', initials: 'YS', status: 'queued', attempts: 0, error: null }],
     }]);
   });
 
