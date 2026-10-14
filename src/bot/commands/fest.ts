@@ -10,7 +10,7 @@ import { upsertStand } from '../../storage/fest_stands';
 import { menuFor } from '../../storage/fest_menu';
 import { buildFestView } from '../../jobs/fest-view';
 import { buildQueueView } from '../../jobs/fest-queue-view';
-import { takeBeer } from '../../storage/fest_queue';
+import { removeGlass, takeBeer } from '../../storage/fest_queue';
 import { buildBeerPageUrl } from '../../sources/untappd/beer-page';
 import type { MenuPageResult } from '../../jobs/fest-ingest';
 import { parseStandsCsv } from '../../domain/fest/stands-csv';
@@ -52,7 +52,7 @@ async function showRanking(ctx: BotContext, team: FestTeam): Promise<void> {
   await ctx.replyWithHTML(formatRanking(ctx.t, view), Markup.inlineKeyboard(buttons));
 }
 
-const SUBS = ['targets', 'add', 'take', 'queue', 'stands', 'menu', 'printer'] as const;
+const SUBS = ['targets', 'add', 'take', 'queue', 'drop', 'stands', 'menu', 'printer'] as const;
 /** The station page on the configured origin; any path, query or fragment of the base is dropped. */
 export function festPrintUrl(base: string): string {
   return new URL('/fest-print', base).href;
@@ -99,6 +99,25 @@ async function resolveTeam(ctx: BotContext & { from: { id: number } }, fest: Fes
   return null;
 }
 
+/** `/fest drop 7` or `/fest drop №7`: the glass number, or null. */
+export function glassNoOf(query: string): number | null {
+  const m = /^[№#]?\s*(\d{1,9})$/.exec(query.trim());
+  const n = m ? Number(m[1]) : 0;
+  return n >= 1 ? n : null;
+}
+
+// Cancelling a glass (spec: fest queue). A glass a check-in already closed was surely drunk, and
+// without it closeQueue would hand that check-in to another glass of the beer — so it stays.
+function dropGlass(ctx: BotContext, festId: number, teamId: number, glassNo: number): string {
+  const db = ctx.deps.db;
+  const item = buildQueueView(db, { festId, teamId }).items.find((i) => i.glassNo === glassNo);
+  if (item && item.closedBy.some((c) => c.checkinId !== null)) return ctx.t('fest.drop_closed', { glass: glassNo });
+  const r = removeGlass(db, { teamId, glassNo, at: new Date().toISOString() });
+  if (r.kind === 'already') return ctx.t('fest.drop_already', { glass: glassNo });
+  if (r.kind === 'missing') return ctx.t('fest.drop_none', { glass: glassNo });
+  return ctx.t(r.printed ? 'fest.dropped_printed' : 'fest.dropped_unprinted', { glass: glassNo, name: r.name });
+}
+
 export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
   const festCommand = new Composer<BotContext>();
 
@@ -139,6 +158,12 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
         ctx.t('fest.queue_link', { glass: l.glassNo, name: l.name.slice(0, 50) }), buildBeerPageUrl(l.bid),
       )]);
       await ctx.replyWithHTML(formatQueue(ctx.t, view), Markup.inlineKeyboard(links));
+      return;
+    }
+
+    if (sub === 'drop') {
+      const glassNo = glassNoOf(query);
+      await ctx.reply(glassNo === null ? ctx.t('fest.drop_usage') : dropGlass(ctx, fest.id, team.id, glassNo));
       return;
     }
 
@@ -308,7 +333,23 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     const { glassNo } = takeBeer(db, { teamId: team.id, beerId, addedBy: ctx.from.id, at: new Date().toISOString() });
     const initials = members(db, team.id).find((m) => m.telegram_id === ctx.from.id)?.initials ?? '?';
     await ctx.answerCbQuery();
-    await ctx.reply(ctx.t('fest.taken', { glass: glassNo, name: beer.name, initials }));
+    await ctx.reply(ctx.t('fest.taken', { glass: glassNo, name: beer.name, initials }), Markup.inlineKeyboard([
+      [Markup.button.callback(ctx.t('fest.undo_button', { glass: glassNo }), `fest:u:${team.id}:${glassNo}`)],
+    ]));
+  });
+
+  // «↩️ Скасувати №N» under «Взяв»: any member may cancel; the button leaves the message whatever the answer.
+  festCommand.action(/^fest:u:(\d+):(\d{1,9})$/, async (ctx) => {
+    const db = ctx.deps.db;
+    const team = teamById(db, Number(ctx.match[1]));
+    if (!team || !isTeamMember(db, team.id, ctx.from.id)) {
+      await ctx.answerCbQuery(ctx.t('fest.not_member'));
+      return;
+    }
+    const text = dropGlass(ctx, team.fest_id, team.id, Number(ctx.match[2]));
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    await ctx.reply(text);
   });
 
   // ➕ / ➖ a Target by hand (spec §5 overrides). Only a member of that team may change its list.

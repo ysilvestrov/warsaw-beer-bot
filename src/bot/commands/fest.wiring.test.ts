@@ -1,4 +1,4 @@
-import { Telegraf } from 'telegraf';
+import { Markup, Telegraf } from 'telegraf';
 import type { Update, UserFromGetMe } from '@telegraf/types';
 import { createTranslator } from '../../i18n';
 import { openDb, type DB } from '../../storage/db';
@@ -9,6 +9,7 @@ import { addMember, createTeam, isTeamMember } from '../../storage/fest_teams';
 import { upsertMenuItem } from '../../storage/fest_menu';
 import { queueFor } from '../../storage/fest_queue';
 import { stationTeam } from '../../storage/fest_print';
+import { insertVenueCheckins } from '../../storage/venue_checkins';
 import type { BotContext } from '../index';
 import { createFestCommand } from './fest';
 
@@ -23,7 +24,10 @@ function callback(updateId: number, from: number, data: string) {
     message: { message_id: 1, date: 1, chat: { id: -100, type: 'supergroup' as const, title: 'Team' } } } };
 }
 
-function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: string[]; answers: (string | undefined)[]; extras: unknown[] } {
+function setup(): {
+  db: DB; bot: Telegraf<BotContext>; teamId: number; replies: string[]; answers: (string | undefined)[]; extras: unknown[];
+  replyExtras: unknown[]; edits: unknown[];
+} {
   const db = openDb(':memory:');
   migrate(db);
   const festId = getFestBySlug(db, 'wfp22')!.id;
@@ -39,16 +43,19 @@ function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: 
   const replies: string[] = [];
   const answers: (string | undefined)[] = [];
   const extras: unknown[] = [];
+  const replyExtras: unknown[] = [];
+  const edits: unknown[] = [];
   bot.use((ctx, next) => {
     ctx.deps = { db, env: {}, log: {} } as never;
     ctx.locale = 'en';
     ctx.t = createTranslator('en');
-    ctx.reply = (async (message: string) => { replies.push(message); return { message_id: 1 }; }) as never;
+    ctx.reply = (async (message: string, extra?: unknown) => { replies.push(message); replyExtras.push(extra); return { message_id: 1 }; }) as never;
+    ctx.editMessageReplyMarkup = (async (markup: unknown) => { edits.push(markup); return true; }) as never;
     ctx.answerCbQuery = (async (text?: string, extra?: unknown) => { answers.push(text); extras.push(extra); return true; }) as never;
     return next();
   });
   bot.use(createFestCommand({ downloadFile: async () => Buffer.from(''), printStationUrl: 'https://beer-api.example/fest-print' }));
-  return { db, bot, teamId, replies, answers, extras };
+  return { db, bot, teamId, replies, answers, extras, replyExtras, edits };
 }
 
 describe('«Я в команді» (fest:j)', () => {
@@ -145,5 +152,76 @@ describe('/fest printer', () => {
     // The last WFP22 session ends 2026-10-17 22:00Z.
     expect([stationTeam(db, token, '2026-10-18T21:59:59.000Z'), stationTeam(db, token, '2026-10-18T22:00:00.000Z')])
       .toEqual([teamId, null]);
+  });
+});
+
+describe('cancelling a glass (fest:u, /fest drop)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T18:00:00.000Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('the «Взяв» reply carries a cancel button for that glass', async () => {
+    const { bot, teamId, replyExtras } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    expect(replyExtras).toEqual([Markup.inlineKeyboard([[Markup.button.callback('↩️ Cancel #1', `fest:u:${teamId}:1`)]])]);
+  });
+
+  it('the button cancels the glass, says so in the chat and takes itself off the message', async () => {
+    const { db, bot, teamId, replies, answers, edits } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    await bot.handleUpdate(callback(2, 7, `fest:u:${teamId}:1`) as unknown as Update);
+    expect([queueFor(db, teamId), replies[1], answers, edits]).toEqual([
+      [], '↩️ Glass #1 (Bravo) cancelled. Its label will not be printed; if it comes out anyway, throw it away.',
+      [undefined, undefined], [undefined],
+    ]);
+  });
+
+  it('someone outside the team cancels nothing', async () => {
+    const { db, bot, teamId, replies, answers, edits } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    await bot.handleUpdate(callback(2, 8, `fest:u:${teamId}:1`) as unknown as Update);
+    expect([queueFor(db, teamId).map((r) => r.glass_no), replies.length, answers[1], edits])
+      .toEqual([[1], 1, 'This is for team members — press “I’m in the team”.', []]);
+  });
+
+  it('/fest drop cancels by number; a printed label is to be thrown away', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    db.prepare("UPDATE fest_print_jobs SET status = 'printed'").run();
+    await bot.handleUpdate(command(2, 7, { id: -100, type: 'supergroup' }, '/fest drop 1') as unknown as Update);
+    expect([queueFor(db, teamId), replies[1]]).toEqual([[], '↩️ Glass #1 (Bravo) cancelled. Throw away label #1.']);
+  });
+
+  it('/fest drop answers a cancelled number, an unknown one, a missing one and a non-number', async () => {
+    const { bot, teamId, replies } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    const group = { id: -100, type: 'supergroup' as const };
+    await bot.handleUpdate(command(2, 7, group, '/fest drop №1') as unknown as Update);
+    await bot.handleUpdate(command(3, 7, group, '/fest drop 1') as unknown as Update);
+    await bot.handleUpdate(command(4, 7, group, '/fest drop 5') as unknown as Update);
+    await bot.handleUpdate(command(5, 7, group, '/fest drop') as unknown as Update);
+    await bot.handleUpdate(command(6, 7, group, '/fest drop two') as unknown as Update);
+    await bot.handleUpdate(command(7, 7, group, '/fest drop 0') as unknown as Update);
+    expect(replies.slice(1)).toEqual([
+      '↩️ Glass #1 (Bravo) cancelled. Its label will not be printed; if it comes out anyway, throw it away.',
+      'Glass #1 is already cancelled.',
+      'There is no glass #5 in the queue.',
+      'Send the glass number: /fest drop 7 (numbers are in /fest queue).',
+      'Send the glass number: /fest drop 7 (numbers are in /fest queue).',
+      'Send the glass number: /fest drop 7 (numbers are in /fest queue).',
+    ]);
+  });
+
+  it('a glass a check-in already closed is not cancelled', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    insertVenueCheckins(db, [
+      { checkin_id: 501, venue_id: 2167060, bid: 6000011, untappd_user: 'member', checkin_at: '2026-10-15T18:05:00.000Z' },
+    ], 'laptop', '2026-10-15T18:05:00.000Z');
+    await bot.handleUpdate(command(2, 7, { id: -100, type: 'supergroup' }, '/fest drop 1') as unknown as Update);
+    expect([queueFor(db, teamId).map((r) => r.glass_no), replies[1]])
+      .toEqual([[1], 'Glass #1 is already checked in — it cannot be cancelled.']);
   });
 });

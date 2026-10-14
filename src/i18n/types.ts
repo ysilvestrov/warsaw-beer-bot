@@ -218,6 +218,13 @@ export interface Messages {
   'fest.take_pick': string;
   'fest.take_button': string;
   'fest.taken': string;
+  'fest.undo_button': string;
+  'fest.drop_usage': string;
+  'fest.drop_none': string;
+  'fest.drop_already': string;
+  'fest.drop_closed': string;
+  'fest.dropped_printed': string;
+  'fest.dropped_unprinted': string;
   'fest.queue_header': string;
   'fest.queue_empty': string;
   'fest.queue_line': string;
