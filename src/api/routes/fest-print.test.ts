@@ -7,7 +7,7 @@ import { ensureProfile } from '../../storage/user_profiles';
 import { hashToken, rotateToken } from '../../storage/api_tokens';
 import { getFestBySlug } from '../../storage/fests';
 import { addMember, createTeam } from '../../storage/fest_teams';
-import { takeBeer } from '../../storage/fest_queue';
+import { removeGlass, takeBeer } from '../../storage/fest_queue';
 import { createStation } from '../../storage/fest_print';
 import { createApiApp } from '../index';
 import { NIIMBLUE_FILE } from './fest-print';
@@ -73,6 +73,15 @@ describe('print station API', () => {
     });
     const statuses = [other.status, ...(await Promise.all([failed(), failed({ error: '' }), failed({ error: '   ' })])).map((r) => r.status)];
     expect(statuses).toEqual([404, 400, 400, 400]);
+  });
+
+  it('a cancelled glass leaves the job list, and a late report on it is not found', async () => {
+    const { db, app, station, glassId } = setup();
+    const { team_id: teamId } = db.prepare('SELECT team_id FROM fest_queue WHERE id = ?').get(glassId) as { team_id: number };
+    removeGlass(db, { teamId, glassNo: 1, at: '2026-10-15T18:01:00.000Z' });
+    const list = await app.request('/fest-print/jobs', { headers: bearer(station) });
+    const late = await app.request(`/fest-print/jobs/${glassId}/printed`, { method: 'POST', headers: bearer(station) });
+    expect([await list.json(), late.status]).toEqual([{ jobs: [] }, 404]);
   });
 
   it('the job list is never cached', async () => {

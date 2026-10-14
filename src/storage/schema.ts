@@ -1058,6 +1058,21 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         CHECK (CASE WHEN json_valid(target_name_patterns) THEN json_type(target_name_patterns) = 'array' ELSE 0 END);
     `,
   },
+  {
+    version: 50,
+    // A cancelled glass (spec: fest queue): its number, so the next glass never takes it again — a
+    // label with that number may already be out. The queue row and its print job are deleted; who
+    // cancelled is not stored. A table, not a column on fest_queue: a code-only rollback then sees
+    // the queue without the cancelled glasses instead of printing them again. Idempotent.
+    sql: `
+      CREATE TABLE IF NOT EXISTS fest_glass_removed (
+        team_id    INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+        glass_no   INTEGER NOT NULL,
+        removed_at TEXT NOT NULL,
+        PRIMARY KEY (team_id, glass_no)
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

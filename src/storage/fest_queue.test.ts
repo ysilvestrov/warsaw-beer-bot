@@ -5,7 +5,7 @@ import { getFestBySlug } from './fests';
 import { createTeam } from './fest_teams';
 import { insertVenueCheckins } from './venue_checkins';
 import { mergeCheckin } from './checkins';
-import { memberBeerCheckins, queueFor, takeBeer } from './fest_queue';
+import { memberBeerCheckins, queueFor, removeGlass, takeBeer } from './fest_queue';
 
 function setup(): { db: DB; teamA: number; teamB: number } {
   const db = openDb(':memory:');
@@ -111,5 +111,65 @@ describe('memberBeerCheckins', () => {
       memberBeerCheckins(db, { members: member, beerIds: [11], sinceIso: '2026-10-15T17:50:00.000Z' }),
       memberBeerCheckins(db, { members: member, beerIds: [], sinceIso: '2026-10-15T17:50:00.000Z' }),
     ]).toEqual([[], []]);
+  });
+});
+
+describe('removeGlass', () => {
+  it('migration 50 is recorded', () => {
+    const { db } = setup();
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 50').get()).toEqual({ version: 50 });
+  });
+
+  it('takes the glass and its print job out of the queue and tombstones its number', () => {
+    const { db, teamA } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    const second = takeBeer(db, { teamId: teamA, beerId: 12, addedBy: 1, at: AT });
+    expect(removeGlass(db, { teamId: teamA, glassNo: 1, at: '2026-10-15T18:01:00+02:00' }))
+      .toEqual({ kind: 'removed', name: 'Bravo', printed: false });
+    expect(queueFor(db, teamA).map((r) => r.glass_no)).toEqual([2]);
+    expect(db.prepare('SELECT queue_id FROM fest_print_jobs').all()).toEqual([{ queue_id: second.id }]);
+    expect(db.prepare('SELECT team_id, glass_no, removed_at FROM fest_glass_removed').all())
+      .toEqual([{ team_id: teamA, glass_no: 1, removed_at: '2026-10-15T16:01:00.000Z' }]);
+  });
+
+  it('says whether the label was already printed', () => {
+    const { db, teamA } = setup();
+    const glass = takeBeer(db, { teamId: teamA, beerId: 12, addedBy: 1, at: AT });
+    db.prepare("UPDATE fest_print_jobs SET status = 'printed' WHERE queue_id = ?").run(glass.id);
+    expect(removeGlass(db, { teamId: teamA, glassNo: 1, at: AT })).toEqual({ kind: 'removed', name: 'Charlie', printed: true });
+  });
+
+  it('a cancelled number is already cancelled; a number never given, or given in another team, is missing', () => {
+    const { db, teamA, teamB } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    removeGlass(db, { teamId: teamA, glassNo: 1, at: AT });
+    takeBeer(db, { teamId: teamB, beerId: 11, addedBy: 1, at: AT });
+    expect([
+      removeGlass(db, { teamId: teamA, glassNo: 1, at: AT }),
+      removeGlass(db, { teamId: teamA, glassNo: 7, at: AT }),
+      removeGlass(db, { teamId: teamB, glassNo: 2, at: AT }),
+    ]).toEqual([{ kind: 'already' }, { kind: 'missing' }, { kind: 'missing' }]);
+    expect(queueFor(db, teamB).map((r) => r.glass_no)).toEqual([1]);
+  });
+
+  it('the number of a cancelled last glass is never given again, and the other team still starts at 1', () => {
+    const { db, teamA, teamB } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    takeBeer(db, { teamId: teamA, beerId: 12, addedBy: 1, at: AT });
+    removeGlass(db, { teamId: teamA, glassNo: 2, at: AT });
+    removeGlass(db, { teamId: teamA, glassNo: 1, at: AT });
+    expect([
+      takeBeer(db, { teamId: teamA, beerId: 12, addedBy: 1, at: AT }).glassNo,
+      takeBeer(db, { teamId: teamB, beerId: 12, addedBy: 1, at: AT }).glassNo,
+    ]).toEqual([3, 1]);
+  });
+
+  it('the same tap again after a cancel is a new glass, not the cancelled one back', () => {
+    const { db, teamA } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    removeGlass(db, { teamId: teamA, glassNo: 1, at: AT });
+    const again = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: new Date(Date.parse(AT) + 5000).toISOString() });
+    expect([again.glassNo, again.repeated]).toEqual([2, false]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM fest_print_jobs').get()).toEqual({ n: 1 });
   });
 });

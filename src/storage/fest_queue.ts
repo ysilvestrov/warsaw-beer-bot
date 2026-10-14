@@ -23,7 +23,7 @@ export const REPEAT_TAP_MS = 30 * 1000;
 
 // "Взяв" (spec §7): the next glass number and a queued print job in one transaction, so two
 // members pressing at once get two numbers and every number has its print job. Glass numbers are
-// per team and never reused; they also name the pre-printed stickers (spec §8, level 3). The same
+// per team and never reused, a cancelled one included; they also name the pre-printed stickers (spec §8, level 3). The same
 // member taking the same beer again within REPEAT_TAP_MS gets that glass back: on a phone in a
 // crowd a double tap is far likelier than two identical glasses half a minute apart.
 export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: number; at: string }): { id: number; glassNo: number; repeated: boolean } {
@@ -37,8 +37,11 @@ export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: n
         ORDER BY glass_no DESC LIMIT 1`,
     ).get(p.teamId, p.beerId, p.addedBy, since, at) as { id: number; glass_no: number } | undefined;
     if (recent) return { id: recent.id, glassNo: recent.glass_no, repeated: true };
-    const { next } = db.prepare('SELECT COALESCE(MAX(glass_no), 0) + 1 AS next FROM fest_queue WHERE team_id = ?')
-      .get(p.teamId) as { next: number };
+    // A cancelled glass keeps its number (fest_glass_removed): the next one never reuses it.
+    const { next } = db.prepare(
+      `SELECT MAX(COALESCE((SELECT MAX(glass_no) FROM fest_queue WHERE team_id = ?), 0),
+                  COALESCE((SELECT MAX(glass_no) FROM fest_glass_removed WHERE team_id = ?), 0)) + 1 AS next`,
+    ).get(p.teamId, p.teamId) as { next: number };
     const id = Number(db.prepare(
       'INSERT INTO fest_queue (team_id, glass_no, beer_id, added_by, added_at) VALUES (?, ?, ?, ?, ?)',
     ).run(p.teamId, next, p.beerId, p.addedBy, at).lastInsertRowid);
@@ -50,6 +53,34 @@ export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: n
 export function queueFor(db: DB, teamId: number): QueueRow[] {
   return db.prepare('SELECT id, glass_no, beer_id, added_by, added_at FROM fest_queue WHERE team_id = ? ORDER BY glass_no')
     .all(teamId) as QueueRow[];
+}
+
+export type RemoveGlassResult =
+  | { kind: 'removed'; name: string; printed: boolean }
+  | { kind: 'already' }
+  | { kind: 'missing' };
+
+// A glass taken by mistake (spec: cancelling a glass): the queue row and its print job go, its number
+// is tombstoned so takeBeer never gives it again. `printed` is the label's state at this moment — a
+// station may still be printing it. Whether a check-in already closed the glass is the caller's check.
+export function removeGlass(db: DB, p: { teamId: number; glassNo: number; at: string }): RemoveGlassResult {
+  const at = new Date(p.at).toISOString();
+  return db.transaction((): RemoveGlassResult => {
+    const row = db.prepare(
+      `SELECT q.id, b.name, j.status FROM fest_queue q
+         JOIN beers b ON b.id = q.beer_id
+         LEFT JOIN fest_print_jobs j ON j.queue_id = q.id
+        WHERE q.team_id = ? AND q.glass_no = ?`,
+    ).get(p.teamId, p.glassNo) as { id: number; name: string; status: string | null } | undefined;
+    if (!row) {
+      const gone = db.prepare('SELECT 1 FROM fest_glass_removed WHERE team_id = ? AND glass_no = ?').get(p.teamId, p.glassNo);
+      return gone ? { kind: 'already' } : { kind: 'missing' };
+    }
+    // Its print job goes with it: fest_print_jobs.queue_id is ON DELETE CASCADE, and openDb turns foreign keys on.
+    db.prepare('DELETE FROM fest_queue WHERE id = ?').run(row.id);
+    db.prepare('INSERT INTO fest_glass_removed (team_id, glass_no, removed_at) VALUES (?, ?, ?)').run(p.teamId, p.glassNo, at);
+    return { kind: 'removed', name: row.name, printed: row.status === 'printed' };
+  }).immediate();
 }
 
 // Two sources, one shape. checkins.checkin_at is canonical 'YYYY-MM-DD HH:MM:SS' UTC without a zone
