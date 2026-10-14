@@ -178,6 +178,15 @@ describe('cancelling a glass (fest:u, /fest drop)', () => {
     ]);
   });
 
+  it('a button pressed after the fest is over cancels nothing and stays on the message', async () => {
+    const { db, bot, teamId, replies, answers, edits } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    vi.setSystemTime(new Date('2026-10-20T12:00:00.000Z'));
+    await bot.handleUpdate(callback(2, 7, `fest:u:${teamId}:1`) as unknown as Update);
+    expect([queueFor(db, teamId).map((r) => r.glass_no), replies.length, answers[1], edits])
+      .toEqual([[1], 1, 'There is no festival to join right now.', []]);
+  });
+
   it('someone outside the team cancels nothing', async () => {
     const { db, bot, teamId, replies, answers, edits } = setup();
     await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);

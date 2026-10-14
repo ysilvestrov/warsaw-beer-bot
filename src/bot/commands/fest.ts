@@ -339,11 +339,17 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
   });
 
   // «↩️ Скасувати №N» under «Взяв»: any member may cancel; the button leaves the message whatever the answer.
+  // Like «Взяв» and /fest drop, it acts only while the fest is current or ahead: the queue of a fest
+  // that is over is its record.
   festCommand.action(/^fest:u:(\d+):(\d{1,9})$/, async (ctx) => {
     const db = ctx.deps.db;
     const team = teamById(db, Number(ctx.match[1]));
     if (!team || !isTeamMember(db, team.id, ctx.from.id)) {
       await ctx.answerCbQuery(ctx.t('fest.not_member'));
+      return;
+    }
+    if (!currentOrNextFests(db, new Date()).some((f) => f.id === team.fest_id)) {
+      await ctx.answerCbQuery(ctx.t('fest.no_fest'));
       return;
     }
     const text = dropGlass(ctx, team.fest_id, team.id, Number(ctx.match[2]));
