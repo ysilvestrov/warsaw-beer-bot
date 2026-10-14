@@ -30,6 +30,7 @@
 <div>
   <label>Ширина, мм <input id="w" type="number" min="10" max="100" step="1"></label>
   <label>Висота, мм <input id="h" type="number" min="8" max="50" step="1"></label>
+  <label>Відступ, мм <input id="m" type="number" min="0" max="4" step="0.5"></label>
 </div>
 <div id="status">Завантаження…</div>
 <canvas id="preview"></canvas>
@@ -56,11 +57,15 @@
   const $ = (id) => document.getElementById(id);
   const statusEl = $('status');
   const say = (text) => { statusEl.textContent = text; };
-  const size = { w: Number(store.get('fest-print-w')) || 40, h: Number(store.get('fest-print-h')) || 12 };
-  $('w').value = size.w; $('h').value = size.h;
-  for (const k of ['w', 'h']) {
+  // m: an empty band kept at the top and bottom of what is printed, tuned on the phone for the roll
+  // in use and remembered with the label size.
+  const stored = (k, dflt) => { const v = store.get(`fest-print-${k}`); return v === null || v === '' || Number.isNaN(Number(v)) ? dflt : Number(v); };
+  const size = { w: stored('w', 40) || 40, h: stored('h', 12) || 12, m: stored('m', 0.5) };
+  $('w').value = size.w; $('h').value = size.h; $('m').value = size.m;
+  for (const k of ['w', 'h', 'm']) {
     $(k).addEventListener('change', () => {
-      size[k] = Number($(k).value) || size[k];
+      const v = Number($(k).value);
+      size[k] = k === 'm' ? (Number.isFinite(v) ? Math.min(4, Math.max(0, v)) : size.m) : (v || size[k]);
       store.set(`fest-print-${k}`, String(size[k]));
       render();
     });
@@ -77,8 +82,9 @@
     return res.json();
   }
 
-  // One label, drawn as a person reads it: the glass number large on the left; the beer on up to
-  // two lines, the second cut with "…"; the initials below. The encoder rotates it for the head.
+  // One label, drawn as a person reads it: the glass number large on the left; on the right the
+  // brewery, the beer and the initials, one line each, a too-long line cut with "…". Nothing is drawn
+  // in the top and bottom margin. The encoder rotates the canvas for the head.
   function fitLine(ctx, text, width) {
     if (ctx.measureText(text).width <= width) return text;
     let t = text;
@@ -86,34 +92,36 @@
     return `${t.trimEnd()}…`;
   }
 
-  function wrapTwo(ctx, text, width) {
-    const words = text.split(/\s+/);
-    let first = '';
-    while (words.length && ctx.measureText(first ? `${first} ${words[0]}` : words[0]).width <= width) {
-      first = first ? `${first} ${words.shift()}` : words.shift();
-    }
-    if (!first) return [fitLine(ctx, text, width)]; // one word longer than the line
-    return words.length ? [first, fitLine(ctx, words.join(' '), width)] : [first];
-  }
+  // The printhead prints this many dots across the label (D11: 96, i.e. 12 mm). A label taller than
+  // that cannot be printed whole: on the rehearsal a 15 mm label lost its top 3 mm, while the screen
+  // showed it fine. So the canvas is never taller than the head, and the preview shows the same band.
+  const headDots = () => (client && client.getModelMetadata() ? client.getModelMetadata().printheadPixels : null);
 
   function draw(canvas, job) {
-    const W = Math.round(size.w * DOTS_PER_MM), H = Math.round(size.h * DOTS_PER_MM);
+    const head = headDots();
+    const W = Math.round(size.w * DOTS_PER_MM);
+    const H = head ? Math.min(Math.round(size.h * DOTS_PER_MM), head) : Math.round(size.h * DOTS_PER_MM);
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
-    const pad = Math.round(H * 0.06);
-    ctx.font = `bold ${Math.round(H * 0.62)}px sans-serif`;
+    const m = Math.min(Math.round(size.m * DOTS_PER_MM), Math.floor(H / 3));
+    const top = m, band = H - 2 * m, pad = Math.round(H * 0.05);
+    ctx.font = `bold ${Math.round(band * 0.8)}px sans-serif`;
     const numText = `№${job.glassNo}`;
     const numW = Math.min(ctx.measureText(numText).width, W * 0.35);
-    ctx.fillText(numText, pad, H / 2, numW);
+    ctx.fillText(numText, pad, top + band / 2, numW);
     const left = pad * 2 + numW, avail = W - left - pad;
-    const nameSize = Math.round(H * 0.27);
-    ctx.font = `bold ${nameSize}px sans-serif`;
-    const lines = wrapTwo(ctx, job.beerName, avail);
-    lines.forEach((line, i) => ctx.fillText(line, left, pad + nameSize * (0.55 + i * 1.05)));
-    ctx.font = `${Math.round(H * 0.24)}px sans-serif`;
-    ctx.fillText(job.initials, left, H - pad - H * 0.12, avail);
+    // An older server sends no brewery: two lines then, as before.
+    const rows = job.brewery
+      ? [[job.brewery, true], [job.beerName, true], [job.initials, false]]
+      : [[job.beerName, true], [job.initials, false]];
+    const rowH = band / rows.length;
+    const fontPx = Math.round(rowH * 0.82);
+    rows.forEach(([text, bold], i) => {
+      ctx.font = `${bold ? 'bold ' : ''}${fontPx}px sans-serif`;
+      ctx.fillText(fitLine(ctx, String(text), avail), left, top + rowH * (i + 0.5));
+    });
   }
 
   async function printOne(job) {
@@ -179,7 +187,7 @@
       row.className = 'row';
       const text = document.createElement('div');
       text.className = `text${job.status === 'failed' ? ' failed' : ''}`;
-      text.textContent = `№${job.glassNo} ${job.beerName} · ${job.initials}` + (job.status === 'failed' ? ` — не вдалося: ${job.error || ''}` : '');
+      text.textContent = `№${job.glassNo} ${job.brewery ? `${job.brewery} · ` : ''}${job.beerName} · ${job.initials}` + (job.status === 'failed' ? ` — не вдалося: ${job.error || ''}` : '');
       const png = document.createElement('button');
       png.textContent = 'PNG';
       png.onclick = () => savePng(job);
@@ -199,7 +207,9 @@
     if (!token) { say('Немає токена станції — відкрий посилання з /fest printer у боті.'); return; }
     try {
       jobs = (await api('/fest-print/jobs')).jobs;
-      if (!printing) say(client ? `Принтер підключено. У черзі: ${jobs.length}` : `У черзі: ${jobs.length}. Підключи принтер.`);
+      const head = headDots();
+      const clipped = head && size.h * DOTS_PER_MM > head ? ` Етикетка вища за голівку (${head / DOTS_PER_MM} мм) — друкую смугу ${head / DOTS_PER_MM} мм.` : '';
+      if (!printing) say(client ? `Принтер підключено. У черзі: ${jobs.length}.${clipped}` : `У черзі: ${jobs.length}. Підключи принтер.`);
     } catch (e) {
       say(e.message);
     }
