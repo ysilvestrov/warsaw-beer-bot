@@ -139,7 +139,7 @@ describe('markerLine', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and see them fail.** `npx vitest run scripts/cross-review/core.test.ts` — expected FAIL: the new imports are not exported, and `runDirPrefix` has no mode.
+- [ ] **Step 2: Run the tests and see them fail.** `npm test -- scripts/cross-review/core.test.ts` — expected FAIL: the new imports are not exported, and `runDirPrefix` has no mode.
 
 - [ ] **Step 3: Implement.** In `scripts/cross-review/core.ts`:
 
@@ -239,7 +239,7 @@ describe('prompt-spec.md template', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and see it fail.** `npx vitest run scripts/cross-review/core.test.ts` — expected FAIL: `ENOENT … prompt-spec.md`.
+- [ ] **Step 2: Run it and see it fail.** `npm test -- scripts/cross-review/core.test.ts` — expected FAIL: `ENOENT … prompt-spec.md`.
 
 - [ ] **Step 3: Create `scripts/cross-review/prompt-spec.md`:**
 
