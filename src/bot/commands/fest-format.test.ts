@@ -245,7 +245,7 @@ describe('formatQueue', () => {
       '   ✅ YS ⏳ OB',
       '№3 <b>Beer &lt;3&gt;</b> (PINTA) · взяв OB',
       '   ⏳ YS ⏳ OB',
-      'Сховано келихів, випитих усіма: 2.',
+      'Сховано, бо всі вже зачекінились: 2.',
     ].join('\n'));
   });
 
@@ -267,15 +267,15 @@ describe('formatQueue', () => {
     ].join('\n'));
   });
 
-  it('one hidden glass reads as a count, not a plural adjective', () => {
-    expect(formatQueue(t, { items: [item(1, ['a', 'b'])] }).split('\n').at(-1)).toBe('Сховано келихів, випитих усіма: 1.');
+  it('one hidden glass reads as a count, with no noun or adjective to agree with it', () => {
+    expect(formatQueue(t, { items: [item(1, ['a', 'b'])] }).split('\n').at(-1)).toBe('Сховано, бо всі вже зачекінились: 1.');
   });
 
   it('a queue checked in by everyone shows only the header and the count', () => {
     expect(formatQueue(t, { items: [item(1, ['a', 'b']), item(2, ['c', 'd'])] })).toBe([
       '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
       '',
-      'Сховано келихів, випитих усіма: 2.',
+      'Сховано, бо всі вже зачекінились: 2.',
     ].join('\n'));
   });
 
