@@ -43,13 +43,27 @@ describe('resolveShortLink', () => {
     ]);
   });
 
-  it('is null for a redirect elsewhere, a page instead of a redirect, or a failed request', async () => {
-    const thrown = (async () => { throw new Error('ENOTFOUND'); }) as unknown as typeof fetch;
+  it('is not_beer for a redirect elsewhere or a page instead of a redirect', async () => {
     expect([
       await resolveShortLink('https://untp.beer/a', answer(302, 'https://untappd.com/v/legia/11142155')),
       await resolveShortLink('https://untp.beer/a', answer(302)),
       await resolveShortLink('https://untp.beer/a', answer(200)),
+      await resolveShortLink('https://untp.beer/a', answer(404)),
+    ]).toEqual(['not_beer', 'not_beer', 'not_beer', 'not_beer']);
+  });
+
+  it('is failed when untp.beer does not answer or answers with a server error: the link may be fine', async () => {
+    const thrown = (async () => { throw new Error('ENOTFOUND'); }) as unknown as typeof fetch;
+    expect([
       await resolveShortLink('https://untp.beer/a', thrown),
-    ]).toEqual([null, null, null, null]);
+      await resolveShortLink('https://untp.beer/a', answer(503)),
+    ]).toEqual(['failed', 'failed']);
+  });
+
+  it('lets the redirect body go instead of leaving it unread', async () => {
+    let cancelled = false;
+    const body = new ReadableStream({ cancel() { cancelled = true; } });
+    const fetchFn = (async () => new Response(body, { status: 302, headers: { location: 'https://untappd.com/b/x/5' } })) as unknown as typeof fetch;
+    expect([await resolveShortLink('https://untp.beer/a', fetchFn), cancelled]).toEqual([5, true]);
   });
 });

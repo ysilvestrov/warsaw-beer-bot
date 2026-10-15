@@ -30,6 +30,10 @@ describe('parseMcpBeer', () => {
     expect(parseMcpBeer(asTool(JSON.stringify(body)))).toMatchObject({ rating_global: null, style: null, abv: null });
   });
 
+  it('reads the body from the first text item, after an item of another kind', () => {
+    expect(parseMcpBeer({ content: [{ type: 'image', data: 'x' }, { type: 'text', text: BODY }] })).toMatchObject({ untappd_id: 6134008 });
+  });
+
   it('is null for a tool error, text that is not JSON, a beer without a brewery and no content', () => {
     const body = JSON.parse(BODY);
     delete body.beer.brewery;

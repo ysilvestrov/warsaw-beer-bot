@@ -20,14 +20,22 @@ export function beerLinkOf(text: string): BeerLink {
   return SHORT_RE.test(t) ? { short: t } : null;
 }
 
-/** One GET without following the redirect: the bid from a 3xx Location to a beer page, else null. */
-export async function resolveShortLink(url: string, fetchFn: typeof fetch, timeoutMs = 5000): Promise<number | null> {
+/**
+ * One GET without following the redirect: the bid from a 3xx Location to a beer page; `not_beer`
+ * when untp.beer answered with something else; `failed` when it did not answer (timeout, network,
+ * 5xx) — the link may be fine, so the person is told to try again rather than that it is wrong.
+ */
+export async function resolveShortLink(url: string, fetchFn: typeof fetch, timeoutMs = 5000): Promise<number | 'not_beer' | 'failed'> {
+  let res: Response;
   try {
-    const res = await fetchFn(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
-    if (res.status < 300 || res.status > 399) return null;
-    const link = beerLinkOf(res.headers.get('location') ?? '');
-    return link !== null && 'bid' in link ? link.bid : null;
+    res = await fetchFn(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
   } catch {
-    return null;
+    return 'failed';
   }
+  // Only the status and a header are read: the body is let go so the connection is not held.
+  await res.body?.cancel().catch(() => {});
+  if (res.status >= 500) return 'failed';
+  if (res.status < 300 || res.status > 399) return 'not_beer';
+  const link = beerLinkOf(res.headers.get('location') ?? '');
+  return link !== null && 'bid' in link ? link.bid : 'not_beer';
 }

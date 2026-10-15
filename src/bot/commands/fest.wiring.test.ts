@@ -171,9 +171,15 @@ describe('/fest take <Untappd link>', () => {
   });
 
   it('a short link that does not lead to a beer takes nothing and says so', async () => {
-    const { db, bot, teamId, replies } = setup({ resolveShortLink: async () => null });
+    const { db, bot, teamId, replies } = setup({ resolveShortLink: async () => 'not_beer' });
     await bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untp.beer/zzz') as unknown as Update);
     expect([glasses(db, teamId), replies]).toEqual([[], [createTranslator('en')('fest.take_link_bad')]]);
+  });
+
+  it('a short link untp.beer did not answer for takes nothing and asks to try again, not that it is wrong', async () => {
+    const { db, bot, teamId, replies } = setup({ resolveShortLink: async () => 'failed' });
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untp.beer/zzz') as unknown as Update);
+    expect([glasses(db, teamId), replies]).toEqual([[], [createTranslator('en')('fest.take_link_unknown')]]);
   });
 
   it('a full link fits the team picker whole, so the beer picked is the beer linked', () => {

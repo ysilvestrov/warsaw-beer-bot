@@ -34,8 +34,8 @@ export interface FestCommandDeps {
   downloadFile: (fileId: string) => Promise<Buffer>;
   /** The print station page as phones reach it (FEST_PRINT_BASE_URL + /fest-print). */
   printStationUrl: string;
-  /** A short untp.beer link → the bid it redirects to, or null. */
-  resolveShortLink?: (url: string) => Promise<number | null>;
+  /** A short untp.beer link → the bid it redirects to; `not_beer`, or `failed` when untp.beer did not answer. */
+  resolveShortLink?: (url: string) => Promise<number | 'not_beer' | 'failed'>;
   /** A beer the bot has never seen, from Untappd (MCP get_beer); absent without FEST_MCP_URL. */
   lookupBeer?: (bid: number) => Promise<BidBeerInput | null>;
 }
@@ -150,9 +150,10 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
   // the beer exactly, so it is taken at once — off the menu too, and in the version actually poured.
   async function takeByLink(ctx: BotContext & { from: { id: number } }, team: FestTeam, link: { bid: number } | { short: string }): Promise<void> {
     const db = ctx.deps.db;
-    const bid = 'bid' in link ? link.bid : deps.resolveShortLink ? await deps.resolveShortLink(link.short) : null;
-    if (bid === null) {
-      await ctx.reply(ctx.t('fest.take_link_bad'));
+    const bid = 'bid' in link ? link.bid : deps.resolveShortLink ? await deps.resolveShortLink(link.short) : 'failed';
+    if (bid === 'not_beer' || bid === 'failed') {
+      // A link untp.beer did not answer for may be fine: try again, not "wrong link".
+      await ctx.reply(ctx.t(bid === 'failed' ? 'fest.take_link_unknown' : 'fest.take_link_bad'));
       return;
     }
     let beer = db.prepare('SELECT id, name FROM beers WHERE untappd_id = ?').get(bid) as { id: number; name: string } | undefined;

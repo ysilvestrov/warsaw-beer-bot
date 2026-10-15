@@ -21,11 +21,12 @@ const bodySchema = z.object({
 /** The beer as the catalogue stores it, or null for a tool error or an answer of another shape. */
 export function parseMcpBeer(result: ToolCallResult): BidBeerInput | null {
   if (result.isError || !Array.isArray(result.content)) return null;
-  const first = result.content[0] as { type?: unknown; text?: unknown } | undefined;
-  if (!first || first.type !== 'text' || typeof first.text !== 'string') return null;
+  // The first text item: the probe saw it at content[0], and an item of another kind before it is not the body.
+  const text = (result.content as { type?: unknown; text?: unknown }[]).find((c) => c?.type === 'text' && typeof c.text === 'string')?.text as string | undefined;
+  if (text === undefined) return null;
   let json: unknown;
   try {
-    json = JSON.parse(first.text);
+    json = JSON.parse(text);
   } catch {
     return null;
   }
