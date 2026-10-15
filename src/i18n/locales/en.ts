@@ -263,7 +263,7 @@ export const en: Messages = {
   'fest.queue_header': '<b>Glass queue</b> (✅ checked in · ⏳ not yet)',
   'fest.queue_empty': 'The queue is empty. Tap “🍺 Got it” in a section or send /fest take <name>.',
   'fest.queue_line': '#{glass} <b>{name}</b>{section} · got by {taker}\n   {marks}',
-  'fest.queue_done_hidden': 'Checked in by everyone and hidden: {count}.',
+  'fest.queue_done_hidden': 'Hidden glasses checked in by everyone: {count}.',
   'fest.queue_link': '#{glass} {name} ↗',
   'fest.alert_new': '🆕 Just tapped:',
   'fest.alert_pouring': '🍺 Already pouring:',

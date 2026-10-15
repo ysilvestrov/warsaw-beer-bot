@@ -245,7 +245,7 @@ describe('formatQueue', () => {
       '   ✅ YS ⏳ OB',
       '№3 <b>Beer &lt;3&gt;</b> (PINTA) · взяв OB',
       '   ⏳ YS ⏳ OB',
-      'Випиті всіма й сховані: 2.',
+      'Сховано келихів, випитих усіма: 2.',
     ].join('\n'));
   });
 
@@ -258,11 +258,24 @@ describe('formatQueue', () => {
     ].join('\n'));
   });
 
+  it('a glass with no member rows is not counted as checked in by everyone: it stays shown', () => {
+    expect(formatQueue(t, { items: [item(1, [])] })).toBe([
+      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+      '',
+      '№1 <b>Beer &lt;1&gt;</b> (PINTA) · взяв OB',
+      '   ',
+    ].join('\n'));
+  });
+
+  it('one hidden glass reads as a count, not a plural adjective', () => {
+    expect(formatQueue(t, { items: [item(1, ['a', 'b'])] }).split('\n').at(-1)).toBe('Сховано келихів, випитих усіма: 1.');
+  });
+
   it('a queue checked in by everyone shows only the header and the count', () => {
     expect(formatQueue(t, { items: [item(1, ['a', 'b']), item(2, ['c', 'd'])] })).toBe([
       '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
       '',
-      'Випиті всіма й сховані: 2.',
+      'Сховано келихів, випитих усіма: 2.',
     ].join('\n'));
   });
 

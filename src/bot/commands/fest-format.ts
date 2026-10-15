@@ -149,7 +149,8 @@ export function searchMenu(view: FestView, query: string, limit = 8): { beerId: 
   return out;
 }
 
-const isOpen = (item: QueueItemView): boolean => item.closedBy.some((c) => c.checkinId === null);
+// Open unless someone shows every member's check-in: a glass with no member rows has no such evidence.
+const isOpen = (item: QueueItemView): boolean => item.closedBy.length === 0 || item.closedBy.some((c) => c.checkinId === null);
 
 /** Queue items not yet checked in by everyone first, each group by glass number. */
 export function queueOrder(view: QueueView): QueueItemView[] {
