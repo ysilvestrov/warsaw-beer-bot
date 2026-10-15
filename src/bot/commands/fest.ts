@@ -11,6 +11,8 @@ import { menuFor } from '../../storage/fest_menu';
 import { buildFestView } from '../../jobs/fest-view';
 import { buildQueueView } from '../../jobs/fest-queue-view';
 import { removeGlass, takeBeer } from '../../storage/fest_queue';
+import { upsertBeerByBid, type BidBeerInput } from '../../storage/beers';
+import { beerLinkOf } from '../../sources/untappd/beer-link';
 import { buildBeerPageUrl } from '../../sources/untappd/beer-page';
 import type { MenuPageResult } from '../../jobs/fest-ingest';
 import { parseStandsCsv } from '../../domain/fest/stands-csv';
@@ -32,6 +34,10 @@ export interface FestCommandDeps {
   downloadFile: (fileId: string) => Promise<Buffer>;
   /** The print station page as phones reach it (FEST_PRINT_BASE_URL + /fest-print). */
   printStationUrl: string;
+  /** A short untp.beer link → the bid it redirects to, or null. */
+  resolveShortLink?: (url: string) => Promise<number | null>;
+  /** A beer the bot has never seen, from Untappd (MCP get_beer); absent without FEST_MCP_URL. */
+  lookupBeer?: (bid: number) => Promise<BidBeerInput | null>;
 }
 
 const isGroup = (type: string | undefined): boolean => type === 'group' || type === 'supergroup';
@@ -78,6 +84,15 @@ export function pickCallback(teamId: number, sub: Sub, query: string): string {
   return prefix + q;
 }
 
+/**
+ * A full beer link as the shortest one naming the same bid. The team picker carries the query in 64
+ * bytes of callback data and cuts it: a full link cut there would keep a prefix of its bid — another beer.
+ */
+export function compactLinkQuery(query: string): string {
+  const link = beerLinkOf(query);
+  return link !== null && 'bid' in link ? `https://untappd.com/b/-/${link.bid}` : query;
+}
+
 /** The team a command refers to: the group's own team, or the caller's only team in a private chat. */
 async function resolveTeam(ctx: BotContext & { from: { id: number } }, fest: Fest, sub: Sub = '', query = ''): Promise<FestTeam | null> {
   const db = ctx.deps.db;
@@ -118,8 +133,43 @@ function dropGlass(ctx: BotContext, festId: number, teamId: number, glassNo: num
   return ctx.t(r.printed ? 'fest.dropped_printed' : 'fest.dropped_unprinted', { glass: glassNo, name: r.name });
 }
 
+/** «Взяв» done: the glass number, announced with its undo button. */
+async function replyTaken(ctx: BotContext & { from: { id: number } }, team: FestTeam, beerId: number, name: string): Promise<void> {
+  const db = ctx.deps.db;
+  const { glassNo } = takeBeer(db, { teamId: team.id, beerId, addedBy: ctx.from.id, at: new Date().toISOString() });
+  const initials = members(db, team.id).find((m) => m.telegram_id === ctx.from.id)?.initials ?? '?';
+  await ctx.reply(ctx.t('fest.taken', { glass: glassNo, name, initials }), Markup.inlineKeyboard([
+    [Markup.button.callback(ctx.t('fest.undo_button', { glass: glassNo }), `fest:u:${team.id}:${glassNo}`)],
+  ]));
+}
+
 export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
   const festCommand = new Composer<BotContext>();
+
+  // /fest take <Untappd link> (spec 2026-10-15-fest-queue-reality-design.md §PR 1): the link names
+  // the beer exactly, so it is taken at once — off the menu too, and in the version actually poured.
+  async function takeByLink(ctx: BotContext & { from: { id: number } }, team: FestTeam, link: { bid: number } | { short: string }): Promise<void> {
+    const db = ctx.deps.db;
+    const bid = 'bid' in link ? link.bid : deps.resolveShortLink ? await deps.resolveShortLink(link.short) : null;
+    if (bid === null) {
+      await ctx.reply(ctx.t('fest.take_link_bad'));
+      return;
+    }
+    let beer = db.prepare('SELECT id, name FROM beers WHERE untappd_id = ?').get(bid) as { id: number; name: string } | undefined;
+    if (!beer && deps.lookupBeer) {
+      const found = await deps.lookupBeer(bid).catch((e: unknown) => {
+        ctx.deps.log.warn({ bid, err: e instanceof Error ? e.message : String(e) }, 'fest take: get_beer failed');
+        return null;
+      });
+      // Only the beer that was asked for: an answer about another bid is not this link's beer.
+      if (found && found.untappd_id === bid) beer = { id: upsertBeerByBid(db, found), name: found.name };
+    }
+    if (!beer) {
+      await ctx.reply(ctx.t('fest.take_link_unknown'));
+      return;
+    }
+    await replyTaken(ctx, team, beer.id, beer.name);
+  }
 
   async function runSub(ctx: BotContext, fest: Fest, team: FestTeam, sub: Sub, query: string): Promise<void> {
     const db = ctx.deps.db;
@@ -141,12 +191,19 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
         await ctx.reply(ctx.t(take ? 'fest.take_usage' : 'fest.add_usage'));
         return;
       }
-      const found = searchMenu(buildFestView(db, { festId: fest.id, teamId: team.id, now }), query);
+      const link = take ? beerLinkOf(query) : null;
+      if (link !== null && ctx.from) {
+        await takeByLink(ctx as BotContext & { from: { id: number } }, team, link);
+        return;
+      }
+      const { found, total } = searchMenu(buildFestView(db, { festId: fest.id, teamId: team.id, now }), query);
       if (found.length === 0) {
         await ctx.reply(ctx.t(take ? 'fest.take_none' : 'fest.add_none', { query }));
         return;
       }
-      await ctx.reply(ctx.t(take ? 'fest.take_pick' : 'fest.add_pick'), Markup.inlineKeyboard(
+      const pick = ctx.t(take ? 'fest.take_pick' : 'fest.add_pick');
+      const more = total > found.length ? `\n${ctx.t('fest.search_more', { shown: found.length, total })}` : '';
+      await ctx.reply(pick + more, Markup.inlineKeyboard(
         found.map((f) => [Markup.button.callback(`${take ? '🍺' : '➕'} ${f.label.slice(0, 55)}`, `fest:${take ? 'q' : 'a'}:${team.id}:${f.beerId}`)]),
       ));
       return;
@@ -238,7 +295,7 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     }
 
     const known = (SUBS as readonly string[]).includes(sub) ? sub as Sub : '';
-    const query = rest.join(' ');
+    const query = known === 'take' ? compactLinkQuery(rest.join(' ')) : rest.join(' ');
     const team = await resolveTeam(ctx, fest, known, query);
     if (!team) return;
     await runSub(ctx, fest, team, known, query);
@@ -330,12 +387,8 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     }
     const beer = menuFor(db, team.fest_id).find((m) => m.beer_id === beerId);
     if (!beer) return ctx.answerCbQuery();
-    const { glassNo } = takeBeer(db, { teamId: team.id, beerId, addedBy: ctx.from.id, at: new Date().toISOString() });
-    const initials = members(db, team.id).find((m) => m.telegram_id === ctx.from.id)?.initials ?? '?';
     await ctx.answerCbQuery();
-    await ctx.reply(ctx.t('fest.taken', { glass: glassNo, name: beer.name, initials }), Markup.inlineKeyboard([
-      [Markup.button.callback(ctx.t('fest.undo_button', { glass: glassNo }), `fest:u:${team.id}:${glassNo}`)],
-    ]));
+    await replyTaken(ctx, team, beerId, beer.name);
   });
 
   // «↩️ Скасувати №N» under «Взяв»: any member may cancel; the button leaves the message whatever the answer.

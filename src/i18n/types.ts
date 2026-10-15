@@ -216,6 +216,9 @@ export interface Messages {
   'fest.take_usage': string;
   'fest.take_none': string;
   'fest.take_pick': string;
+  'fest.take_link_bad': string;
+  'fest.take_link_unknown': string;
+  'fest.search_more': string;
   'fest.take_button': string;
   'fest.taken': string;
   'fest.undo_button': string;

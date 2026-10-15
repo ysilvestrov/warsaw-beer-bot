@@ -1,0 +1,27 @@
+{
+  "beer": {
+    "bid": 6134008,
+    "beer_name": "Hop Selection: Motueka",
+    "beer_label": "https://assets.untappd.com/site/beer_logos/beer-6134008_87d0c_sm.jpeg",
+    "beer_abv": 6.5,
+    "beer_ibu": 0,
+    "beer_description": "To piwo jest wyjątkowe — uwarzone z chmielem, który wybraliśmy podczas kontrakta",
+    "beer_style": "IPA - New England / Hazy",
+    "is_in_production": 1,
+    "beer_slug": "pinta-hop-selection-motueka",
+    "is_vintage": 0,
+    "vintages": {
+      "count": 0,
+      "items": []
+    },
+    "rating_count": 1600,
+    "rating_score": 4.02203,
+    "created_at": "Mon, 20 Jan 2025 09:22:50 +0000",
+    "brewery": {
+      "brewery_id": 14861,
+      "brewery_name": "PINTA",
+      "brewery_slug": "pinta",
+      "country_name": "Poland"
+    }
+  }
+}

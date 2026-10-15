@@ -161,12 +161,16 @@ describe('formatTargets', () => {
 
 describe('searchMenu', () => {
   it('matches name or brewery case-insensitively, up to the limit', () => {
-    expect([searchMenu(view(), 'pinta').map((f) => f.beerId), searchMenu(view(), 'BESK').map((f) => f.label), searchMenu(view(), 'pinta', 1).length])
+    expect([searchMenu(view(), 'pinta').found.map((f) => f.beerId), searchMenu(view(), 'BESK').found.map((f) => f.label), searchMenu(view(), 'pinta', 1).found.length])
       .toEqual([[1, 2], ['Beskidy — Verdant'], 1]);
   });
 
+  it('counts every match, the ones past the limit too (#873)', () => {
+    expect([searchMenu(view(), 'pinta', 1).total, searchMenu(view(), 'pinta', 2).total]).toEqual([2, 2]);
+  });
+
   it('finds nothing for an empty or unmatched query', () => {
-    expect([searchMenu(view(), '   '), searchMenu(view(), 'zzz')]).toEqual([[], []]);
+    expect([searchMenu(view(), '   '), searchMenu(view(), 'zzz')]).toEqual([{ found: [], total: 0 }, { found: [], total: 0 }]);
   });
 });
 

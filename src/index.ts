@@ -38,6 +38,8 @@ import { runFestAlerts } from './jobs/fest-alerts';
 import { runFestFriendFeed, runFestMcpKeepalive } from './jobs/fest-friend-feed';
 import { runFestMcpVenues } from './jobs/fest-mcp-venues';
 import { createFestMcp } from './sources/untappd/mcp-client';
+import { parseMcpBeer } from './sources/untappd/mcp-beer';
+import { resolveShortLink } from './sources/untappd/beer-link';
 import { festPrintUrl } from './bot/commands/fest';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
@@ -242,6 +244,9 @@ async function main(): Promise<void> {
     onRecover: () => adminAlert('✅ Untappd профіль-скрейп: доступ відновлено.'),
   });
 
+  // One Untappd MCP client for the bot and the fest crons: a second one on the same OAuth file would
+  // race it over the refresh token's rotation. Off without FEST_MCP_URL.
+  const festMcp = env.FEST_MCP_URL ? createFestMcp({ url: env.FEST_MCP_URL, oauthFile: env.FEST_MCP_OAUTH_FILE, log }) : null;
   const festDeps = untappdHttp ? {
     db, log, http: untappdHttp, notifyAdmin,
     breaker: createPersistentCircuitBreaker({
@@ -283,6 +288,8 @@ async function main(): Promise<void> {
       downloadFile,
       printStationUrl: festPrintUrl(env.FEST_PRINT_BASE_URL),
       refreshMenu: festDeps ? (fest, now) => refreshFestMenu(festDeps, fest, now) : undefined,
+      resolveShortLink: (url) => resolveShortLink(url, fetch),
+      lookupBeer: festMcp ? async (bid) => parseMcpBeer(await festMcp.call('get_beer', { beerId: bid })) : undefined,
     }),
     createRefreshCommand(
       async (notify, opts) => {
@@ -490,10 +497,10 @@ async function main(): Promise<void> {
   // a polling window; the three venue feeds (spec 2026-10-02-wfp-mcp-venue-eye-design.md); and a
   // daily keepalive that keeps the refresh token in use outside the fest.
   // Independent of the cookie'd client; off without FEST_MCP_URL.
-  if (env.FEST_MCP_URL) {
+  if (festMcp) {
     const mcpDeps = {
       db, log, notifyAdmin,
-      mcp: createFestMcp({ url: env.FEST_MCP_URL, oauthFile: env.FEST_MCP_OAUTH_FILE, log }),
+      mcp: festMcp,
       breaker: createPersistentCircuitBreaker({
         db, key: 'fest_mcp_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
         onTrip: () => adminAlert('Фест: Untappd MCP не відповідає — пауза 30 хв'),

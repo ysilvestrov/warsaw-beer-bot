@@ -11,7 +11,8 @@ import { queueFor } from '../../storage/fest_queue';
 import { stationTeam } from '../../storage/fest_print';
 import { insertVenueCheckins } from '../../storage/venue_checkins';
 import type { BotContext } from '../index';
-import { createFestCommand } from './fest';
+import { compactLinkQuery, createFestCommand, pickCallback, type FestCommandDeps } from './fest';
+import { beerLinkOf } from '../../sources/untappd/beer-link';
 
 const BOT_INFO: UserFromGetMe = {
   id: 1, is_bot: true, first_name: 'B', username: 'BeerBot', can_join_groups: true,
@@ -24,7 +25,7 @@ function callback(updateId: number, from: number, data: string) {
     message: { message_id: 1, date: 1, chat: { id: -100, type: 'supergroup' as const, title: 'Team' } } } };
 }
 
-function setup(): {
+function setup(extra: Partial<FestCommandDeps> = {}): {
   db: DB; bot: Telegraf<BotContext>; teamId: number; replies: string[]; answers: (string | undefined)[]; extras: unknown[];
   replyExtras: unknown[]; edits: unknown[];
 } {
@@ -46,7 +47,7 @@ function setup(): {
   const replyExtras: unknown[] = [];
   const edits: unknown[] = [];
   bot.use((ctx, next) => {
-    ctx.deps = { db, env: {}, log: {} } as never;
+    ctx.deps = { db, env: {}, log: { warn: () => {} } } as never;
     ctx.locale = 'en';
     ctx.t = createTranslator('en');
     ctx.reply = (async (message: string, extra?: unknown) => { replies.push(message); replyExtras.push(extra); return { message_id: 1 }; }) as never;
@@ -54,7 +55,7 @@ function setup(): {
     ctx.answerCbQuery = (async (text?: string, extra?: unknown) => { answers.push(text); extras.push(extra); return true; }) as never;
     return next();
   });
-  bot.use(createFestCommand({ downloadFile: async () => Buffer.from(''), printStationUrl: 'https://beer-api.example/fest-print' }));
+  bot.use(createFestCommand({ downloadFile: async () => Buffer.from(''), printStationUrl: 'https://beer-api.example/fest-print', ...extra }));
   return { db, bot, teamId, replies, answers, extras, replyExtras, edits };
 }
 
@@ -128,6 +129,92 @@ function command(updateId: number, from: number, chat: { id: number; type: 'priv
     chat: chat.type === 'private' ? { id: chat.id, type: 'private' as const, first_name: 'T' } : { id: chat.id, type: 'supergroup' as const, title: 'Team' },
     from: { id: from, is_bot: false, first_name: 'Test' } } };
 }
+
+const GROUP = { id: -100, type: 'supergroup' as const };
+const glasses = (db: DB, teamId: number) => queueFor(db, teamId).map((r) => [r.glass_no, r.beer_id]);
+const CAROTENES = {
+  untappd_id: 7230846, name: 'Carotenes', brewery: 'Magic Road', style: 'IPA', abv: 6, rating_global: 3.9,
+  normalized_name: 'carotenes', normalized_brewery: 'magic road', untappd_id_source: 'checkin' as const,
+};
+
+describe('/fest take <Untappd link>', () => {
+  it('a beer the bot knows is taken at once by its full link, off the menu or not', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untappd.com/b/brew-bravo/6000011') as unknown as Update);
+    expect([glasses(db, teamId), replies]).toEqual([[[1, 11]], ['🍺 Glass #1 — Bravo · YS']]);
+  });
+
+  it('a short link is resolved, and a beer the bot has never seen is read from Untappd and stored', async () => {
+    const asked: unknown[] = [];
+    const { db, bot, teamId, replies } = setup({
+      resolveShortLink: async (url) => { asked.push(url); return 7230846; },
+      lookupBeer: async (bid) => { asked.push(bid); return CAROTENES; },
+    });
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untp.beer/q5a8n') as unknown as Update);
+    const beer = db.prepare('SELECT id, name, brewery FROM beers WHERE untappd_id = 7230846').get() as { id: number; name: string; brewery: string };
+    expect([asked, beer.name, beer.brewery, glasses(db, teamId), replies]).toEqual([
+      ['https://untp.beer/q5a8n', 7230846], 'Carotenes', 'Magic Road', [[1, beer.id]], ['🍺 Glass #1 — Carotenes · YS'],
+    ]);
+  });
+
+  it('an unknown beer without the Untappd lookup, or one it cannot find, takes nothing and says so', async () => {
+    const t = createTranslator('en');
+    const without = setup();
+    await without.bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untappd.com/b/x/7230846') as unknown as Update);
+    const failing = setup({ lookupBeer: async () => { throw new Error('mcp down'); } });
+    await failing.bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untappd.com/b/x/7230846') as unknown as Update);
+    const other = setup({ lookupBeer: async () => ({ ...CAROTENES, untappd_id: 1 }) });
+    await other.bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untappd.com/b/x/7230846') as unknown as Update);
+    expect([without, failing, other].map((s) => [glasses(s.db, s.teamId), s.replies])).toEqual([
+      [[], [t('fest.take_link_unknown')]], [[], [t('fest.take_link_unknown')]], [[], [t('fest.take_link_unknown')]],
+    ]);
+  });
+
+  it('a short link that does not lead to a beer takes nothing and says so', async () => {
+    const { db, bot, teamId, replies } = setup({ resolveShortLink: async () => null });
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest take https://untp.beer/zzz') as unknown as Update);
+    expect([glasses(db, teamId), replies]).toEqual([[], [createTranslator('en')('fest.take_link_bad')]]);
+  });
+
+  it('a full link fits the team picker whole, so the beer picked is the beer linked', () => {
+    const query = compactLinkQuery('https://untappd.com/b/magic-road-carotenes-double-dry-hopped/7230846');
+    const data = pickCallback(123456789, 'take', query);
+    expect([query, data, beerLinkOf(data.slice('fest:t:123456789:take:'.length))]).toEqual([
+      'https://untappd.com/b/-/7230846', 'fest:t:123456789:take:https://untappd.com/b/-/7230846', { bid: 7230846 },
+    ]);
+  });
+
+  it('someone outside the team takes nothing by link', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(command(1, 8, GROUP, '/fest take https://untappd.com/b/brew-bravo/6000011') as unknown as Update);
+    expect([glasses(db, teamId), replies]).toEqual([[], [createTranslator('en')('fest.not_member')]]);
+  });
+});
+
+describe('/fest take <text> beyond eight matches (#873)', () => {
+  const addMenu = (db: DB, n: number) => {
+    const festId = getFestBySlug(db, 'wfp22')!.id;
+    for (let i = 0; i < n; i++) {
+      db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+                  VALUES (?, ?, ?, 'Wfp', ?, 'wfp')`).run(100 + i, 7000000 + i, `WFP ${i}`, `wfp ${i}`);
+      upsertMenuItem(db, festId, 100 + i, 'WFP', '2026-10-15T10:00:00.000Z');
+    }
+  };
+
+  it('says how many are shown of how many when more match than fit', async () => {
+    const { db, bot, replies } = setup();
+    addMenu(db, 9);
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest take wfp') as unknown as Update);
+    expect(replies).toEqual(['Which beer did you get?\nShowing 8 of 9 — narrow the search.']);
+  });
+
+  it('says nothing more when every match is shown', async () => {
+    const { db, bot, replies } = setup();
+    addMenu(db, 8);
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest take wfp') as unknown as Update);
+    expect(replies).toEqual(['Which beer did you get?']);
+  });
+});
 
 describe('/fest printer', () => {
   it("in a private chat a member gets a station link whose token opens the team's print queue", async () => {

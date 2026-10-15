@@ -138,15 +138,18 @@ export function formatTargets(t: Translator, view: FestView): string {
 }
 
 /** Menu beers whose name or brewery contains `query` (case-insensitive), at most `limit`. */
-export function searchMenu(view: FestView, query: string, limit = 8): { beerId: number; label: string }[] {
+/** The first `limit` menu beers matching the query, and how many match in all (#873: say when some are not shown). */
+export function searchMenu(view: FestView, query: string, limit = 8): { found: { beerId: number; label: string }[]; total: number } {
   const q = query.trim().toLowerCase();
-  if (q === '') return [];
-  const out: { beerId: number; label: string }[] = [];
+  if (q === '') return { found: [], total: 0 };
+  const found: { beerId: number; label: string }[] = [];
+  let total = 0;
   for (const [beerId, b] of view.beerNames) {
-    if (`${b.name} ${b.brewery}`.toLowerCase().includes(q)) out.push({ beerId, label: `${b.name} — ${b.brewery}` });
-    if (out.length === limit) break;
+    if (!`${b.name} ${b.brewery}`.toLowerCase().includes(q)) continue;
+    total++;
+    if (found.length < limit) found.push({ beerId, label: `${b.name} — ${b.brewery}` });
   }
-  return out;
+  return { found, total };
 }
 
 // Open unless someone shows every member's check-in: a glass with no member rows has no such evidence.
