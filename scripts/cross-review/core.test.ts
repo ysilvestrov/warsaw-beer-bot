@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseArgs, isNestedRun, preflight, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand, DEFAULT_MODEL } from './core';
+import { parseArgs, isNestedRun, preflight, specPreflight, normalizeSpecPath, specPathError, markerLine, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand, DEFAULT_MODEL } from './core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -32,6 +32,20 @@ describe('parseArgs', () => {
   });
   test('an unknown flag is rejected', () => {
     expect(parseArgs(['--reviewer', 'codex', '--fast'])).toEqual({ ok: false, error: 'unknown argument "--fast"' });
+  });
+  test('--spec is carried as given; base keeps its default', () => {
+    expect(parseArgs(['--reviewer', 'codex', '--spec', 'docs/superpowers/specs/2026-10/x-design.md'])).toEqual({
+      ok: true,
+      opts: { reviewer: 'codex', base: 'origin/main', spec: 'docs/superpowers/specs/2026-10/x-design.md' },
+    });
+  });
+  test('--spec with --base is a usage error: a spec review has no base', () => {
+    expect(parseArgs(['--reviewer', 'claude', '--spec', 'a.md', '--base', 'origin/main'])).toEqual({
+      ok: false, error: '--spec and --base cannot be combined: a spec review has no base',
+    });
+  });
+  test('--spec without its value is rejected', () => {
+    expect(parseArgs(['--reviewer', 'codex', '--spec'])).toEqual({ ok: false, error: '--spec needs a value' });
   });
 });
 
@@ -109,8 +123,65 @@ describe('classifyResult', () => {
 });
 
 describe('runDirPrefix', () => {
-  test('reviewer, branch with slashes as dashes, sha cut to 7, open for the mkdtemp suffix', () => {
-    expect(runDirPrefix('/r/tmp', 'codex', 'feat/cross-review', '0123456789abcdef')).toBe('/r/tmp/cross-review-codex-feat-cross-review-0123456-');
+  test('diff mode: reviewer, branch with slashes as dashes, sha cut to 7, open for the mkdtemp suffix', () => {
+    expect(runDirPrefix('/r/tmp', 'codex', 'feat/cross-review', '0123456789abcdef', 'diff')).toBe('/r/tmp/cross-review-codex-feat-cross-review-0123456-');
+  });
+  test('spec mode is told apart by its own prefix', () => {
+    expect(runDirPrefix('/r/tmp', 'claude', 'main', '0123456789abcdef', 'spec')).toBe('/r/tmp/cross-review-spec-claude-main-0123456-');
+  });
+});
+
+describe('normalizeSpecPath', () => {
+  test('Windows separators become forward slashes', () => {
+    expect(normalizeSpecPath('docs\\superpowers\\specs\\2026-10\\x-design.md')).toBe('docs/superpowers/specs/2026-10/x-design.md');
+  });
+  test('a leading ./ is dropped', () => {
+    expect(normalizeSpecPath('./docs/superpowers/specs/2026-10/x-design.md')).toBe('docs/superpowers/specs/2026-10/x-design.md');
+  });
+  test('a plain repo-relative path is unchanged', () => {
+    expect(normalizeSpecPath('docs/superpowers/specs/2026-10/x-design.md')).toBe('docs/superpowers/specs/2026-10/x-design.md');
+  });
+});
+
+describe('specPathError', () => {
+  test('a markdown file in a month folder passes', () => {
+    expect(specPathError('docs/superpowers/specs/2026-10/2026-10-15-x-design.md')).toBeNull();
+  });
+  test('a file at the top of specs/ is refused: specs live in month folders', () => {
+    expect(specPathError('docs/superpowers/specs/x-design.md')).toBe('--spec must name a .md file under docs/superpowers/specs/<YYYY-MM>/, got "docs/superpowers/specs/x-design.md"');
+  });
+  test('a plan is not a spec', () => {
+    expect(specPathError('docs/superpowers/plans/2026-10/x.md')).toBe('--spec must name a .md file under docs/superpowers/specs/<YYYY-MM>/, got "docs/superpowers/plans/2026-10/x.md"');
+  });
+  test('a nested folder under the month is refused', () => {
+    expect(specPathError('docs/superpowers/specs/2026-10/a/x.md')).toBe('--spec must name a .md file under docs/superpowers/specs/<YYYY-MM>/, got "docs/superpowers/specs/2026-10/a/x.md"');
+  });
+  test('a non-markdown file is refused', () => {
+    expect(specPathError('docs/superpowers/specs/2026-10/x.txt')).toBe('--spec must name a .md file under docs/superpowers/specs/<YYYY-MM>/, got "docs/superpowers/specs/2026-10/x.txt"');
+  });
+  test('an empty path is refused', () => {
+    expect(specPathError('')).toBe('--spec must name a .md file under docs/superpowers/specs/<YYYY-MM>/, got ""');
+  });
+});
+
+describe('specPreflight', () => {
+  test('clean tree with the spec committed passes', () => {
+    expect(specPreflight({ dirty: false, inHead: true })).toBeNull();
+  });
+  test('a spec missing from HEAD is refused', () => {
+    expect(specPreflight({ dirty: false, inHead: false })).toBe('the spec is not committed at HEAD — commit it first; the review is pinned to a SHA');
+  });
+  test('dirty wins over a missing spec (the first thing to fix)', () => {
+    expect(specPreflight({ dirty: true, inHead: false })).toBe('working tree is dirty — commit first; the review is pinned to a SHA');
+  });
+});
+
+describe('markerLine', () => {
+  test('diff mode keeps the PR marker text', () => {
+    expect(markerLine('diff', 'codex @ abc1234 — 2 findings: <f> fixed, <r> rejected')).toBe('PR marker: Cross-review: codex @ abc1234 — 2 findings: <f> fixed, <r> rejected');
+  });
+  test('spec mode prints the Spec-review header line', () => {
+    expect(markerLine('spec', 'failed (timeout after 15 min)')).toBe('Spec marker: Spec-review: failed (timeout after 15 min)');
   });
 });
 

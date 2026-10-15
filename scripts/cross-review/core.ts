@@ -2,7 +2,8 @@
 // The runner (cli.ts) does the I/O; everything that decides lives here so it can be tested.
 
 export type Reviewer = 'codex' | 'claude';
-export interface Options { reviewer: Reviewer; base: string; model?: string }
+export type Mode = 'diff' | 'spec';
+export interface Options { reviewer: Reviewer; base: string; model?: string; spec?: string }
 
 export const EXIT = { ok: 0, usage: 2, nested: 3, reviewerFailed: 5 } as const;
 export const TIMEOUT_MS = 900_000;
@@ -16,6 +17,9 @@ const ERROR_LINE: Record<Reviewer, { stream: 'stdout' | 'stderr'; prefix: string
 };
 const CLAUDE_NO_NETWORK = /EAI_AGAIN|Can't reach the API server/;
 const MARKER_REASON_MAX = 200;
+const FLAGS = ['--reviewer', '--base', '--model', '--spec'];
+const DIRTY = 'working tree is dirty — commit first; the review is pinned to a SHA';
+const SPEC_PATH = /^docs\/superpowers\/specs\/\d{4}-\d{2}\/[^/]+\.md$/;
 
 function lastNonEmptyLine(text: string): string {
   const lines = text.split(/\r\n|\r|\n/).map((l) => l.trim()).filter((l) => l !== ''); // a bare \r ends a progress line
@@ -26,7 +30,7 @@ export function parseArgs(argv: string[]): { ok: true; opts: Options } | { ok: f
   const values: Record<string, string> = {};
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    if (flag !== '--reviewer' && flag !== '--base' && flag !== '--model') {
+    if (!FLAGS.includes(flag)) {
       return { ok: false, error: `unknown argument "${flag}"` };
     }
     const value = argv[i + 1];
@@ -39,8 +43,12 @@ export function parseArgs(argv: string[]): { ok: true; opts: Options } | { ok: f
   if (reviewer !== 'codex' && reviewer !== 'claude') {
     return { ok: false, error: `unknown reviewer "${reviewer}" (expected codex|claude)` };
   }
+  if (values['--spec'] !== undefined && values['--base'] !== undefined) {
+    return { ok: false, error: '--spec and --base cannot be combined: a spec review has no base' };
+  }
   const opts: Options = { reviewer, base: values['--base'] ?? 'origin/main' };
   if (values['--model'] !== undefined) opts.model = values['--model'];
+  if (values['--spec'] !== undefined) opts.spec = values['--spec'];
   return { ok: true, opts };
 }
 
@@ -49,8 +57,24 @@ export function isNestedRun(env: Record<string, string | undefined>): boolean {
 }
 
 export function preflight(s: { dirty: boolean; diffBytes: number }): string | null {
-  if (s.dirty) return 'working tree is dirty — commit first; the review is pinned to a SHA';
+  if (s.dirty) return DIRTY;
   if (s.diffBytes === 0) return 'empty diff against the base — nothing to review';
+  return null;
+}
+
+// A spec review reads one committed file, so the path is normalised (a Windows shell passes
+// backslashes) and must name a spec in a month folder; anything else is a usage error.
+export function normalizeSpecPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+export function specPathError(p: string): string | null {
+  return SPEC_PATH.test(p) ? null : `--spec must name a .md file under docs/superpowers/specs/<YYYY-MM>/, got "${p}"`;
+}
+
+export function specPreflight(s: { dirty: boolean; inHead: boolean }): string | null {
+  if (s.dirty) return DIRTY;
+  if (!s.inHead) return 'the spec is not committed at HEAD — commit it first; the review is pinned to a SHA';
   return null;
 }
 
@@ -100,8 +124,14 @@ export function reportText(reviewer: Reviewer, stdout: string, reportFile: strin
 
 // Every run owns a fresh directory (mkdtemp appends a unique suffix to this prefix), so two concurrent
 // runs — same reviewer, branch and SHA included — never share a diff, report, log or snapshot.
-export function runDirPrefix(tmpDir: string, reviewer: Reviewer, branch: string, sha: string): string {
-  return `${tmpDir}/cross-review-${reviewer}-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}-`;
+export function runDirPrefix(tmpDir: string, reviewer: Reviewer, branch: string, sha: string, mode: Mode): string {
+  const kind = mode === 'spec' ? 'spec-' : '';
+  return `${tmpDir}/cross-review-${kind}${reviewer}-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}-`;
+}
+
+// Where the author pastes the result: a PR body (diff mode) or the spec's own header (spec mode).
+export function markerLine(mode: Mode, body: string): string {
+  return mode === 'spec' ? `Spec marker: Spec-review: ${body}` : `PR marker: Cross-review: ${body}`;
 }
 
 export function runArtifacts(runDir: string): { diff: string; report: string; log: string; snapshot: string } {
@@ -120,9 +150,9 @@ export function spawnOutcome(r: {
 
 export function renderPrompt(
   template: string,
-  vars: { base: string; sha: string; branch: string; diffPath: string },
+  vars: Record<string, string>,
 ): string {
-  const table: Record<string, string> = vars;
+  const table = vars;
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
     if (!Object.hasOwn(table, key)) throw new Error(`unfilled placeholder {{${key}}}`);
     return table[key];

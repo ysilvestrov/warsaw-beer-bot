@@ -46,7 +46,7 @@
 (a) Extend the import line:
 
 ```ts
-import { parseArgs, isNestedRun, preflight, specPreflight, normalizeSpecPath, specPathError, markerLine, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand } from './core';
+import { parseArgs, isNestedRun, preflight, specPreflight, normalizeSpecPath, specPathError, markerLine, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand, DEFAULT_MODEL } from './core';
 ```
 
 (b) Inside `describe('parseArgs', …)` append:

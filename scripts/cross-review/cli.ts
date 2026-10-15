@@ -57,7 +57,7 @@ function main(argv: string[]): number {
 
   const tmpDir = join(root, 'tmp');
   mkdirSync(tmpDir, { recursive: true });
-  const runDir = mkdtempSync(runDirPrefix(tmpDir, reviewer, branch, sha));
+  const runDir = mkdtempSync(runDirPrefix(tmpDir, reviewer, branch, sha, 'diff'));
   const paths = runArtifacts(runDir);
   writeFileSync(paths.diff, diff);
   const template = readFileSync(join(__dirname, 'prompt.md'), 'utf8');
