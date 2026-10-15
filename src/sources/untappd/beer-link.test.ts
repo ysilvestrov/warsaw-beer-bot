@@ -43,21 +43,24 @@ describe('resolveShortLink', () => {
     ]);
   });
 
-  it('is not_beer for a redirect elsewhere or a page instead of a redirect', async () => {
+  it('is not_beer only when untp.beer says so: a redirect elsewhere, or a code it does not know', async () => {
     expect([
       await resolveShortLink('https://untp.beer/a', answer(302, 'https://untappd.com/v/legia/11142155')),
       await resolveShortLink('https://untp.beer/a', answer(302)),
-      await resolveShortLink('https://untp.beer/a', answer(200)),
       await resolveShortLink('https://untp.beer/a', answer(404)),
+      await resolveShortLink('https://untp.beer/a', answer(410)),
     ]).toEqual(['not_beer', 'not_beer', 'not_beer', 'not_beer']);
   });
 
-  it('is failed when untp.beer does not answer or answers with a server error: the link may be fine', async () => {
+  it('is failed when untp.beer does not answer, limits the rate, errs or serves a page: the link may be fine', async () => {
     const thrown = (async () => { throw new Error('ENOTFOUND'); }) as unknown as typeof fetch;
     expect([
       await resolveShortLink('https://untp.beer/a', thrown),
+      await resolveShortLink('https://untp.beer/a', answer(408)),
+      await resolveShortLink('https://untp.beer/a', answer(429)),
       await resolveShortLink('https://untp.beer/a', answer(503)),
-    ]).toEqual(['failed', 'failed']);
+      await resolveShortLink('https://untp.beer/a', answer(200)),
+    ]).toEqual(['failed', 'failed', 'failed', 'failed', 'failed']);
   });
 
   it('lets the redirect body go instead of leaving it unread', async () => {

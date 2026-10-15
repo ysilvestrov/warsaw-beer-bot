@@ -21,9 +21,10 @@ export function beerLinkOf(text: string): BeerLink {
 }
 
 /**
- * One GET without following the redirect: the bid from a 3xx Location to a beer page; `not_beer`
- * when untp.beer answered with something else; `failed` when it did not answer (timeout, network,
- * 5xx) — the link may be fine, so the person is told to try again rather than that it is wrong.
+ * One GET without following the redirect: the bid from a 3xx Location to a beer page. `not_beer` only
+ * when untp.beer says so — a redirect elsewhere, or 404/410 for a code it does not know. Anything else
+ * (no answer, 429, 5xx, a page instead of a redirect) is `failed`: the link may be fine, so the person
+ * is told to try again rather than that it is wrong.
  */
 export async function resolveShortLink(url: string, fetchFn: typeof fetch, timeoutMs = 5000): Promise<number | 'not_beer' | 'failed'> {
   let res: Response;
@@ -34,8 +35,8 @@ export async function resolveShortLink(url: string, fetchFn: typeof fetch, timeo
   }
   // Only the status and a header are read: the body is let go so the connection is not held.
   await res.body?.cancel().catch(() => {});
-  if (res.status >= 500) return 'failed';
-  if (res.status < 300 || res.status > 399) return 'not_beer';
+  if (res.status === 404 || res.status === 410) return 'not_beer';
+  if (res.status < 300 || res.status > 399) return 'failed';
   const link = beerLinkOf(res.headers.get('location') ?? '');
   return link !== null && 'bid' in link ? link.bid : 'not_beer';
 }
