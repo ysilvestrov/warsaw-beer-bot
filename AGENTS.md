@@ -315,6 +315,26 @@ claim about data.
 
 ---
 
+Writing a Design Spec
+
+Every new architectural spec follows `docs/spec-format.md`, whichever agent writes it. The owner
+approves a spec from its first section, «Для власника», and is not required to read the body; a
+decision that lives only in the body is a decision the owner misses. That is how "merge means
+deploy" went through in the merge-deploy spec.
+
+- At the start of brainstorming, restate the task in your own words and ask for the owner's size
+  estimate **before giving yours** — yours would anchor it. Give yours once the approach is chosen
+  and before the spec is written, with a breakdown and a cheaper variant. A gap of two sizes or
+  more stops the work until it is talked through.
+- After the probes, with the spec committed, have Claude review it: `npm run cross-review -- --spec
+  <file> --reviewer claude`, with a command timeout of at least 16 minutes. The same
+  `.codex/rules/default.rules` entry as for the code review lets it reach the network. Verify each
+  finding: fix it or reject it with a reason. Put the printed `Spec-review:` line in the spec's
+  header and the decisions in its final `## Рев'ю спеки` table. Once per spec.
+- After the last PR of the change merges, add the actual size to the spec's estimate.
+
+---
+
 Staging a Large Change
 
 A change whose plan runs past roughly four tasks, or whose later tasks build on
