@@ -156,18 +156,24 @@ export function queueOrder(view: QueueView): QueueItemView[] {
   return [...view.items].sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || a.glassNo - b.glassNo);
 }
 
-/** /fest queue (spec §7): every glass, who got it, and who has checked it in (✅) or not yet (⏳). */
+/**
+ * /fest queue (spec §7): the glasses someone has not checked in yet (⏳), who got each, and every
+ * member's ✅/⏳. Glasses checked in by everyone are hidden and only counted
+ * (2026-10-15-fest-queue-hide-done-design.md): on a long fest they buried what is left to drink.
+ */
 export function formatQueue(t: Translator, view: QueueView): string {
   // The hint names a placeholder in angle brackets; the reply is HTML, so it must be escaped.
   if (view.items.length === 0) return escapeHtml(t('fest.queue_empty'));
-  const items = queueOrder(view).map((item) => t('fest.queue_line', {
+  const open = queueOrder(view).filter(isOpen);
+  const hidden = view.items.length - open.length;
+  const items = open.map((item) => t('fest.queue_line', {
     glass: item.glassNo,
     name: escapeHtml(item.name),
     section: item.section ? ` (${escapeHtml(item.section)})` : '',
     taker: escapeHtml(item.takenBy),
     marks: item.closedBy.map((c) => `${c.checkinId === null ? '⏳' : '✅'} ${escapeHtml(c.initials)}`).join(' '),
   }));
-  return fitMessage(t, [t('fest.queue_header'), ''], items);
+  return fitMessage(t, [t('fest.queue_header'), ''], items, hidden > 0 ? [t('fest.queue_done_hidden', { count: hidden })] : []);
 }
 
 export const QUEUE_LINKS = 20;

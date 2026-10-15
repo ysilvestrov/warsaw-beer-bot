@@ -228,6 +228,7 @@ export interface Messages {
   'fest.queue_header': string;
   'fest.queue_empty': string;
   'fest.queue_line': string;
+  'fest.queue_done_hidden': string;
   'fest.queue_link': string;
   'fest.alert_new': string;
   'fest.alert_pouring': string;

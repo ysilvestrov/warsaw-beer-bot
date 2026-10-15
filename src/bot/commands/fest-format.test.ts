@@ -236,15 +236,33 @@ describe('formatQueue', () => {
     closedBy: marks.map((checkinId, i) => ({ initials: ['YS', 'OB'][i], checkinId })),
   });
 
-  it('lists glasses still open for someone first, with a ✅ or ⏳ per member', () => {
-    const view = { items: [item(1, ['a', 'b']), item(2, ['c', null], 6000002, null)] };
+  it('lists the glasses someone still has to check in, a ✅ or ⏳ per member, and counts the hidden rest', () => {
+    const view = { items: [item(1, ['a', 'b']), item(2, ['c', null], 6000002, null), item(3, [null, null]), item(4, ['d', 'e'])] };
     expect(formatQueue(t, view)).toBe([
       '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
       '',
       '№2 <b>Beer &lt;2&gt;</b> · взяв OB',
       '   ✅ YS ⏳ OB',
+      '№3 <b>Beer &lt;3&gt;</b> (PINTA) · взяв OB',
+      '   ⏳ YS ⏳ OB',
+      'Випиті всіма й сховані: 2.',
+    ].join('\n'));
+  });
+
+  it('with nothing checked in by everyone there is no hidden-count line', () => {
+    expect(formatQueue(t, { items: [item(1, ['a', null])] })).toBe([
+      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+      '',
       '№1 <b>Beer &lt;1&gt;</b> (PINTA) · взяв OB',
-      '   ✅ YS ✅ OB',
+      '   ✅ YS ⏳ OB',
+    ].join('\n'));
+  });
+
+  it('a queue checked in by everyone shows only the header and the count', () => {
+    expect(formatQueue(t, { items: [item(1, ['a', 'b']), item(2, ['c', 'd'])] })).toBe([
+      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+      '',
+      'Випиті всіма й сховані: 2.',
     ].join('\n'));
   });
 

@@ -263,6 +263,7 @@ export const pl: Messages = {
   'fest.queue_header': '<b>Kolejka kufli</b> (✅ zameldowane · ⏳ jeszcze nie)',
   'fest.queue_empty': 'Kolejka jest pusta. Naciśnij „🍺 Wziąłem” w sekcji albo wyślij /fest take <nazwa>.',
   'fest.queue_line': 'nr {glass} <b>{name}</b>{section} · wziął {taker}\n   {marks}',
+  'fest.queue_done_hidden': 'Wypite przez wszystkich i ukryte: {count}.',
   'fest.queue_link': 'nr {glass} {name} ↗',
   'fest.alert_new': '🆕 Właśnie na kranie:',
   'fest.alert_pouring': '🍺 Już nalewają:',
