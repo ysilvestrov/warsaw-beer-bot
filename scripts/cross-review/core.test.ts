@@ -276,6 +276,20 @@ describe('prompt.md template', () => {
   });
 });
 
+describe('prompt-spec.md template', () => {
+  test('renders with the spec-mode variables, points at the format doc, demands the result line', () => {
+    const tpl = readFileSync(join(__dirname, 'prompt-spec.md'), 'utf8');
+    const out = renderPrompt(tpl, { sha: 'abc1234', branch: 'main', specPath: 'docs/superpowers/specs/2026-10/x-design.md' });
+    expect(out.includes('docs/superpowers/specs/2026-10/x-design.md')).toBe(true);
+    expect(out.includes('docs/spec-format.md')).toBe(true);
+    expect(out.includes('CROSS-REVIEW-RESULT: <n> findings')).toBe(true);
+  });
+  test('a diff-mode variable set does not fill it', () => {
+    const tpl = readFileSync(join(__dirname, 'prompt-spec.md'), 'utf8');
+    expect(() => renderPrompt(tpl, { base: 'origin/main', sha: 'abc1234', branch: 'main', diffPath: '/t/x.diff' })).toThrow('unfilled placeholder {{specPath}}');
+  });
+});
+
 const CLAUDE_NO_NET = "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)";
 const CODEX_LIMIT = 'ERROR: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 11:20 AM.';
 const CODEX_NO_NET_STDERR = [
