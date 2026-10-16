@@ -12,6 +12,9 @@ export const ENRICH_RESULT_BODY_LIMIT_BYTES = 512 * KIB;
 export const MATCH_BODY_LIMIT_BYTES = 256 * KIB;
 export const ENRICH_CANDIDATES_BODY_LIMIT_BYTES = 256 * KIB;
 export const CHECKINS_HTML_LIMIT_CHARS = 768 * KIB;
+// A festival menu page is not a check-in page: WFP22's 975 items came to 2.0 M characters
+// (2026-10-16), so /fest/menu has only the global transport limit and this schema bound.
+export const FEST_MENU_HTML_LIMIT_CHARS = 4 * MIB;
 export const ENRICH_HTML_LIMIT_CHARS = 384 * KIB;
 export const BEER_TEXT_LIMIT_CHARS = 512;
 export const PAGE_URL_LIMIT_CHARS = 2048;

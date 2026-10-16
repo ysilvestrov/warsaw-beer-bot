@@ -1199,14 +1199,16 @@ CORS: `origin: '*'` (авторизація — Bearer-заголовок, не 
 
 #### Ліміти розміру запитів
 Усі HTTP-запити мають глобальний transport-ліміт **4 MiB**. Для тіл окремих
-endpoint'ів діють жорсткіші ліміти: `POST /checkins/sync` — **1 MiB**,
+endpoint'ів діють жорсткіші ліміти: `POST /checkins/sync` і `POST /fest/feed` — по **1 MiB**,
 `POST /enrich/result` — **512 KiB**, `POST /match` і
 `POST /enrich/candidates` — по **256 KiB**. Transport-ліміти рахуються в байтах;
 вони застосовуються як до відомого `Content-Length`, так і до фактично прочитаного
-потоку.
+потоку. `POST /fest/menu` власного transport-ліміту не має — лише глобальний
+**4 MiB**: сторінка меню фесту на 975 позицій — це 2,1 MB тіла (WFP22, 2026-10-16).
 
-Окремо schema-валідація обмежує JavaScript-рядки в символах: `html` чекінів —
-**768 Ki символів**, enrich-`html` — **384 Ki символів**, `brewery` і `name` —
+Окремо schema-валідація обмежує JavaScript-рядки в символах: `html` чекінів (і
+`/fest/feed`) — **768 Ki символів**, `html` меню фесту — **4 Mi символів**,
+enrich-`html` — **384 Ki символів**, `brewery` і `name` —
 по **512 символів**, `pageUrl` — **2048 символів**, `maxId` — **512 символів**.
 Будь-яке перевищення transport- або character-ліміту повертає точну відповідь
 `413 {"error":"payload_too_large"}`. Звичайні помилки схеми, не пов'язані з
@@ -2242,7 +2244,9 @@ submit сторінки до backend або паузу між сторінкам
 #### `POST /fest/feed` / `POST /fest/menu` — прийом від фестивальних «очей» (v42)
 
 Дизайн: `docs/superpowers/specs/2026-09/2026-09-29-wfp-team-assistant-design.md`. Auth — Bearer-токен, як у
-`/checkins/*`, ліміт тіла той самий (`CHECKINS_SYNC_BODY_LIMIT_BYTES`). Писати може лише учасник команди
+`/checkins/*`. Ліміт тіла `/fest/feed` той самий (`CHECKINS_SYNC_BODY_LIMIT_BYTES`, `html` ≤ 768 Ki символів);
+`/fest/menu` — лише глобальний 4 MiB і `html` ≤ 4 Mi символів (`FEST_MENU_HTML_LIMIT_CHARS`), бо повна
+сторінка меню фесту втричі більша за сторінку чекінів (див. «Ліміти розміру запитів»). Писати може лише учасник команди
 фесту (`fest_team_members`), інакше `403 not_team_member`; блок-сторінка → `502 blocked`, нічого не пишеться.
 
 - `POST /fest/feed` `{ venueId, html, cursor?, fetchedAt }` — лише у вікні опитування (сесія ± 30 хв,

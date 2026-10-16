@@ -9,6 +9,7 @@ import { hashToken, rotateToken } from '../../storage/api_tokens';
 import { getFestBySlug } from '../../storage/fests';
 import { addMember, createTeam } from '../../storage/fest_teams';
 import { authMiddleware } from '../middleware/auth';
+import { FEST_MENU_HTML_LIMIT_CHARS } from '../middleware/payload-limit';
 import { festRoute } from './fest';
 import type { ApiEnv } from '../types';
 
@@ -114,6 +115,19 @@ describe('POST /fest/menu', () => {
     const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
     const res = await post(app, '/fest/menu', 'member-token', { html: MENU });
     expect([res.status, await res.json()]).toEqual([200, { items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false }]);
+  });
+
+  it('ingests a menu page the size of WFP22\'s, three times the check-in page bound', async () => {
+    // 975 items came to 2 005 865 characters on 2026-10-16; the comment stands in for them.
+    const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
+    const res = await post(app, '/fest/menu', 'member-token', { html: `${MENU}<!--${'x'.repeat(2_200_000)}-->` });
+    expect([res.status, await res.json()]).toEqual([200, { items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false }]);
+  });
+
+  it('answers 413 for a menu page one character past its schema bound', async () => {
+    const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
+    const res = await post(app, '/fest/menu', 'member-token', { html: 'x'.repeat(FEST_MENU_HTML_LIMIT_CHARS + 1) });
+    expect([res.status, await res.json()]).toEqual([413, { error: 'payload_too_large' }]);
   });
 
   it('refuses a non-member', async () => {

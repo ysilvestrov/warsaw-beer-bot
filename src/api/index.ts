@@ -84,8 +84,10 @@ export function createApiApp(deps: ApiAppDeps): Hono<ApiEnv> {
   app.use('/checkins/*', authMiddleware(deps.db));
   checkinsRoute(app, deps);
 
-  // Festival eyes relay a venue feed page or the menu page — the same size class as /checkins/sync.
-  app.use('/fest/*', postPayloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES));
+  // A festival eye's feed page is the size class of /checkins/sync. The menu page is not (2.1 MB
+  // for WFP22's 975 items), so /fest/menu has only the global limit and its schema bound.
+  const festBodyLimit = postPayloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES);
+  app.use('/fest/*', (c, next) => (c.req.path === '/fest/menu' ? next() : festBodyLimit(c, next)));
   app.use('/fest/*', authMiddleware(deps.db));
   festRoute(app, deps);
   // The print station has its own team-bound token (spec §8), so it lives outside /fest/*.

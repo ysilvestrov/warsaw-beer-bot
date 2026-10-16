@@ -2,7 +2,12 @@ import type { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
-import { CHECKINS_HTML_LIMIT_CHARS, CURSOR_LIMIT_CHARS, payloadSizeValidationHook } from '../middleware/payload-limit';
+import {
+  CHECKINS_HTML_LIMIT_CHARS,
+  CURSOR_LIMIT_CHARS,
+  FEST_MENU_HTML_LIMIT_CHARS,
+  payloadSizeValidationHook,
+} from '../middleware/payload-limit';
 import { activeFests, currentOrNextFests, festSessions, festVenues, POLL_MARGIN_MS } from '../../storage/fests';
 import { isFestMember } from '../../storage/fest_teams';
 import { BlockedPageError, applyMenu, ingestFeedPage } from '../../jobs/fest-ingest';
@@ -17,7 +22,7 @@ const FeedBody = z.object({
 });
 
 const MenuBody = z.object({
-  html: z.string().max(CHECKINS_HTML_LIMIT_CHARS),
+  html: z.string().max(FEST_MENU_HTML_LIMIT_CHARS),
 });
 
 // Relay endpoints for festival eyes (spec §4.2). Only a member of a team of the fest that is

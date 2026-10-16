@@ -146,6 +146,7 @@ describe('createApiApp', () => {
     ['/enrich/candidates', ENRICH_CANDIDATES_BODY_LIMIT_BYTES],
     ['/enrich/result', ENRICH_RESULT_BODY_LIMIT_BYTES],
     ['/checkins/sync', CHECKINS_SYNC_BODY_LIMIT_BYTES],
+    ['/fest/feed', CHECKINS_SYNC_BODY_LIMIT_BYTES],
   ])('rejects an oversized %s body before invalid authorization', async (path, limit) => {
     const { warn, ...apiDeps } = deps();
     const app = createApiApp(apiDeps);
@@ -234,6 +235,37 @@ describe('createApiApp', () => {
       ...(telegramId === undefined ? {} : { telegramId }),
     });
     expect((warn.mock.calls[0]?.[0] as Record<string, unknown>).telegramId).toBe(telegramId);
+  });
+
+  it('lets a /fest/menu body past the /fest/feed limit reach authorization', async () => {
+    // WFP22's menu page came to 2 109 888 bytes as a request body on 2026-10-16.
+    const { warn, ...apiDeps } = deps();
+    const app = createApiApp(apiDeps);
+    const res = await app.request('/fest/menu', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
+      body: JSON.stringify({ html: 'x'.repeat(2_200_000) }),
+    });
+
+    expect([res.status, await res.json()]).toEqual([401, { error: 'unauthorized' }]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a /fest/menu body past the global limit', async () => {
+    const { warn, ...apiDeps } = deps();
+    const app = createApiApp(apiDeps);
+    const res = await app.request('/fest/menu', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
+      body: JSON.stringify({ html: 'x'.repeat(GLOBAL_BODY_LIMIT_BYTES) }),
+    });
+
+    expect([res.status, await res.json()]).toEqual([413, { error: 'payload_too_large' }]);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      method: 'POST', path: '/fest/menu', rejectionLayer: 'global',
+      limit: GLOBAL_BODY_LIMIT_BYTES, limitUnit: 'bytes', auth: 'invalid',
+    });
   });
 
   it('sets permissive CORS headers', async () => {
