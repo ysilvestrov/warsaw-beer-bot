@@ -209,3 +209,23 @@ describe('manual marks', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM fest_glass_marks').get()).toEqual({ n: 0 });
   });
 });
+
+describe('takeBeer with a duplicate check', () => {
+  it('a glass the check names is the answer: no new glass and no print job', () => {
+    const { db, teamA } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    const r = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 2, at: AT }, { duplicateOf: () => 1 });
+    expect([r, queueFor(db, teamA).length, db.prepare('SELECT COUNT(*) AS n FROM fest_print_jobs').get()])
+      .toEqual([{ kind: 'duplicate', glassNo: 1 }, 1, { n: 1 }]);
+  });
+
+  it('no duplicate takes a new glass, and a repeated tap is answered before the check is asked', () => {
+    const { db, teamA } = setup();
+    const asked: string[] = [];
+    const first = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT }, { duplicateOf: () => { asked.push('first'); return null; } });
+    const again = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT }, { duplicateOf: () => { asked.push('again'); return 1; } });
+    expect([first, again, asked, queueFor(db, teamA).length]).toMatchObject([
+      { kind: 'taken', glassNo: 1, repeated: false }, { kind: 'taken', glassNo: 1, repeated: true }, ['first'], 1,
+    ]);
+  });
+});

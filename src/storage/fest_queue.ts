@@ -26,17 +26,29 @@ export const REPEAT_TAP_MS = 30 * 1000;
 // per team and never reused, a cancelled one included; they also name the pre-printed stickers (spec §8, level 3). The same
 // member taking the same beer again within REPEAT_TAP_MS gets that glass back: on a phone in a
 // crowd a double tap is far likelier than two identical glasses half a minute apart.
-export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: number; at: string }): { id: number; glassNo: number; repeated: boolean } {
+//
+// `duplicateOf` (spec 2026-10-15-fest-queue-reality-design.md §PR 2) runs inside the same transaction,
+// after the repeat-tap check: a glass number it returns is an open glass of this beer still on the
+// table, and no second one is taken — two members pressing at once get the same answer.
+export type Taken = { kind: 'taken'; id: number; glassNo: number; repeated: boolean };
+export type TakeResult = Taken | { kind: 'duplicate'; glassNo: number };
+type TakeInput = { teamId: number; beerId: number; addedBy: number; at: string };
+
+export function takeBeer(db: DB, p: TakeInput): Taken;
+export function takeBeer(db: DB, p: TakeInput, opts: { duplicateOf: () => number | null }): TakeResult;
+export function takeBeer(db: DB, p: TakeInput, opts: { duplicateOf?: () => number | null } = {}): TakeResult {
   // Stored and compared as canonical ISO 'Z' text, so the window is a comparison of instants.
   const at = new Date(p.at).toISOString();
-  return db.transaction(() => {
+  return db.transaction((): TakeResult => {
     const since = new Date(Date.parse(at) - REPEAT_TAP_MS).toISOString();
     const recent = db.prepare(
       `SELECT id, glass_no FROM fest_queue
         WHERE team_id = ? AND beer_id = ? AND added_by = ? AND added_at >= ? AND added_at <= ?
         ORDER BY glass_no DESC LIMIT 1`,
     ).get(p.teamId, p.beerId, p.addedBy, since, at) as { id: number; glass_no: number } | undefined;
-    if (recent) return { id: recent.id, glassNo: recent.glass_no, repeated: true };
+    if (recent) return { kind: 'taken', id: recent.id, glassNo: recent.glass_no, repeated: true };
+    const duplicate = opts.duplicateOf?.() ?? null;
+    if (duplicate !== null) return { kind: 'duplicate', glassNo: duplicate };
     // A cancelled glass keeps its number (fest_glass_removed): the next one never reuses it.
     const { next } = db.prepare(
       `SELECT MAX(COALESCE((SELECT MAX(glass_no) FROM fest_queue WHERE team_id = ?), 0),
@@ -50,7 +62,7 @@ export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: n
                    COALESCE((SELECT MAX(queue_id) FROM fest_glass_removed), 0)) + 1, ?, ?, ?, ?, ?)`,
     ).run(p.teamId, next, p.beerId, p.addedBy, at).lastInsertRowid);
     db.prepare("INSERT INTO fest_print_jobs (queue_id, status, attempts, updated_at) VALUES (?, 'queued', 0, ?)").run(id, at);
-    return { id, glassNo: next, repeated: false };
+    return { kind: 'taken', id, glassNo: next, repeated: false };
   }).immediate();
 }
 

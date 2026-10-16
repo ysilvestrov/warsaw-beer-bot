@@ -9,6 +9,10 @@ export interface ClosureItem {
   id: number;
   beerId: number;
   addedAt: string;
+  /** Members the glass waits for (presence, spec 2026-10-15-fest-queue-reality-design.md §PR 2). */
+  expected: number[];
+  /** Members who marked it done themselves (☑️). */
+  marked: number[];
 }
 
 export interface ClosureCheckin {
@@ -18,13 +22,17 @@ export interface ClosureCheckin {
   checkinAt: string;
 }
 
+/** How a glass is closed for a member: by a check-in, by their own mark, or not yet. */
+export type Closure = { checkinId: string } | { marked: true } | null;
+
 /**
- * queue id → member telegram id → the closing check-in id, or null. One check-in proves one glass:
- * for each member, glasses are matched in queue order to the earliest check-in not yet used, so
- * two glasses of the same beer need two check-ins to both show ✅.
+ * queue id → expected member → how it is closed. One check-in proves one glass: for each member,
+ * glasses are matched in queue order to the earliest check-in not yet used, so two glasses of the
+ * same beer need two check-ins to both show ✅. A glass the member marked takes no check-in (it goes
+ * to their next glass of that beer); a glass that does not wait for the member takes none either.
  */
-export function closeQueue(items: ClosureItem[], memberIds: number[], checkins: ClosureCheckin[]): Map<number, Map<number, string | null>> {
-  const out = new Map<number, Map<number, string | null>>(items.map((item) => [item.id, new Map<number, string | null>()]));
+export function closeQueue(items: ClosureItem[], memberIds: number[], checkins: ClosureCheckin[]): Map<number, Map<number, Closure>> {
+  const out = new Map<number, Map<number, Closure>>(items.map((item) => [item.id, new Map<number, Closure>()]));
   const ordered = [...items].sort((a, b) => Date.parse(a.addedAt) - Date.parse(b.addedAt) || a.id - b.id);
   for (const m of memberIds) {
     const own = checkins
@@ -34,10 +42,15 @@ export function closeQueue(items: ClosureItem[], memberIds: number[], checkins: 
     // from an authored venue row, and it still proves only one glass.
     const used = new Set<string>();
     for (const item of ordered) {
+      if (!item.expected.includes(m)) continue;
+      if (item.marked.includes(m)) {
+        out.get(item.id)!.set(m, { marked: true });
+        continue;
+      }
       const from = Date.parse(item.addedAt) - CLOSE_SLACK_MS;
       const hit = own.find((c) => !used.has(c.checkinId) && c.beerId === item.beerId && Date.parse(c.checkinAt) >= from);
       if (hit) used.add(hit.checkinId);
-      out.get(item.id)!.set(m, hit ? hit.checkinId : null);
+      out.get(item.id)!.set(m, hit ? { checkinId: hit.checkinId } : null);
     }
   }
   return out;

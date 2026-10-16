@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Translator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
-import type { QueueItemView, QueueView } from '../../jobs/fest-queue-view';
+import { isOpen, onTable, type QueueItemView, type QueueView } from '../../jobs/fest-queue-view';
 import type { AlertPlan, OnTapTarget } from '../../domain/fest/alerts';
 import type { TapStatus } from '../../domain/fest/tap-status';
 import type { FestStand } from '../../storage/fest_stands';
@@ -38,7 +38,7 @@ export function fitMessage(t: Translator, head: string[], items: string[], tail:
   return nl > 0 ? out.slice(0, nl).replace(/<[^>]*>/g, '') + '\n…' : '…';
 }
 
-const hhmm = (iso: string): string =>
+export const hhmm = (iso: string): string =>
   new Intl.DateTimeFormat('uk-UA', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit', hour12: false })
     .format(new Date(iso));
 
@@ -152,42 +152,66 @@ export function searchMenu(view: FestView, query: string, limit = 8): { found: {
   return { found, total };
 }
 
-// Open unless someone shows every member's check-in: a glass with no member rows has no such evidence.
-const isOpen = (item: QueueItemView): boolean => item.closedBy.length === 0 || item.closedBy.some((c) => c.checkinId === null);
-
-/** Queue items not yet checked in by everyone first, each group by glass number. */
+/** Open glasses first, each group by glass number. */
 export function queueOrder(view: QueueView): QueueItemView[] {
   return [...view.items].sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || a.glassNo - b.glassNo);
 }
 
+/** `all` is /fest queue all; otherwise the table: only glasses taken within the last 40 minutes. */
+export interface QueueScope {
+  now: Date;
+  all: boolean;
+}
+
+const shown = (view: QueueView, scope: QueueScope): QueueItemView[] =>
+  queueOrder(view).filter((item) => isOpen(item) && (scope.all || onTable(item, scope.now)));
+
+const mark = (c: QueueItemView['closedBy'][number]): string => (c.checkinId !== null ? '✅' : c.marked ? '☑️' : '⏳');
+
 /**
- * /fest queue (spec §7): the glasses someone has not checked in yet (⏳), who got each, and every
- * member's ✅/⏳. Glasses checked in by everyone are hidden and only counted
- * (2026-10-15-fest-queue-hide-done-design.md): on a long fest they buried what is left to drink.
+ * /fest queue (spec 2026-10-15-fest-queue-reality-design.md §PR 2): the table — glasses taken within
+ * the last 40 minutes that someone they wait for has not closed — or, with `all`, every such glass of
+ * the fest. Each row: who got it and ✅ check-in / ☑️ own mark / ⏳ for each member it waits for.
+ * What is left out is only counted: closed by everyone, and (on the table) older than 40 minutes.
  */
-export function formatQueue(t: Translator, view: QueueView): string {
+export function formatQueue(t: Translator, view: QueueView, scope: QueueScope): string {
   // The hint names a placeholder in angle brackets; the reply is HTML, so it must be escaped.
   if (view.items.length === 0) return escapeHtml(t('fest.queue_empty'));
-  const open = queueOrder(view).filter(isOpen);
-  const hidden = view.items.length - open.length;
-  const items = open.map((item) => t('fest.queue_line', {
+  const rows = shown(view, scope);
+  const done = view.items.filter((item) => !isOpen(item)).length;
+  const old = view.items.length - done - rows.length;
+  const items = rows.map((item) => t('fest.queue_line', {
     glass: item.glassNo,
     name: escapeHtml(item.name),
     section: item.section ? ` (${escapeHtml(item.section)})` : '',
     taker: escapeHtml(item.takenBy),
-    marks: item.closedBy.map((c) => `${c.checkinId === null ? '⏳' : '✅'} ${escapeHtml(c.initials)}`).join(' '),
+    marks: item.closedBy.map((c) => `${mark(c)} ${escapeHtml(c.initials)}`).join(' '),
   }));
-  return fitMessage(t, [t('fest.queue_header'), ''], items, hidden > 0 ? [t('fest.queue_done_hidden', { count: hidden })] : []);
+  const tail = [
+    ...(done > 0 ? [t('fest.queue_done_hidden', { count: done })] : []),
+    ...(old > 0 ? [t('fest.queue_old_hidden', { count: old })] : []),
+  ];
+  const header = [t(scope.all ? 'fest.queue_all_header' : 'fest.queue_header'), ''];
+  return fitMessage(t, header, items.length > 0 ? items : [t('fest.queue_table_empty')], tail);
 }
 
 export const QUEUE_LINKS = 20;
 
-/** Untappd links for the open glasses that have a bid: the page to check in from. */
-export function queueLinks(view: QueueView): { glassNo: number; name: string; bid: number }[] {
-  return queueOrder(view)
-    .filter((item) => isOpen(item) && item.bid !== null)
+/** Untappd links for the glasses shown that have a bid: the page to check in from. */
+export function queueLinks(view: QueueView, scope: QueueScope): { glassNo: number; name: string; bid: number }[] {
+  return shown(view, scope)
+    .filter((item) => item.bid !== null)
     .slice(0, QUEUE_LINKS)
     .map((item) => ({ glassNo: item.glassNo, name: item.name, bid: item.bid! }));
+}
+
+export const DRANK_BUTTONS = 20;
+
+/** /fest drank: the glasses of the fest that wait for this member and that they have not closed. */
+export function myOpenGlasses(view: QueueView, telegramId: number): QueueItemView[] {
+  return [...view.items]
+    .filter((item) => item.closedBy.some((c) => c.telegramId === telegramId && c.checkinId === null && !c.marked))
+    .sort((a, b) => a.glassNo - b.glassNo);
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });

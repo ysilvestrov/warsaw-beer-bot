@@ -9,14 +9,17 @@ import { ensureProfile, getProfile } from '../../storage/user_profiles';
 import { upsertStand } from '../../storage/fest_stands';
 import { menuFor } from '../../storage/fest_menu';
 import { buildFestView } from '../../jobs/fest-view';
-import { buildQueueView } from '../../jobs/fest-queue-view';
-import { removeGlass, takeBeer } from '../../storage/fest_queue';
+import { buildQueueView, openGlassOf } from '../../jobs/fest-queue-view';
+import { addPresence } from '../../storage/fest_presence';
+import { markGlass, removeGlass, takeBeer, unmarkGlass } from '../../storage/fest_queue';
 import { upsertBeerByBid, type BidBeerInput } from '../../storage/beers';
 import { beerLinkOf } from '../../sources/untappd/beer-link';
 import { buildBeerPageUrl } from '../../sources/untappd/beer-page';
 import type { MenuPageResult } from '../../jobs/fest-ingest';
 import { parseStandsCsv } from '../../domain/fest/stands-csv';
-import { formatQueue, formatRanking, formatSection, formatTargets, queueLinks, searchMenu, sectionKey, TARGETS_SHOWN } from './fest-format';
+import {
+  DRANK_BUTTONS, formatQueue, formatRanking, formatSection, formatTargets, hhmm, myOpenGlasses, queueLinks, searchMenu, sectionKey, TARGETS_SHOWN,
+} from './fest-format';
 
 // Festival mode in the bot (spec §7). The handlers only glue: the view is built by buildFestView
 // and rendered by fest-format.ts.
@@ -46,19 +49,26 @@ const STANDS_CAPTION_RE = /^\/fest(?:@\w+)?\s+stands\b/i;
 /** A document captioned this way is a stand map for /fest stands, not an export for /import. */
 export const isStandsCaption = (caption: string | undefined): boolean => STANDS_CAPTION_RE.test(caption ?? '');
 
-function joinKeyboard(ctx: BotContext, teamId: number) {
-  return Markup.inlineKeyboard([[Markup.button.callback(ctx.t('fest.join_button'), `fest:j:${teamId}`)]]);
+// «🟢 Почати день» / «🔴 Закінчити день» (spec 2026-10-15-fest-queue-reality-design.md §PR 2) in place
+// of «🙋 Я в команді»: a keyboard in a group is the same for everyone, so starting the day also joins.
+const dayButtons = (ctx: BotContext, teamId: number) => [
+  Markup.button.callback(ctx.t('fest.day_start_button'), `fest:ps:${teamId}`),
+  Markup.button.callback(ctx.t('fest.day_end_button'), `fest:pe:${teamId}`),
+];
+
+function dayKeyboard(ctx: BotContext, teamId: number) {
+  return Markup.inlineKeyboard([dayButtons(ctx, teamId)]);
 }
 
 async function showRanking(ctx: BotContext, team: FestTeam): Promise<void> {
   const view = buildFestView(ctx.deps.db, { festId: team.fest_id, teamId: team.id, now: new Date() });
   // Telegram limits an inline keyboard to 100 buttons; the best-ranked sections are the ones worth a tap.
   const buttons = view.ranking.slice(0, RANKING_BUTTONS).map((r) => [Markup.button.callback(r.section.slice(0, 60), `fest:s:${team.id}:${sectionKey(r.section)}`)]);
-  if (isGroup(ctx.chat?.type)) buttons.push([Markup.button.callback(ctx.t('fest.join_button'), `fest:j:${team.id}`)]);
+  buttons.push(dayButtons(ctx, team.id));
   await ctx.replyWithHTML(formatRanking(ctx.t, view), Markup.inlineKeyboard(buttons));
 }
 
-const SUBS = ['targets', 'add', 'take', 'queue', 'drop', 'stands', 'menu', 'printer'] as const;
+const SUBS = ['targets', 'add', 'take', 'queue', 'drop', 'drank', 'start', 'end', 'stands', 'menu', 'printer'] as const;
 /** The station page on the configured origin; any path, query or fragment of the base is dropped. */
 export function festPrintUrl(base: string): string {
   return new URL('/fest-print', base).href;
@@ -126,25 +136,146 @@ export function glassNoOf(query: string): number | null {
 function dropGlass(ctx: BotContext, festId: number, teamId: number, glassNo: number): string {
   const db = ctx.deps.db;
   const item = buildQueueView(db, { festId, teamId }).items.find((i) => i.glassNo === glassNo);
-  if (item && item.closedBy.some((c) => c.checkinId !== null)) return ctx.t('fest.drop_closed', { glass: glassNo });
+  // A mark is someone's word that they had it: the glass stays for the same reason as a checked-in one.
+  if (item && item.closedBy.some((c) => c.checkinId !== null || c.marked)) return ctx.t('fest.drop_closed', { glass: glassNo });
   const r = removeGlass(db, { teamId, glassNo, at: new Date().toISOString() });
   if (r.kind === 'already') return ctx.t('fest.drop_already', { glass: glassNo });
   if (r.kind === 'missing') return ctx.t('fest.drop_none', { glass: glassNo });
   return ctx.t(r.printed ? 'fest.dropped_printed' : 'fest.dropped_unprinted', { glass: glassNo, name: r.name });
 }
 
-/** «Взяв» done: the glass number, announced with its undo button. */
+/**
+ * «Взяв»: the glass number, announced with its undo button — or, while an open glass of this beer is
+ * still on the table, that glass's number and no second one (spec 2026-10-15-fest-queue-reality-design.md §PR 2).
+ */
 async function replyTaken(ctx: BotContext & { from: { id: number } }, team: FestTeam, beerId: number, name: string): Promise<void> {
   const db = ctx.deps.db;
-  const { glassNo } = takeBeer(db, { teamId: team.id, beerId, addedBy: ctx.from.id, at: new Date().toISOString() });
+  const at = new Date();
+  const r = takeBeer(db, { teamId: team.id, beerId, addedBy: ctx.from.id, at: at.toISOString() }, {
+    duplicateOf: () => openGlassOf(buildQueueView(db, { festId: team.fest_id, teamId: team.id }), beerId, at),
+  });
+  if (r.kind === 'duplicate') {
+    await ctx.reply(ctx.t('fest.taken_duplicate', { glass: r.glassNo, name }));
+    return;
+  }
+  const { glassNo } = r;
   const initials = members(db, team.id).find((m) => m.telegram_id === ctx.from.id)?.initials ?? '?';
   await ctx.reply(ctx.t('fest.taken', { glass: glassNo, name, initials }), Markup.inlineKeyboard([
     [Markup.button.callback(ctx.t('fest.undo_button', { glass: glassNo }), `fest:u:${team.id}:${glassNo}`)],
   ]));
 }
 
+const nameOf = (from: { first_name?: string; last_name?: string; username?: string }): string => from.first_name ?? initialsOf(from);
+
+/** «🟢 Ю. почав день о 18:05» / «🔴 … закінчив день о 22:40». */
+function dayAnnouncement(ctx: BotContext, kind: 'start' | 'end', at: Date): string {
+  return ctx.t(kind === 'start' ? 'fest.day_started' : 'fest.day_ended', { name: ctx.from ? nameOf(ctx.from) : '?', time: hhmm(at.toISOString()) });
+}
+
+/** Joins the caller to the team; false (with the alert said) when they have no Untappd linked yet. */
+async function joinTeam(ctx: BotContext & { from: { id: number; first_name?: string } }, team: FestTeam): Promise<boolean> {
+  const db = ctx.deps.db;
+  ensureProfile(db, ctx.from.id);
+  if (!getProfile(db, ctx.from.id)?.untappd_username) {
+    await ctx.answerCbQuery(ctx.t('fest.need_link'), { show_alert: true });
+    return false;
+  }
+  addMember(db, team.id, ctx.from.id, initialsOf(ctx.from), new Date().toISOString());
+  return true;
+}
+
+/**
+ * /fest drank N and its button (spec 2026-10-15-fest-queue-reality-design.md §PR 2): the caller's own
+ * ☑️ on a glass that waits for them — drunk without a check-in that closes it, or not drunk at all.
+ */
+async function replyMarked(ctx: BotContext & { from: { id: number } }, team: FestTeam, glassNo: number): Promise<void> {
+  const db = ctx.deps.db;
+  const item = buildQueueView(db, { festId: team.fest_id, teamId: team.id }).items.find((i) => i.glassNo === glassNo);
+  const mine = item?.closedBy.find((c) => c.telegramId === ctx.from.id);
+  if (!item) {
+    await ctx.reply(ctx.t('fest.drop_none', { glass: glassNo }));
+    return;
+  }
+  if (!mine) {
+    await ctx.reply(ctx.t('fest.drank_not_yours', { glass: glassNo }));
+    return;
+  }
+  if (mine.checkinId !== null) {
+    await ctx.reply(ctx.t('fest.drank_already', { glass: glassNo }));
+    return;
+  }
+  markGlass(db, { queueId: item.id, telegramId: ctx.from.id, at: new Date().toISOString() });
+  await ctx.reply(ctx.t('fest.drank_marked', { glass: glassNo, name: item.name }), Markup.inlineKeyboard([
+    [Markup.button.callback(ctx.t('fest.unmark_button', { glass: glassNo }), `fest:du:${team.id}:${glassNo}`)],
+  ]));
+}
+
 export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
   const festCommand = new Composer<BotContext>();
+
+  /** The team behind a member's button while its fest is current or ahead; null (answered) otherwise. */
+  async function buttonTeam(ctx: BotContext & { from: { id: number } }, teamId: number): Promise<FestTeam | null> {
+    const db = ctx.deps.db;
+    const team = teamById(db, teamId);
+    if (!team || !isTeamMember(db, team.id, ctx.from.id)) {
+      await ctx.answerCbQuery(ctx.t('fest.not_member'));
+      return null;
+    }
+    if (!currentOrNextFests(db, new Date()).some((f) => f.id === team.fest_id)) {
+      await ctx.answerCbQuery(ctx.t('fest.no_fest'));
+      return null;
+    }
+    return team;
+  }
+
+  // «☑️ №N» under /fest drank.
+  festCommand.action(/^fest:d:(\d+):(\d{1,9})$/, async (ctx) => {
+    const team = await buttonTeam(ctx, Number(ctx.match[1]));
+    if (!team) return;
+    await ctx.answerCbQuery();
+    await replyMarked(ctx, team, Number(ctx.match[2]));
+  });
+
+  // «↩️ Зняти відмітку №N» under a mark: only the caller's own mark is taken back.
+  festCommand.action(/^fest:du:(\d+):(\d{1,9})$/, async (ctx) => {
+    const db = ctx.deps.db;
+    const team = await buttonTeam(ctx, Number(ctx.match[1]));
+    if (!team) return;
+    const glassNo = Number(ctx.match[2]);
+    const item = buildQueueView(db, { festId: team.fest_id, teamId: team.id }).items.find((i) => i.glassNo === glassNo);
+    const removed = item ? unmarkGlass(db, { queueId: item.id, telegramId: ctx.from.id }) : false;
+    await ctx.answerCbQuery();
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    await ctx.reply(ctx.t(removed ? 'fest.unmarked' : 'fest.unmark_none', { glass: glassNo }));
+  });
+
+  // «🟢 Почати день»: a member starts the day; someone with Untappd linked joins the team and starts it.
+  festCommand.action(/^fest:ps:(\d+)$/, async (ctx) => {
+    const db = ctx.deps.db;
+    const team = teamById(db, Number(ctx.match[1]));
+    if (!team) return ctx.answerCbQuery();
+    if (!currentOrNextFests(db, new Date()).some((f) => f.id === team.fest_id)) {
+      await ctx.answerCbQuery(ctx.t('fest.no_fest'));
+      return;
+    }
+    const joined = !isTeamMember(db, team.id, ctx.from.id);
+    if (joined && !(await joinTeam(ctx, team))) return;
+    const now = new Date();
+    addPresence(db, { teamId: team.id, telegramId: ctx.from.id, kind: 'start', at: now.toISOString() });
+    await ctx.answerCbQuery();
+    if (joined) await ctx.reply(ctx.t('fest.joined', { name: nameOf(ctx.from) }));
+    await ctx.reply(dayAnnouncement(ctx, 'start', now));
+  });
+
+  // «🔴 Закінчити день»: members only.
+  festCommand.action(/^fest:pe:(\d+)$/, async (ctx) => {
+    const team = await buttonTeam(ctx, Number(ctx.match[1]));
+    if (!team) return;
+    const now = new Date();
+    addPresence(ctx.deps.db, { teamId: team.id, telegramId: ctx.from.id, kind: 'end', at: now.toISOString() });
+    await ctx.answerCbQuery();
+    await ctx.reply(dayAnnouncement(ctx, 'end', now));
+  });
 
   // /fest take <Untappd link> (spec 2026-10-15-fest-queue-reality-design.md §PR 1): the link names
   // the beer exactly, so it is taken at once — off the menu too, and in the version actually poured.
@@ -212,10 +343,39 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
 
     if (sub === 'queue') {
       const view = buildQueueView(db, { festId: fest.id, teamId: team.id });
-      const links = queueLinks(view).map((l) => [Markup.button.url(
+      const scope = { now, all: query.trim().toLowerCase() === 'all' };
+      const links = queueLinks(view, scope).map((l) => [Markup.button.url(
         ctx.t('fest.queue_link', { glass: l.glassNo, name: l.name.slice(0, 50) }), buildBeerPageUrl(l.bid),
       )]);
-      await ctx.replyWithHTML(formatQueue(ctx.t, view), Markup.inlineKeyboard(links));
+      await ctx.replyWithHTML(formatQueue(ctx.t, view, scope), Markup.inlineKeyboard(links));
+      return;
+    }
+
+    if ((sub === 'start' || sub === 'end') && ctx.from) {
+      addPresence(db, { teamId: team.id, telegramId: ctx.from.id, kind: sub, at: now.toISOString() });
+      await ctx.reply(dayAnnouncement(ctx, sub, now));
+      return;
+    }
+
+    if (sub === 'drank' && ctx.from) {
+      const glassNo = glassNoOf(query);
+      if (glassNo !== null) {
+        await replyMarked(ctx as BotContext & { from: { id: number } }, team, glassNo);
+        return;
+      }
+      if (query.trim() !== '') {
+        await ctx.reply(ctx.t('fest.drank_usage'));
+        return;
+      }
+      const mine = myOpenGlasses(buildQueueView(db, { festId: fest.id, teamId: team.id }), ctx.from.id);
+      if (mine.length === 0) {
+        await ctx.reply(ctx.t('fest.drank_none'));
+        return;
+      }
+      const more = mine.length > DRANK_BUTTONS ? `\n${ctx.t('fest.drank_more', { count: mine.length - DRANK_BUTTONS })}` : '';
+      await ctx.reply(ctx.t('fest.drank_pick') + more, Markup.inlineKeyboard(mine.slice(0, DRANK_BUTTONS).map((item) => [
+        Markup.button.callback(ctx.t('fest.drank_button', { glass: item.glassNo, name: item.name.slice(0, 45) }), `fest:d:${team.id}:${item.glassNo}`),
+      ])));
       return;
     }
 
@@ -284,7 +444,7 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
       if (isGroup(ctx.chat.type)) {
         const team = teamByChat(db, fest.id, ctx.chat.id) ?? createTeam(db, fest.id, ctx.chat.id, new Date().toISOString());
         if (members(db, team.id).length === 0) {
-          await ctx.reply(ctx.t('fest.team_created', { fest: fest.name }), joinKeyboard(ctx, team.id));
+          await ctx.reply(ctx.t('fest.team_created', { fest: fest.name }), dayKeyboard(ctx, team.id));
           return;
         }
         await showRanking(ctx, team);
@@ -328,18 +488,15 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     const db = ctx.deps.db;
     const team = teamById(db, Number(ctx.match[1]));
     if (!team) return ctx.answerCbQuery();
+    // The button of messages sent before «Почати день» replaced it (spec 2026-10-15-fest-queue-reality-design.md §PR 2).
     ensureProfile(db, ctx.from.id);
-    if (!getProfile(db, ctx.from.id)?.untappd_username) {
-      await ctx.answerCbQuery(ctx.t('fest.need_link'), { show_alert: true });
-      return;
-    }
-    if (isTeamMember(db, team.id, ctx.from.id)) {
+    if (getProfile(db, ctx.from.id)?.untappd_username && isTeamMember(db, team.id, ctx.from.id)) {
       await ctx.answerCbQuery(ctx.t('fest.already_member'));
       return;
     }
-    addMember(db, team.id, ctx.from.id, initialsOf(ctx.from), new Date().toISOString());
+    if (!(await joinTeam(ctx, team))) return;
     await ctx.answerCbQuery();
-    await ctx.reply(ctx.t('fest.joined', { name: ctx.from.first_name ?? initialsOf(ctx.from) }));
+    await ctx.reply(ctx.t('fest.joined', { name: nameOf(ctx.from) }));
   });
 
   festCommand.action(/^fest:t:(\d+)(?::([a-z]*):(.*))?$/s, async (ctx) => {

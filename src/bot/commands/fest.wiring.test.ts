@@ -7,7 +7,7 @@ import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { getFestBySlug } from '../../storage/fests';
 import { addMember, createTeam, isTeamMember } from '../../storage/fest_teams';
 import { upsertMenuItem } from '../../storage/fest_menu';
-import { queueFor } from '../../storage/fest_queue';
+import { glassMarks, queueFor } from '../../storage/fest_queue';
 import { stationTeam } from '../../storage/fest_print';
 import { insertVenueCheckins } from '../../storage/venue_checkins';
 import type { BotContext } from '../index';
@@ -101,7 +101,7 @@ describe('«Взяв» (fest:q)', () => {
   it('someone outside the team queues nothing and is told so', async () => {
     const { db, bot, teamId, replies, answers } = setup();
     await bot.handleUpdate(callback(1, 8, `fest:q:${teamId}:11`) as unknown as Update);
-    expect([queueFor(db, teamId), replies, answers]).toEqual([[], [], ['This is for team members — press “I’m in the team”.']]);
+    expect([queueFor(db, teamId), replies, answers]).toEqual([[], [], ['This is for team members — press “🟢 Start the day”.']]);
   });
 
   it('a button pressed after the fest is over queues nothing', async () => {
@@ -285,7 +285,7 @@ describe('cancelling a glass (fest:u, /fest drop)', () => {
     await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
     await bot.handleUpdate(callback(2, 8, `fest:u:${teamId}:1`) as unknown as Update);
     expect([queueFor(db, teamId).map((r) => r.glass_no), replies.length, answers[1], edits])
-      .toEqual([[1], 1, 'This is for team members — press “I’m in the team”.', []]);
+      .toEqual([[1], 1, 'This is for team members — press “🟢 Start the day”.', []]);
   });
 
   it('/fest drop cancels by number; a printed label is to be thrown away', async () => {
@@ -325,5 +325,149 @@ describe('cancelling a glass (fest:u, /fest drop)', () => {
     await bot.handleUpdate(command(2, 7, { id: -100, type: 'supergroup' }, '/fest drop 1') as unknown as Update);
     expect([queueFor(db, teamId).map((r) => r.glass_no), replies[1]])
       .toEqual([[1], 'Glass #1 is already checked in — it cannot be cancelled.']);
+  });
+});
+
+const day = (db: DB, teamId: number) =>
+  db.prepare('SELECT telegram_id, kind, at FROM fest_presence WHERE team_id = ? ORDER BY rowid').all(teamId);
+
+describe('the day: /fest start, /fest end and their buttons', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T16:05:00.000Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('/fest start and /fest end record the day and say so with the Warsaw time', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest start') as unknown as Update);
+    vi.setSystemTime(new Date('2026-10-15T20:40:00.000Z'));
+    await bot.handleUpdate(command(2, 7, GROUP, '/fest end') as unknown as Update);
+    expect([day(db, teamId), replies]).toEqual([
+      [{ telegram_id: 7, kind: 'start', at: '2026-10-15T16:05:00.000Z' }, { telegram_id: 7, kind: 'end', at: '2026-10-15T20:40:00.000Z' }],
+      ['🟢 Test: day started at 18:05.', '🔴 Test: day ended at 22:40.'],
+    ]);
+  });
+
+  it('the ranking under /fest carries «Start the day» and «End the day», not «I’m in the team»', async () => {
+    const { bot, teamId, replyExtras } = setup();
+    await bot.handleUpdate(command(1, 7, GROUP, '/fest') as unknown as Update);
+    const rows = (replyExtras[0] as { reply_markup: { inline_keyboard: { callback_data: string }[][] } }).reply_markup.inline_keyboard;
+    expect(rows.at(-1)!.map((b) => b.callback_data)).toEqual([`fest:ps:${teamId}`, `fest:pe:${teamId}`]);
+  });
+
+  it('«Start the day» from someone with Untappd linked joins them and starts their day', async () => {
+    const { db, bot, teamId, replies } = setup();
+    ensureProfile(db, 8);
+    setUntappdUsername(db, 8, 'newcomer');
+    await bot.handleUpdate(callback(1, 8, `fest:ps:${teamId}`) as unknown as Update);
+    expect([isTeamMember(db, teamId, 8), day(db, teamId), replies]).toEqual([
+      true, [{ telegram_id: 8, kind: 'start', at: '2026-10-15T16:05:00.000Z' }], ['✅ Test joined the team.', '🟢 Test: day started at 18:05.'],
+    ]);
+  });
+
+  it('«Start the day» without Untappd linked asks to link it and records nothing', async () => {
+    const { db, bot, teamId, replies, answers } = setup();
+    await bot.handleUpdate(callback(1, 8, `fest:ps:${teamId}`) as unknown as Update);
+    expect([isTeamMember(db, teamId, 8), day(db, teamId), replies, answers])
+      .toEqual([false, [], [], ['First link Untappd in a private chat with the bot: /link <username>']]);
+  });
+
+  it('«End the day» from someone outside the team records nothing', async () => {
+    const { db, bot, teamId, replies, answers } = setup();
+    await bot.handleUpdate(callback(1, 8, `fest:pe:${teamId}`) as unknown as Update);
+    expect([day(db, teamId), replies, answers]).toEqual([[], [], ['This is for team members — press “🟢 Start the day”.']]);
+  });
+
+  it('a member’s «Start the day» and «End the day» record their day', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:ps:${teamId}`) as unknown as Update);
+    await bot.handleUpdate(callback(2, 7, `fest:pe:${teamId}`) as unknown as Update);
+    expect([day(db, teamId).map((r) => (r as { kind: string }).kind), replies])
+      .toEqual([['start', 'end'], ['🟢 Test: day started at 18:05.', '🔴 Test: day ended at 18:05.']]);
+  });
+});
+
+describe('/fest queue, /fest queue all, /fest drank (spec 2026-10-15-fest-queue-reality-design.md §PR 2)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-15T18:00:00.000Z'));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const t = createTranslator('en');
+
+  it('a glass leaves the table after 40 minutes and stays in /fest queue all', async () => {
+    const { bot, teamId, replies } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    vi.setSystemTime(new Date('2026-10-15T18:41:00.000Z'));
+    await bot.handleUpdate(command(2, 7, GROUP, '/fest queue') as unknown as Update);
+    await bot.handleUpdate(command(3, 7, GROUP, '/fest queue all') as unknown as Update);
+    expect([replies[1].split('\n').slice(2), replies[2].split('\n').slice(2)]).toEqual([
+      [t('fest.queue_table_empty'), t('fest.queue_old_hidden', { count: 1 })],
+      ['#1 <b>Bravo</b> (PINTA) · got by YS', '   ⏳ YS'],
+    ]);
+  });
+
+  it('/fest drank lists my open glasses as buttons; one marks it ☑️ in the queue, and the mark can be taken back', async () => {
+    const { db, bot, teamId, replies, replyExtras } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    await bot.handleUpdate(command(2, 7, GROUP, '/fest drank') as unknown as Update);
+    await bot.handleUpdate(callback(3, 7, `fest:d:${teamId}:1`) as unknown as Update);
+    const markedMarks = glassMarks(db, teamId).length;
+    await bot.handleUpdate(command(4, 7, GROUP, '/fest queue all') as unknown as Update);
+    await bot.handleUpdate(callback(5, 7, `fest:du:${teamId}:1`) as unknown as Update);
+    expect([replies[1], replyExtras[1], replies[2], markedMarks, replies[3].split('\n').slice(2), replies[4], glassMarks(db, teamId)]).toEqual([
+      t('fest.drank_pick'),
+      Markup.inlineKeyboard([[Markup.button.callback('☑️ #1 Bravo', `fest:d:${teamId}:1`)]]),
+      '☑️ #1 — Bravo: marked.',
+      1,
+      [t('fest.queue_table_empty'), t('fest.queue_done_hidden', { count: 1 })],
+      'The mark on #1 is taken back.',
+      [],
+    ]);
+  });
+
+  it('/fest drank N marks at once; a glass that does not wait for me, one my check-in closed and a missing one are refused', async () => {
+    const { db, bot, teamId, replies } = setup();
+    ensureProfile(db, 8);
+    setUntappdUsername(db, 8, 'late');
+    addMember(db, teamId, 8, 'LT', '2026-10-01T00:00:00.000Z');
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    insertVenueCheckins(db, [
+      { checkin_id: 801, venue_id: 2167060, bid: 6000011, untappd_user: 'member', checkin_at: '2026-10-15T18:05:00.000Z' },
+    ], 'laptop', '2026-10-15T18:06:00.000Z');
+    vi.setSystemTime(new Date('2026-10-15T19:00:00.000Z'));
+    await bot.handleUpdate(command(2, 8, GROUP, '/fest start') as unknown as Update);
+    await bot.handleUpdate(command(3, 8, GROUP, '/fest drank 1') as unknown as Update);
+    await bot.handleUpdate(command(4, 7, GROUP, '/fest drank 1') as unknown as Update);
+    await bot.handleUpdate(command(5, 7, GROUP, '/fest drank 9') as unknown as Update);
+    await bot.handleUpdate(command(6, 7, GROUP, '/fest drank') as unknown as Update);
+    expect(replies.slice(2)).toEqual([
+      t('fest.drank_not_yours', { glass: 1 }), t('fest.drank_already', { glass: 1 }), t('fest.drop_none', { glass: 9 }), t('fest.drank_none'),
+    ]);
+  });
+
+  it('a second «Взяв» of the same beer by another member while it is on the table gives the same glass; after 40 minutes a new one', async () => {
+    const { db, bot, teamId, replies } = setup();
+    ensureProfile(db, 8);
+    setUntappdUsername(db, 8, 'second');
+    addMember(db, teamId, 8, 'SC', '2026-10-01T00:00:00.000Z');
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    vi.setSystemTime(new Date('2026-10-15T18:05:00.000Z'));
+    await bot.handleUpdate(callback(2, 8, `fest:q:${teamId}:11`) as unknown as Update);
+    vi.setSystemTime(new Date('2026-10-15T18:41:00.000Z'));
+    await bot.handleUpdate(callback(3, 8, `fest:q:${teamId}:11`) as unknown as Update);
+    expect([queueFor(db, teamId).map((r) => r.glass_no), replies.slice(1)]).toEqual([
+      [1, 2], [t('fest.taken_duplicate', { glass: 1, name: 'Bravo' }), '🍺 Glass #2 — Bravo · SC'],
+    ]);
+  });
+
+  it('a glass someone marked is not cancelled', async () => {
+    const { bot, teamId, replies } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    await bot.handleUpdate(command(2, 7, GROUP, '/fest drank 1') as unknown as Update);
+    await bot.handleUpdate(command(3, 7, GROUP, '/fest drop 1') as unknown as Update);
+    expect(replies[2]).toBe(t('fest.drop_closed', { glass: 1 }));
   });
 });

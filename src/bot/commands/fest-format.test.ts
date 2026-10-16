@@ -1,7 +1,7 @@
 import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
-import { capText, fitMessage, formatAlert, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
+import { capText, fitMessage, formatAlert, formatQueue, myOpenGlasses, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
 import { festPrintUrl, initialsOf, pickCallback } from './fest';
 
 const t = createTranslator('uk');
@@ -234,63 +234,83 @@ describe('pickCallback', () => {
 });
 
 describe('formatQueue', () => {
-  const item = (glassNo: number, marks: (string | null)[], bid: number | null = 6000000 + glassNo, section: string | null = 'PINTA') => ({
-    id: glassNo, glassNo, beerId: glassNo, name: `Beer <${glassNo}>`, brewery: 'Brew', bid, section, takenBy: 'OB',
-    addedAt: '2026-10-15T18:00:00.000Z',
-    closedBy: marks.map((checkinId, i) => ({ initials: ['YS', 'OB'][i], checkinId })),
+  // A mark per member: a check-in id (✅), 'M' for their own mark (☑️), null for neither (⏳).
+  const closure = (m: string | null, i: number) => ({ telegramId: i + 1, initials: ['YS', 'OB'][i], checkinId: m === 'M' ? null : m, marked: m === 'M' });
+  const item = (glassNo: number, marks: (string | null)[], opts: { bid?: number | null; section?: string | null; addedAt?: string } = {}) => ({
+    id: glassNo, glassNo, beerId: glassNo, name: `Beer <${glassNo}>`, brewery: 'Brew', takenBy: 'OB',
+    bid: 6000000 + glassNo, section: 'PINTA' as string | null, addedAt: '2026-10-15T18:00:00.000Z',
+    ...opts,
+    closedBy: marks.map(closure),
   });
+  const TABLE = { now: new Date('2026-10-15T18:30:00.000Z'), all: false };
+  const ALL = { now: new Date('2026-10-15T18:30:00.000Z'), all: true };
+  const HEADER = '<b>Черга келихів — на столі</b> (останні 40 хв · ✅ чекін · ☑️ відмітка · ⏳ ще ні)';
+  const old = { addedAt: '2026-10-15T17:49:59.000Z' };
 
-  it('lists the glasses someone still has to check in, a ✅ or ⏳ per member, and counts the hidden rest', () => {
-    const view = { items: [item(1, ['a', 'b']), item(2, ['c', null], 6000002, null), item(3, [null, null]), item(4, ['d', 'e'])] };
-    expect(formatQueue(t, view)).toBe([
-      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+  it('on the table: open glasses of the last 40 minutes, ✅ ☑️ ⏳ per member waited for, and counts the rest by reason', () => {
+    const view = { items: [
+      item(1, ['a', 'b']), item(2, ['c', null], { bid: 6000002, section: null }), item(3, ['M', null]), item(4, [null, null], old),
+    ] };
+    expect(formatQueue(t, view, TABLE)).toBe([
+      HEADER,
       '',
       '№2 <b>Beer &lt;2&gt;</b> · взяв OB',
       '   ✅ YS ⏳ OB',
       '№3 <b>Beer &lt;3&gt;</b> (PINTA) · взяв OB',
+      '   ☑️ YS ⏳ OB',
+      'Сховано, бо всі вже зачекінились: 1.',
+      'Старші за 40 хв і ще не закриті: 1 — /fest queue all.',
+    ].join('\n'));
+  });
+
+  it('a glass taken exactly 40 minutes ago is still on the table', () => {
+    expect(formatQueue(t, { items: [item(1, [null], { addedAt: '2026-10-15T17:50:00.000Z' })] }, TABLE).split('\n')[2])
+      .toBe('№1 <b>Beer &lt;1&gt;</b> (PINTA) · взяв OB');
+  });
+
+  it('all: every open glass of the fest, old ones too, and only the closed-by-everyone count', () => {
+    const view = { items: [item(1, ['a', 'M']), item(4, [null, null], old)] };
+    expect(formatQueue(t, view, ALL)).toBe([
+      '<b>Черга келихів — уся</b> (✅ чекін · ☑️ відмітка · ⏳ ще ні)',
+      '',
+      '№4 <b>Beer &lt;4&gt;</b> (PINTA) · взяв OB',
       '   ⏳ YS ⏳ OB',
-      'Сховано, бо всі вже зачекінились: 2.',
+      'Сховано, бо всі вже зачекінились: 1.',
     ].join('\n'));
   });
 
-  it('with nothing checked in by everyone there is no hidden-count line', () => {
-    expect(formatQueue(t, { items: [item(1, ['a', null])] })).toBe([
-      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+  it('a glass that waits for nobody is closed, not shown', () => {
+    expect(formatQueue(t, { items: [item(1, [])] }, ALL)).toBe([
+      '<b>Черга келихів — уся</b> (✅ чекін · ☑️ відмітка · ⏳ ще ні)',
       '',
-      '№1 <b>Beer &lt;1&gt;</b> (PINTA) · взяв OB',
-      '   ✅ YS ⏳ OB',
+      'На столі нічого не чекає. Уся черга фесту — /fest queue all.',
+      'Сховано, бо всі вже зачекінились: 1.',
     ].join('\n'));
   });
 
-  it('a glass with no member rows is not counted as checked in by everyone: it stays shown', () => {
-    expect(formatQueue(t, { items: [item(1, [])] })).toBe([
-      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+  it('a table with nothing open says where the rest is', () => {
+    expect(formatQueue(t, { items: [item(1, [null], old)] }, TABLE)).toBe([
+      HEADER,
       '',
-      '№1 <b>Beer &lt;1&gt;</b> (PINTA) · взяв OB',
-      '   ',
-    ].join('\n'));
-  });
-
-  it('one hidden glass reads as a count, with no noun or adjective to agree with it', () => {
-    expect(formatQueue(t, { items: [item(1, ['a', 'b'])] }).split('\n').at(-1)).toBe('Сховано, бо всі вже зачекінились: 1.');
-  });
-
-  it('a queue checked in by everyone shows only the header and the count', () => {
-    expect(formatQueue(t, { items: [item(1, ['a', 'b']), item(2, ['c', 'd'])] })).toBe([
-      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
-      '',
-      'Сховано, бо всі вже зачекінились: 2.',
+      'На столі нічого не чекає. Уся черга фесту — /fest queue all.',
+      'Старші за 40 хв і ще не закриті: 1 — /fest queue all.',
     ].join('\n'));
   });
 
   it('an empty queue says how to add a glass', () => {
     // Sent as HTML, so the <назва> placeholder must reach Telegram escaped.
-    expect(formatQueue(t, { items: [] })).toBe('Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take &lt;назва&gt;.');
+    expect(formatQueue(t, { items: [] }, TABLE)).toBe('Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take &lt;назва&gt;.');
   });
 
-  it('links only open glasses that have an Untappd bid', () => {
-    const view = { items: [item(1, ['a', 'b']), item(2, [null, null]), item(3, [null, 'x'], null)] };
-    expect(queueLinks(view)).toEqual([{ glassNo: 2, name: 'Beer <2>', bid: 6000002 }]);
+  it('links only the glasses shown that have an Untappd bid', () => {
+    const view = { items: [item(1, ['a', 'b']), item(2, [null, null]), item(3, [null, 'x'], { bid: null }), item(4, [null, null], old)] };
+    expect([queueLinks(view, TABLE), queueLinks(view, ALL).map((l) => l.glassNo)])
+      .toEqual([[{ glassNo: 2, name: 'Beer <2>', bid: 6000002 }], [2, 4]]);
+  });
+
+  it('/fest drank lists the glasses that wait for this member and that they have not closed', () => {
+    const view = { items: [item(3, [null, null]), item(1, [null, 'b']), item(2, ['a', null]), item(4, ['M', null]), item(5, [null])] };
+    expect([myOpenGlasses(view, 1).map((i) => i.glassNo), myOpenGlasses(view, 2).map((i) => i.glassNo)]).toEqual([[1, 3, 5], [2, 3, 4]]);
   });
 });
 
