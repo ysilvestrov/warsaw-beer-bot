@@ -6,8 +6,10 @@ const SESSIONS = [
   { session_no: 2, start_at: '2026-10-16T12:00:00.000Z', end_at: '2026-10-16T21:00:00.000Z' },
 ];
 const t = (iso: string) => Date.parse(iso);
-const start = (telegramId: number, at: string) => ({ telegramId, kind: 'start' as const, at });
-const end = (telegramId: number, at: string) => ({ telegramId, kind: 'end' as const, at });
+const start = (telegramId: number, at: string) => ({ telegramId, kind: 'start' as const, source: 'explicit' as const, at });
+const end = (telegramId: number, at: string) => ({ telegramId, kind: 'end' as const, source: 'explicit' as const, at });
+const checkin = (telegramId: number, at: string) => ({ telegramId, kind: 'start' as const, source: 'checkin' as const, at });
+const take = (telegramId: number, at: string) => ({ telegramId, kind: 'start' as const, source: 'take' as const, at });
 
 describe('presenceIntervals', () => {
   it('a start and an end make one interval; a later start opens another', () => {
@@ -33,6 +35,39 @@ describe('presenceIntervals', () => {
       { from: t('2026-10-15T15:00:00.000Z'), to: t('2026-10-15T21:00:00.000Z') },
       { from: t('2026-10-16T13:00:00.000Z'), to: t('2026-10-16T21:00:00.000Z') },
     ]);
+  });
+
+  it('a start between sessions lasts an instant: the evening after does not make anyone present the next day', () => {
+    const r = presenceIntervals([checkin(1, '2026-10-15T21:30:00.000Z')], SESSIONS);
+    expect([r.get(1), expectedOn(r, '2026-10-16T13:00:00.000Z')])
+      .toEqual([[{ from: t('2026-10-15T21:30:00.000Z'), to: t('2026-10-15T21:30:00.000Z') }], []]);
+  });
+
+  it('a start up to an hour before the doors open belongs to that session; earlier, it lasts an instant', () => {
+    const r = presenceIntervals([start(1, '2026-10-16T11:00:00.000Z'), start(2, '2026-10-16T10:59:59.000Z')], SESSIONS);
+    expect([r.get(1), r.get(2)]).toEqual([
+      [{ from: t('2026-10-16T11:00:00.000Z'), to: t('2026-10-16T21:00:00.000Z') }],
+      [{ from: t('2026-10-16T10:59:59.000Z'), to: t('2026-10-16T10:59:59.000Z') }],
+    ]);
+  });
+
+  it('after /fest end a check-in on the way out does not reopen the day; an own «Взяв» or /fest start does', () => {
+    const r = presenceIntervals([
+      start(1, '2026-10-15T15:00:00.000Z'), end(1, '2026-10-15T19:00:00.000Z'), checkin(1, '2026-10-15T19:05:00.000Z'),
+      start(2, '2026-10-15T15:00:00.000Z'), end(2, '2026-10-15T19:00:00.000Z'), take(2, '2026-10-15T19:30:00.000Z'),
+    ], SESSIONS);
+    expect([r.get(1), r.get(2)]).toEqual([
+      [{ from: t('2026-10-15T15:00:00.000Z'), to: t('2026-10-15T19:00:00.000Z') }],
+      [
+        { from: t('2026-10-15T15:00:00.000Z'), to: t('2026-10-15T19:00:00.000Z') },
+        { from: t('2026-10-15T19:30:00.000Z'), to: t('2026-10-15T21:00:00.000Z') },
+      ],
+    ]);
+  });
+
+  it('/fest end holds against check-ins only for its own session: the next day a check-in starts it', () => {
+    const r = presenceIntervals([end(1, '2026-10-15T19:00:00.000Z'), checkin(1, '2026-10-16T13:00:00.000Z')], SESSIONS);
+    expect(r.get(1)).toEqual([{ from: t('2026-10-16T13:00:00.000Z'), to: t('2026-10-16T21:00:00.000Z') }]);
   });
 
   it('a start after the last session lasts an instant', () => {

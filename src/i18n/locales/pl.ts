@@ -266,7 +266,7 @@ export const pl: Messages = {
   'fest.queue_header': '<b>Kolejka kufli — na stole</b> (ostatnie 40 min · ✅ meldunek · ☑️ odhaczone · ⏳ jeszcze nie)',
   'fest.queue_empty': 'Kolejka jest pusta. Naciśnij „🍺 Wziąłem” w sekcji albo wyślij /fest take <nazwa>.',
   'fest.queue_line': 'nr {glass} <b>{name}</b>{section} · wziął {taker}\n   {marks}',
-  'fest.queue_done_hidden': 'Ukryto, bo wszyscy już się zameldowali: {count}.',
+  'fest.queue_done_hidden': 'Ukryto, bo wszyscy już zamknęli (✅/☑️): {count}.',
   'fest.queue_all_header': '<b>Kolejka kufli — cała</b> (✅ meldunek · ☑️ odhaczone · ⏳ jeszcze nie)',
   'fest.queue_table_empty': 'Na stole nic nie czeka. Cała kolejka festiwalu — /fest queue all.',
   'fest.queue_old_hidden': 'Starsze niż 40 min i jeszcze niezamknięte: {count} — /fest queue all.',

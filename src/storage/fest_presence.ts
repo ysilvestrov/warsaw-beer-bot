@@ -7,6 +7,8 @@ import type { DB } from './db';
 export interface PresenceEvent {
   telegramId: number;
   kind: 'start' | 'end';
+  /** An explicit /fest start or /fest end, or an implicit start from an own «Взяв» or venue check-in. */
+  source: 'explicit' | 'take' | 'checkin';
   /** ISO-8601 UTC with 'Z'. */
   at: string;
 }
@@ -23,11 +25,11 @@ export function addPresence(db: DB, p: { teamId: number; telegramId: number; kin
  */
 export function presenceEvents(db: DB, p: { festId: number; teamId: number; sinceIso: string }): PresenceEvent[] {
   const rows = db.prepare(
-    `SELECT telegram_id AS telegramId, kind, at FROM fest_presence WHERE team_id = ? AND at >= ?
+    `SELECT telegram_id AS telegramId, kind, 'explicit' AS source, at FROM fest_presence WHERE team_id = ? AND at >= ?
      UNION ALL
-     SELECT added_by, 'start', added_at FROM fest_queue WHERE team_id = ? AND added_at >= ?
+     SELECT added_by, 'start', 'take', added_at FROM fest_queue WHERE team_id = ? AND added_at >= ?
      UNION ALL
-     SELECT m.telegram_id, 'start', v.checkin_at
+     SELECT m.telegram_id, 'start', 'checkin', v.checkin_at
        FROM fest_team_members m
        JOIN user_profiles u ON u.telegram_id = m.telegram_id
        JOIN venue_checkins v ON lower(v.untappd_user) = lower(u.untappd_username)

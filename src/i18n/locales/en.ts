@@ -266,7 +266,7 @@ export const en: Messages = {
   'fest.queue_header': '<b>Glass queue — on the table</b> (last 40 min · ✅ check-in · ☑️ marked · ⏳ not yet)',
   'fest.queue_empty': 'The queue is empty. Tap “🍺 Got it” in a section or send /fest take <name>.',
   'fest.queue_line': '#{glass} <b>{name}</b>{section} · got by {taker}\n   {marks}',
-  'fest.queue_done_hidden': 'Hidden because everyone has checked in: {count}.',
+  'fest.queue_done_hidden': 'Hidden because everyone has closed them (✅/☑️): {count}.',
   'fest.queue_all_header': '<b>Glass queue — all</b> (✅ check-in · ☑️ marked · ⏳ not yet)',
   'fest.queue_table_empty': 'Nothing is waiting on the table. The whole queue of the fest — /fest queue all.',
   'fest.queue_old_hidden': 'Older than 40 min and still open: {count} — /fest queue all.',

@@ -235,7 +235,11 @@ describe('pickCallback', () => {
 
 describe('formatQueue', () => {
   // A mark per member: a check-in id (✅), 'M' for their own mark (☑️), null for neither (⏳).
-  const closure = (m: string | null, i: number) => ({ telegramId: i + 1, initials: ['YS', 'OB'][i], checkinId: m === 'M' ? null : m, marked: m === 'M' });
+  const CLOSURES: Record<string, { checkinId: string | null; marked: boolean }> = {
+    a: { checkinId: 'a', marked: false }, b: { checkinId: 'b', marked: false }, c: { checkinId: 'c', marked: false },
+    x: { checkinId: 'x', marked: false }, M: { checkinId: null, marked: true }, null: { checkinId: null, marked: false },
+  };
+  const closure = (m: string | null, i: number) => ({ telegramId: i + 1, initials: ['YS', 'OB'][i], ...CLOSURES[String(m)] });
   const item = (glassNo: number, marks: (string | null)[], opts: { bid?: number | null; section?: string | null; addedAt?: string } = {}) => ({
     id: glassNo, glassNo, beerId: glassNo, name: `Beer <${glassNo}>`, brewery: 'Brew', takenBy: 'OB',
     bid: 6000000 + glassNo, section: 'PINTA' as string | null, addedAt: '2026-10-15T18:00:00.000Z',
@@ -258,7 +262,7 @@ describe('formatQueue', () => {
       '   ✅ YS ⏳ OB',
       '№3 <b>Beer &lt;3&gt;</b> (PINTA) · взяв OB',
       '   ☑️ YS ⏳ OB',
-      'Сховано, бо всі вже зачекінились: 1.',
+      'Сховано, бо всі вже закрили (✅/☑️): 1.',
       'Старші за 40 хв і ще не закриті: 1 — /fest queue all.',
     ].join('\n'));
   });
@@ -275,7 +279,7 @@ describe('formatQueue', () => {
       '',
       '№4 <b>Beer &lt;4&gt;</b> (PINTA) · взяв OB',
       '   ⏳ YS ⏳ OB',
-      'Сховано, бо всі вже зачекінились: 1.',
+      'Сховано, бо всі вже закрили (✅/☑️): 1.',
     ].join('\n'));
   });
 
@@ -284,7 +288,7 @@ describe('formatQueue', () => {
       '<b>Черга келихів — уся</b> (✅ чекін · ☑️ відмітка · ⏳ ще ні)',
       '',
       'На столі нічого не чекає. Уся черга фесту — /fest queue all.',
-      'Сховано, бо всі вже зачекінились: 1.',
+      'Сховано, бо всі вже закрили (✅/☑️): 1.',
     ].join('\n'));
   });
 

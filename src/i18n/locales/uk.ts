@@ -266,7 +266,7 @@ export const uk: Messages = {
   'fest.queue_header': '<b>Черга келихів — на столі</b> (останні 40 хв · ✅ чекін · ☑️ відмітка · ⏳ ще ні)',
   'fest.queue_empty': 'Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take <назва>.',
   'fest.queue_line': '№{glass} <b>{name}</b>{section} · взяв {taker}\n   {marks}',
-  'fest.queue_done_hidden': 'Сховано, бо всі вже зачекінились: {count}.',
+  'fest.queue_done_hidden': 'Сховано, бо всі вже закрили (✅/☑️): {count}.',
   'fest.queue_all_header': '<b>Черга келихів — уся</b> (✅ чекін · ☑️ відмітка · ⏳ ще ні)',
   'fest.queue_table_empty': 'На столі нічого не чекає. Уся черга фесту — /fest queue all.',
   'fest.queue_old_hidden': 'Старші за 40 хв і ще не закриті: {count} — /fest queue all.',

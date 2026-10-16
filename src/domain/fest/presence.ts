@@ -13,38 +13,55 @@ export interface Interval {
   to: number;
 }
 
+/** A day at the table may begin this long before its session opens: people arrive before the doors. */
+export const SESSION_LEAD_MS = 60 * 60 * 1000;
+
 /**
- * Each member's presence: a start (explicit or a member's own action) opens an interval when none is
- * open, an end closes it. One still open ends with the session it began in — the first session ending
- * at or after its start — or at its start when no session is left: /fest end forgotten stops at the
- * session's end, never runs into the next day.
+ * Each member's presence. A start opens an interval when none is open, an end closes it. A start
+ * belongs to the session it falls in (from SESSION_LEAD_MS before its opening to its end) and an open
+ * interval ends with that session — /fest end forgotten never runs into the next day. A start outside
+ * every session lasts an instant: an action the evening after does not make anyone present tomorrow.
+ * After an explicit end, only an explicit start or an own «Взяв» opens the day again in that session —
+ * a check-in on the way out does not undo /fest end.
  */
 export function presenceIntervals(events: PresenceEvent[], sessions: FestSession[]): Map<number, Interval[]> {
-  const ends = sessions.map((s) => Date.parse(s.end_at)).sort((a, b) => a - b);
-  const sessionEnd = (t: number): number => ends.find((e) => e >= t) ?? t;
+  const windows = sessions.map((s) => ({ from: Date.parse(s.start_at) - SESSION_LEAD_MS, to: Date.parse(s.end_at) }));
+  const sessionEnd = (t: number): number | null => windows.find((w) => w.from <= t && t <= w.to)?.to ?? null;
   const out = new Map<number, Interval[]>();
-  const open = new Map<number, number>();
+  const add = (member: number, i: Interval) => out.set(member, [...(out.get(member) ?? []), i]);
+  const open = new Map<number, { from: number; until: number }>();
+  /** The session end until which an explicit /fest end holds against check-ins. */
+  const ended = new Map<number, number>();
   const ordered = [...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || Number(a.kind === 'end') - Number(b.kind === 'end'));
-  const close = (member: number, from: number, to: number) => {
-    out.set(member, [...(out.get(member) ?? []), { from, to }]);
-    open.delete(member);
-  };
   for (const e of ordered) {
     const t = Date.parse(e.at);
-    const from = open.get(e.telegramId);
-    // A start after the session it opened in has ended belongs to a new day.
-    if (from !== undefined && t > sessionEnd(from)) close(e.telegramId, from, sessionEnd(from));
-    const still = open.get(e.telegramId);
-    if (e.kind === 'start') {
-      if (still === undefined) open.set(e.telegramId, t);
-    } else if (still !== undefined) {
-      close(e.telegramId, still, t);
+    const m = e.telegramId;
+    const current = open.get(m);
+    if (current !== undefined && t > current.until) {
+      add(m, { from: current.from, to: current.until });
+      open.delete(m);
     }
+    const endedUntil = ended.get(m);
+    if (endedUntil !== undefined && t > endedUntil) ended.delete(m);
+    const still = open.get(m);
+    if (e.kind === 'end') {
+      if (still !== undefined) {
+        add(m, { from: still.from, to: t });
+        open.delete(m);
+      }
+      const until = sessionEnd(t);
+      if (e.source === 'explicit' && until !== null) ended.set(m, until);
+      continue;
+    }
+    if (still !== undefined) continue;
+    if (e.source === 'checkin' && ended.has(m)) continue;
+    const until = sessionEnd(t);
+    if (until === null) add(m, { from: t, to: t });
+    else open.set(m, { from: t, until });
   }
-  for (const [member, from] of open) close(member, from, sessionEnd(from));
+  for (const [m, i] of open) add(m, { from: i.from, to: i.until });
   return out;
 }
-
 /** Members expected on a glass taken at `addedAt`: their presence touches [addedAt, addedAt + TABLE_MS]. */
 export function expectedOn(intervals: Map<number, Interval[]>, addedAt: string): number[] {
   const from = Date.parse(addedAt);

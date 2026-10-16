@@ -37,10 +37,10 @@ describe('presenceEvents', () => {
       { checkin_id: 501, venue_id: 2167060, bid: 6000011, untappd_user: 'johndoe', checkin_at: '2026-10-15T17:00:00.000Z' },
     ], 'laptop', SINCE);
     expect(presenceEvents(db, { festId, teamId, sinceIso: SINCE })).toEqual([
-      { telegramId: 1, kind: 'start', at: '2026-10-15T15:00:00.000Z' },
-      { telegramId: 1, kind: 'start', at: '2026-10-15T16:00:00.000Z' },
-      { telegramId: 1, kind: 'start', at: '2026-10-15T17:00:00.000Z' },
-      { telegramId: 1, kind: 'end', at: '2026-10-15T20:00:00.000Z' },
+      { telegramId: 1, kind: 'start', source: 'explicit', at: '2026-10-15T15:00:00.000Z' },
+      { telegramId: 1, kind: 'start', source: 'take', at: '2026-10-15T16:00:00.000Z' },
+      { telegramId: 1, kind: 'start', source: 'checkin', at: '2026-10-15T17:00:00.000Z' },
+      { telegramId: 1, kind: 'end', source: 'explicit', at: '2026-10-15T20:00:00.000Z' },
     ]);
   });
 
