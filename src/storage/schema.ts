@@ -1077,6 +1077,29 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 51,
+    // Presence and manual marks (spec 2026-10-15-fest-queue-reality-design.md §PR 2). fest_presence
+    // holds only explicit /fest start and /fest end — an implicit start (a member's own «Взяв» or
+    // authored venue check-in) is read from where it already is, never copied. fest_glass_marks is a
+    // member's own word that a glass is done for them, shown as ☑️, never as a check-in. New tables
+    // only: a code-only rollback does not read them. Idempotent.
+    sql: `
+      CREATE TABLE IF NOT EXISTS fest_presence (
+        team_id     INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+        telegram_id INTEGER NOT NULL,
+        kind        TEXT NOT NULL CHECK (kind IN ('start', 'end')),
+        at          TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_fest_presence_team ON fest_presence (team_id, telegram_id, at);
+      CREATE TABLE IF NOT EXISTS fest_glass_marks (
+        queue_id    INTEGER NOT NULL REFERENCES fest_queue(id) ON DELETE CASCADE,
+        telegram_id INTEGER NOT NULL,
+        marked_at   TEXT NOT NULL,
+        PRIMARY KEY (queue_id, telegram_id)
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

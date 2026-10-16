@@ -122,3 +122,25 @@ export function memberBeerCheckins(
   }
   return out;
 }
+
+// Manual marks (spec 2026-10-15-fest-queue-reality-design.md §PR 2): a member's own word that a glass is
+// done for them — drunk without a check-in that closes it, or not drunk at all. Shown as ☑️, never as ✅.
+
+/** true when the mark is new; a second mark of the same glass by the same member changes nothing. */
+export function markGlass(db: DB, p: { queueId: number; telegramId: number; at: string }): boolean {
+  return db.prepare('INSERT OR IGNORE INTO fest_glass_marks (queue_id, telegram_id, marked_at) VALUES (?, ?, ?)')
+    .run(p.queueId, p.telegramId, new Date(p.at).toISOString()).changes === 1;
+}
+
+/** true when there was a mark to take back. */
+export function unmarkGlass(db: DB, p: { queueId: number; telegramId: number }): boolean {
+  return db.prepare('DELETE FROM fest_glass_marks WHERE queue_id = ? AND telegram_id = ?').run(p.queueId, p.telegramId).changes === 1;
+}
+
+export function glassMarks(db: DB, teamId: number): { queueId: number; telegramId: number }[] {
+  return db.prepare(
+    `SELECT k.queue_id AS queueId, k.telegram_id AS telegramId
+       FROM fest_glass_marks k JOIN fest_queue q ON q.id = k.queue_id
+      WHERE q.team_id = ? ORDER BY k.queue_id, k.telegram_id`,
+  ).all(teamId) as { queueId: number; telegramId: number }[];
+}

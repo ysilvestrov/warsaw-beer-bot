@@ -5,7 +5,7 @@ import { getFestBySlug } from './fests';
 import { createTeam } from './fest_teams';
 import { insertVenueCheckins } from './venue_checkins';
 import { mergeCheckin } from './checkins';
-import { memberBeerCheckins, queueFor, removeGlass, takeBeer } from './fest_queue';
+import { glassMarks, markGlass, memberBeerCheckins, queueFor, removeGlass, takeBeer, unmarkGlass } from './fest_queue';
 
 function setup(): { db: DB; teamA: number; teamB: number } {
   const db = openDb(':memory:');
@@ -182,5 +182,30 @@ describe('removeGlass', () => {
     const again = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: new Date(Date.parse(AT) + 5000).toISOString() });
     expect([again.glassNo, again.repeated]).toEqual([2, false]);
     expect(db.prepare('SELECT COUNT(*) AS n FROM fest_print_jobs').get()).toEqual({ n: 1 });
+  });
+});
+
+describe('manual marks', () => {
+  it('marks a glass once per member, takes a mark back once, and lists the team’s marks', () => {
+    const { db, teamA, teamB } = setup();
+    const glass = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    const other = takeBeer(db, { teamId: teamB, beerId: 11, addedBy: 1, at: AT });
+    const results = [
+      markGlass(db, { queueId: glass.id, telegramId: 1, at: AT }),
+      markGlass(db, { queueId: glass.id, telegramId: 1, at: AT }),
+      markGlass(db, { queueId: glass.id, telegramId: 2, at: AT }),
+      markGlass(db, { queueId: other.id, telegramId: 1, at: AT }),
+      unmarkGlass(db, { queueId: glass.id, telegramId: 2 }),
+      unmarkGlass(db, { queueId: glass.id, telegramId: 2 }),
+    ];
+    expect([results, glassMarks(db, teamA)]).toEqual([[true, false, true, true, true, false], [{ queueId: glass.id, telegramId: 1 }]]);
+  });
+
+  it('a cancelled glass takes its marks with it', () => {
+    const { db, teamA } = setup();
+    const glass = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    markGlass(db, { queueId: glass.id, telegramId: 1, at: AT });
+    removeGlass(db, { teamId: teamA, glassNo: glass.glassNo, at: AT });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM fest_glass_marks').get()).toEqual({ n: 0 });
   });
 });

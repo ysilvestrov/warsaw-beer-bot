@@ -153,12 +153,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..50 on a fresh db, with no gaps', () => {
+  it('records every migration 1..51 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 51 }, (_, i) => i + 1));
     db.close();
   });
 
