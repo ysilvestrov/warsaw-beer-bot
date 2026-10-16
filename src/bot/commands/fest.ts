@@ -137,7 +137,8 @@ function dropGlass(ctx: BotContext, festId: number, teamId: number, glassNo: num
   const db = ctx.deps.db;
   const item = buildQueueView(db, { festId, teamId }).items.find((i) => i.glassNo === glassNo);
   // A mark is someone's word that they had it: the glass stays for the same reason as a checked-in one.
-  if (item && item.closedBy.some((c) => c.checkinId !== null || c.marked)) return ctx.t('fest.drop_closed', { glass: glassNo });
+  if (item && item.closedBy.some((c) => c.checkinId !== null)) return ctx.t('fest.drop_closed', { glass: glassNo });
+  if (item && item.closedBy.some((c) => c.marked)) return ctx.t('fest.drop_marked', { glass: glassNo });
   const r = removeGlass(db, { teamId, glassNo, at: new Date().toISOString() });
   if (r.kind === 'already') return ctx.t('fest.drop_already', { glass: glassNo });
   if (r.kind === 'missing') return ctx.t('fest.drop_none', { glass: glassNo });
@@ -204,6 +205,10 @@ async function replyMarked(ctx: BotContext & { from: { id: number } }, team: Fes
     await ctx.reply(ctx.t('fest.drank_already', { glass: glassNo }));
     return;
   }
+  if (mine.marked) {
+    await ctx.reply(ctx.t('fest.drank_already_marked', { glass: glassNo }));
+    return;
+  }
   markGlass(db, { queueId: item.id, telegramId: ctx.from.id, at: new Date().toISOString() });
   await ctx.reply(ctx.t('fest.drank_marked', { glass: glassNo, name: item.name }), Markup.inlineKeyboard([
     [Markup.button.callback(ctx.t('fest.unmark_button', { glass: glassNo }), `fest:du:${team.id}:${glassNo}`)],
@@ -244,9 +249,14 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     const glassNo = Number(ctx.match[2]);
     const item = buildQueueView(db, { festId: team.fest_id, teamId: team.id }).items.find((i) => i.glassNo === glassNo);
     const removed = item ? unmarkGlass(db, { queueId: item.id, telegramId: ctx.from.id }) : false;
+    // The button is the marker's, and others see it too: it leaves the message only when it took a mark back.
+    if (!removed) {
+      await ctx.answerCbQuery(ctx.t('fest.unmark_none', { glass: glassNo }));
+      return;
+    }
     await ctx.answerCbQuery();
     await ctx.editMessageReplyMarkup(undefined).catch(() => {});
-    await ctx.reply(ctx.t(removed ? 'fest.unmarked' : 'fest.unmark_none', { glass: glassNo }));
+    await ctx.reply(ctx.t('fest.unmarked', { glass: glassNo }));
   });
 
   // «🟢 Почати день»: a member starts the day; someone with Untappd linked joins the team and starts it.

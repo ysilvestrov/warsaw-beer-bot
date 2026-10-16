@@ -468,6 +468,25 @@ describe('/fest queue, /fest queue all, /fest drank (spec 2026-10-15-fest-queue-
     await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
     await bot.handleUpdate(command(2, 7, GROUP, '/fest drank 1') as unknown as Update);
     await bot.handleUpdate(command(3, 7, GROUP, '/fest drop 1') as unknown as Update);
-    expect(replies[2]).toBe(t('fest.drop_closed', { glass: 1 }));
+    expect(replies[2]).toBe(t('fest.drop_marked', { glass: 1 }));
+  });
+
+  it('marking a glass twice says it is already marked, with no second undo button', async () => {
+    const { bot, teamId, replies, replyExtras } = setup();
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    await bot.handleUpdate(command(2, 7, GROUP, '/fest drank 1') as unknown as Update);
+    await bot.handleUpdate(callback(3, 7, `fest:d:${teamId}:1`) as unknown as Update);
+    expect([replies[2], replyExtras[2]]).toEqual([t('fest.drank_already_marked', { glass: 1 }), undefined]);
+  });
+
+  it('another member pressing my undo button takes nothing back and leaves the button on the message', async () => {
+    const { db, bot, teamId, replies, answers, edits } = setup();
+    ensureProfile(db, 8);
+    setUntappdUsername(db, 8, 'second');
+    addMember(db, teamId, 8, 'SC', '2026-10-01T00:00:00.000Z');
+    await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+    await bot.handleUpdate(command(2, 7, GROUP, '/fest drank 1') as unknown as Update);
+    await bot.handleUpdate(callback(3, 8, `fest:du:${teamId}:1`) as unknown as Update);
+    expect([glassMarks(db, teamId).length, replies.length, answers.at(-1), edits]).toEqual([1, 2, t('fest.unmark_none', { glass: 1 }), []]);
   });
 });

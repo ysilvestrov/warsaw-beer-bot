@@ -226,6 +226,7 @@ export interface Messages {
   'fest.drop_none': string;
   'fest.drop_already': string;
   'fest.drop_closed': string;
+  'fest.drop_marked': string;
   'fest.dropped_printed': string;
   'fest.dropped_unprinted': string;
   'fest.queue_header': string;
@@ -247,6 +248,7 @@ export interface Messages {
   'fest.drank_button': string;
   'fest.drank_not_yours': string;
   'fest.drank_already': string;
+  'fest.drank_already_marked': string;
   'fest.drank_marked': string;
   'fest.unmark_button': string;
   'fest.unmarked': string;
