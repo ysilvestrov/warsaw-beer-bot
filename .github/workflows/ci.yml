@@ -140,7 +140,7 @@ jobs:
             || { echo "::error::push said '$pushed', the registry says '$digest'"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           subject-name: ${{ env.REPOSITORY }}
