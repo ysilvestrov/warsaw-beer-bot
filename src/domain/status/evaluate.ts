@@ -1,4 +1,5 @@
-import type { Colour, Evaluation, FestInputs, StatusInputs, SubsystemId } from './types';
+import type { Colour, Evaluation, FestEye, FestInputs, StatusInputs, SubsystemId } from './types';
+import { EYE_GAP_MS, FAST_EYES_GAP_MS, longestGap } from '../fest/eye-health';
 import { hostPatchFindings } from './host-patch';
 import { upstreamFindings } from './host-upstream';
 import { STATUS_RULES as R } from './rules';
@@ -84,10 +85,38 @@ function staleness(what: string, lastAt: string | null, cycleMs: number, now: Da
   return [];
 }
 
+const EYE_SILENT: Record<FestEye, string> = { mcp_venue: 'MCP-око не покривало', server: 'серверне око не покривало', laptop: 'ноутбук не покривав' };
+const minutes = (ms: number): number => Math.round(ms / 60_000);
+
+// Each eye on its own (spec 2026-10-19-fest-status-eyes-design.md): the sum of all eyes was 99–100% on
+// every WFP22 session while the MCP eye was dead for 391 minutes, so only per-eye gaps show a breakage.
+function eyeFindings(session: NonNullable<FestInputs['session']>): Finding[] {
+  const w = { from: Date.parse(session.from), to: Date.parse(session.to) };
+  const out: Finding[] = [];
+  for (const eye of ['mcp_venue', 'server', 'laptop'] as const) {
+    const e = session.eyes[eye];
+    if (!e.enabled) continue;
+    const gap = longestGap(e.spans, w);
+    if (gap.ms > EYE_GAP_MS[eye]) {
+      out.push(yellow(`${EYE_SILENT[eye]} головну локацію ${minutes(gap.ms)} хв (з ${warsawClock(new Date(gap.from).toISOString())})`));
+    }
+  }
+  // The fast eyes together: without them the server alone sees about a third of the check-ins.
+  const { mcp_venue: mcp, laptop } = session.eyes;
+  if (mcp.enabled && laptop.enabled) {
+    const gap = longestGap([...mcp.spans, ...laptop.spans], w);
+    if (gap.ms > FAST_EYES_GAP_MS) {
+      out.push(yellow(`головну локацію ${minutes(gap.ms)} хв не покривали ні MCP, ні ноутбук (з ${warsawClock(new Date(gap.from).toISOString())})`));
+    }
+  }
+  return out;
+}
+
 export function evaluateFest(fest: FestInputs, now: Date): Evaluation {
   return evaluation('fest', [
-    ...staleness('меню фесту', fest.menuLastAt, fest.menuCycleMs, now),
+    ...(fest.over ? [] : staleness('меню фесту', fest.menuLastAt, fest.menuCycleMs, now)),
     ...staleness('MCP keep-alive фесту', fest.keepaliveLastAt, fest.keepaliveCycleMs, now),
+    ...(fest.session === null ? [] : eyeFindings(fest.session)),
   ]);
 }
 

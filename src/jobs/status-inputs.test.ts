@@ -15,6 +15,7 @@ import { UNLOCK_LAST_RESULT_KEY, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orph
 import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
 import { FEST_MENU_LAST_KEY } from './fest-poll';
 import { KEEPALIVE_LAST_KEY } from './fest-friend-feed';
+import { addCoverage } from '../storage/fest_coverage';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
 
 const NOW = new Date('2026-10-06T07:00:00.000Z');
@@ -157,7 +158,7 @@ test('persisted pause, unlock result and fest timestamps are carried through as 
     { since: '2026-10-06T04:12:33.000Z', status: 401 },
     { ranToday: true, withheld: [{ beerId: 38770, issueNumber: 452 }] },
     { menuLastAt: '2026-10-06T01:00:00.000Z', menuCycleMs: 21_600_000,
-      keepaliveLastAt: '2026-10-05T07:00:00.000Z', keepaliveCycleMs: 86_400_000 },
+      keepaliveLastAt: '2026-10-05T07:00:00.000Z', keepaliveCycleMs: 86_400_000, over: false, session: null },
   ]);
 });
 
@@ -287,4 +288,39 @@ test('testDiagnosticsUid is the trusted owner of the monitor file and `id` is ne
 // The status judges the Node that runs the bot, not the host package (spec 2026-10-11 §10).
 test('runtimeNode is the version of this process', () => {
   expect(collectStatusInputs(emptyDb(), NOW, DATE, missing).runtimeNode).toBe(process.versions.node);
+});
+
+describe('fest eyes in the status (#885)', () => {
+  // WFP22 seed: session 2 is 2026-10-16 12:00–22:00 UTC, session 3 ends 2026-10-17 22:00; main venue 11142155.
+  const MAIN = 11142155;
+  const covered = () => {
+    const db = emptyDb();
+    addCoverage(db, MAIN, { from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T15:29:00.000Z' }, 'mcp_venue', '2026-10-16T15:29:00.000Z');
+    addCoverage(db, MAIN, { from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T22:00:00.000Z' }, 'laptop', '2026-10-16T22:00:00.000Z');
+    addCoverage(db, 2167060, { from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T22:00:00.000Z' }, 'mcp_venue', '2026-10-16T22:00:00.000Z');
+    return db;
+  };
+
+  it('a session on now is judged up to now, with the spans of each eye on the main venue and the configured eyes', () => {
+    const i = collectStatusInputs(covered(), new Date('2026-10-16T16:00:00.000Z'), '2026-10-16', { ...missing, festEyes: { mcp: true, server: false } });
+    expect(i.fest?.session).toEqual({
+      from: '2026-10-16T12:00:00.000Z', to: '2026-10-16T16:00:00.000Z',
+      eyes: {
+        mcp_venue: { enabled: true, spans: [{ from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T15:29:00.000Z' }] },
+        server: { enabled: false, spans: [] },
+        laptop: { enabled: true, spans: [{ from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T22:00:00.000Z' }] },
+      },
+    });
+  });
+
+  it('the next morning judges the session that ended in the night, whole', () => {
+    const i = collectStatusInputs(covered(), new Date('2026-10-17T05:00:00.000Z'), '2026-10-17', missing);
+    expect([i.fest?.session?.from, i.fest?.session?.to, i.fest?.over]).toEqual(['2026-10-16T12:00:00.000Z', '2026-10-16T22:00:00.000Z', false]);
+  });
+
+  it('the fest stays in the status for a day after its last session, then leaves', () => {
+    const db = emptyDb();
+    const after = (h: number) => collectStatusInputs(db, new Date(Date.parse('2026-10-17T22:00:00.000Z') + h * 3_600_000), '2026-10-18', missing).fest;
+    expect([after(23)?.over, after(23)?.session?.to, after(25)]).toEqual([true, '2026-10-17T22:00:00.000Z', null]);
+  });
 });

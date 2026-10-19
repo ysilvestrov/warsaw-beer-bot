@@ -31,7 +31,8 @@ export function pageSpan(p: PageSpanInput): Span | null {
   return { from_at: iso(oldest), to_at: iso(upper) };
 }
 
-function merged(spans: Span[]): { from: number; to: number }[] {
+/** The union of `spans` as sorted, non-overlapping millisecond intervals. */
+export function merged(spans: Span[]): { from: number; to: number }[] {
   const sorted = spans
     .map((s) => ({ from: Date.parse(s.from_at), to: Date.parse(s.to_at) }))
     .sort((a, b) => a.from - b.from);

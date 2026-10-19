@@ -108,7 +108,7 @@ describe('Untappd', () => {
 describe('Фест', () => {
   const fest = (patch: Partial<FestInputs>): FestInputs => ({
     menuLastAt: '2026-10-06T06:00:00.000Z', menuCycleMs: 6 * 3_600_000,
-    keepaliveLastAt: '2026-10-05T21:26:00.000Z', keepaliveCycleMs: 24 * 3_600_000, ...patch,
+    keepaliveLastAt: '2026-10-05T21:26:00.000Z', keepaliveCycleMs: 24 * 3_600_000, over: false, session: null, ...patch,
   });
   test('fresh menu and keep-alive are green', () => {
     expect(evaluateFest(fest({}), NOW)).toEqual({ subsystem: 'fest', colour: 'green', reasons: [] });
@@ -137,6 +137,58 @@ describe('Фест', () => {
       subsystem: 'fest', colour: 'yellow',
       reasons: ['меню фесту: ще жодного успішного оновлення', 'MCP keep-alive фесту: ще жодного успішного оновлення'],
     });
+  });
+});
+
+describe('Фест: кожне око окремо (#885)', () => {
+  // A WFP22-like session 2 (UTC): 12:00–22:00; NOW-independent, the session is passed in whole.
+  const span = (from: string, to: string) => ({ from_at: `2026-10-16T${from}:00.000Z`, to_at: `2026-10-16T${to}:00.000Z` });
+  const eye = (enabled: boolean, spans: ReturnType<typeof span>[]) => ({ enabled, spans });
+  const FULL = [span('12:00', '22:00')];
+  const withEyes = (eyes: { mcp_venue: ReturnType<typeof eye>; server: ReturnType<typeof eye>; laptop: ReturnType<typeof eye> }): FestInputs => ({
+    menuLastAt: '2026-10-06T06:00:00.000Z', menuCycleMs: 6 * 3_600_000,
+    keepaliveLastAt: '2026-10-05T21:26:00.000Z', keepaliveCycleMs: 24 * 3_600_000, over: false,
+    session: { from: '2026-10-16T12:00:00.000Z', to: '2026-10-16T22:00:00.000Z', eyes },
+  });
+  // The server eye covers only part of each 11 minutes; its gaps of up to 20 minutes are its normal.
+  const serverNormal = Array.from({ length: 30 }, (_, i) => span(`${String(12 + Math.floor(i / 3)).padStart(2, '0')}:${String((i % 3) * 20).padStart(2, '0')}`, `${String(12 + Math.floor(i / 3)).padStart(2, '0')}:${String((i % 3) * 20 + 5).padStart(2, '0')}`));
+
+  test('every eye covering as it should is green', () => {
+    expect(evaluateFest(withEyes({ mcp_venue: eye(true, FULL), server: eye(true, serverNormal), laptop: eye(true, FULL) }), NOW).reasons)
+      .toEqual([]);
+  });
+
+  test('the MCP eye dead from 15:29 to the end: its own line, and the fast eyes are still covered by the laptop', () => {
+    const r = evaluateFest(withEyes({ mcp_venue: eye(true, [span('12:00', '15:29')]), server: eye(true, serverNormal), laptop: eye(true, FULL) }), NOW);
+    expect(r).toEqual({ subsystem: 'fest', colour: 'yellow', reasons: ['MCP-око не покривало головну локацію 391 хв (з 17:29)'] });
+  });
+
+  test('MCP and the laptop both silent: each line, and the fast-eyes line', () => {
+    const r = evaluateFest(withEyes({
+      mcp_venue: eye(true, [span('12:00', '18:00')]), server: eye(true, serverNormal), laptop: eye(true, [span('12:00', '18:00')]),
+    }), NOW);
+    expect(r.reasons).toEqual([
+      'MCP-око не покривало головну локацію 240 хв (з 20:00)',
+      'ноутбук не покривав головну локацію 240 хв (з 20:00)',
+      'головну локацію 240 хв не покривали ні MCP, ні ноутбук (з 20:00)',
+    ]);
+  });
+
+  test('a gap exactly at the threshold is not reported', () => {
+    expect(evaluateFest(withEyes({ mcp_venue: eye(true, [span('12:00', '21:45')]), server: eye(false, []), laptop: eye(false, []) }), NOW).reasons)
+      .toEqual([]);
+  });
+
+  test('a configured MCP eye that never covered the session is reported for the whole session; a disabled one is not', () => {
+    expect([
+      evaluateFest(withEyes({ mcp_venue: eye(true, []), server: eye(false, []), laptop: eye(false, []) }), NOW).reasons,
+      evaluateFest(withEyes({ mcp_venue: eye(false, []), server: eye(false, []), laptop: eye(false, []) }), NOW).reasons,
+    ]).toEqual([['MCP-око не покривало головну локацію 600 хв (з 14:00)'], []]);
+  });
+
+  test('after the fest the menu age is not judged', () => {
+    expect(evaluateFest({ ...withEyes({ mcp_venue: eye(false, []), server: eye(false, []), laptop: eye(false, []) }), menuLastAt: null, over: true }, NOW).reasons)
+      .toEqual([]);
   });
 });
 

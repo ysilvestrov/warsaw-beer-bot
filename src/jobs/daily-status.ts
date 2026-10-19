@@ -70,12 +70,19 @@ export interface DailyStatusDeps {
   testDiagnosticsUid?: number;
   hostPatchPath?: string;
   hostPatchUid?: number;
+  /** Which fest eyes are configured, for the status to tell a dead eye from a switched-off one (#885). */
+  festEyes?: { mcp: boolean; server: boolean };
 }
 
 // The env half of DailyStatusDeps (composition root). WBB_OPERATOR_UID, when set, is the owner the
 // monitor reader trusts instead of resolving `id -u ysi` — there is no such account in a container.
-export function dailyStatusEnvDeps(env: Pick<Env, 'GITHUB_REPO' | 'WBB_OPERATOR_UID'>): Pick<DailyStatusDeps, 'repo' | 'testDiagnosticsUid'> {
-  return { repo: env.GITHUB_REPO, testDiagnosticsUid: env.WBB_OPERATOR_UID };
+export function dailyStatusEnvDeps(
+  env: Pick<Env, 'GITHUB_REPO' | 'WBB_OPERATOR_UID' | 'FEST_MCP_URL' | 'UNTAPPD_SESSION_COOKIE'>,
+): Pick<DailyStatusDeps, 'repo' | 'testDiagnosticsUid' | 'festEyes'> {
+  return {
+    repo: env.GITHUB_REPO, testDiagnosticsUid: env.WBB_OPERATOR_UID,
+    festEyes: { mcp: Boolean(env.FEST_MCP_URL), server: Boolean(env.UNTAPPD_SESSION_COOKIE) },
+  };
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
@@ -161,7 +168,7 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     if (!markerReadable) throw new Error('daily-status: last-sent marker unreadable');
     text = buildDailyReport(db, now, dateKey, {
       repo: deps.repo, testDiagnosticsPath: deps.testDiagnosticsPath, testDiagnosticsUid: deps.testDiagnosticsUid,
-      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid,
+      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid, festEyes: deps.festEyes,
     });
   } catch (e) {
     // The report itself broke. Say so once per Warsaw day instead of going silent; the delivery

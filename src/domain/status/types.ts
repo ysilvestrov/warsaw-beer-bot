@@ -43,11 +43,25 @@ export type HostPatchRead = { kind: 'ok'; facts: HostPatchFacts } | { kind: 'sta
 
 // Cycle lengths come from the fest jobs' own constants (filled in by the collector), so the
 // evaluator never duplicates a schedule.
+export type FestEye = 'mcp_venue' | 'server' | 'laptop';
+
 export interface FestInputs {
   menuLastAt: string | null;
   menuCycleMs: number;
   keepaliveLastAt: string | null;
   keepaliveCycleMs: number;
+  /** The fest's last session has ended: nothing reads its menu any more, so its age says nothing. */
+  over: boolean;
+  /**
+   * The session judged (spec 2026-10-19-fest-status-eyes-design.md): the one on now, up to now, or the
+   * last one that ended within a day; null when there is none. Each eye's own proven coverage of the
+   * main venue within it, and whether the eye is on (from config; the laptop: covered anything here).
+   */
+  session: {
+    from: string;
+    to: string;
+    eyes: Record<FestEye, { enabled: boolean; spans: { from_at: string; to_at: string }[] }>;
+  } | null;
 }
 
 export interface StatusInputs {

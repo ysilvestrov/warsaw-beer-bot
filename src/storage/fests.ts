@@ -89,6 +89,22 @@ export function currentOrNextFests(db: DB, now: Date): Fest[] {
   return rows.map(toFest);
 }
 
+/** A fest stays in the morning status this long after its last session: the next morning shows how it went. */
+export const STATUS_AFTER_FEST_MS = 24 * 60 * 60 * 1000;
+
+/** Like currentOrNextFests, but a fest stays for STATUS_AFTER_FEST_MS after its last session (#885). */
+export function recentOrNextFests(db: DB, now: Date): Fest[] {
+  const rows = db
+    .prepare(
+      `SELECT f.* FROM fests f JOIN fest_sessions s ON s.fest_id = f.id
+        GROUP BY f.id
+       HAVING MAX(s.end_at) >= ?
+        ORDER BY MIN(s.start_at), f.id`,
+    )
+    .all(new Date(now.getTime() - STATUS_AFTER_FEST_MS).toISOString()) as FestRow[];
+  return rows.map(toFest);
+}
+
 /** The earliest of `currentOrNextFests`, if any. */
 export function currentOrNextFest(db: DB, now: Date): Fest | null {
   return currentOrNextFests(db, now)[0] ?? null;

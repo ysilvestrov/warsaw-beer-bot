@@ -78,7 +78,7 @@ describe('Канали', () => {
 });
 
 describe('evaluateAll', () => {
-  const fest = { menuLastAt: null, menuCycleMs: 6 * 3_600_000, keepaliveLastAt: '2026-10-05T21:26:00.000Z', keepaliveCycleMs: 24 * 3_600_000 };
+  const fest = { menuLastAt: null, menuCycleMs: 6 * 3_600_000, keepaliveLastAt: '2026-10-05T21:26:00.000Z', keepaliveCycleMs: 24 * 3_600_000, over: false, session: null };
   test('subsystem order, no fest without a fest, history footer counts the week', () => {
     const result = evaluateAll(greenInputs({ history: pastDays(3) }));
     expect(result).toEqual({

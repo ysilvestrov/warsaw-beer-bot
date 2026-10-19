@@ -5,7 +5,7 @@ import { getJobState } from '../storage/job_state';
 import { summarizeSince } from '../storage/bug_reports';
 import { handlerFailuresSince } from '../storage/handler_failures';
 import { listStatusSnapshots } from '../storage/status_snapshots';
-import { currentOrNextFests } from '../storage/fests';
+import { festSessions, recentOrNextFests, STATUS_AFTER_FEST_MS } from '../storage/fests';
 import { parseIsoInstant, shiftDate } from '../domain/status/helpers';
 import { STATUS_RULES } from '../domain/status/rules';
 import { MENU_INTERVAL_RUN_UP_MS } from '../domain/fest/schedule';
@@ -20,6 +20,8 @@ import { FEST_MENU_LAST_KEY } from './fest-poll';
 import { KEEPALIVE_EVERY_MS, KEEPALIVE_LAST_KEY } from './fest-friend-feed';
 
 export interface StatusInputOptions {
+  /** Which fest eyes are configured (#885): MCP needs FEST_MCP_URL, the server eye the session cookie. */
+  festEyes?: { mcp: boolean; server: boolean };
   repo?: string;
   testDiagnosticsPath?: string;
   testDiagnosticsUid?: number;
@@ -99,13 +101,32 @@ function readPaused(db: DB, now: Date): { paused: { since: string; status: numbe
     : { paused: null, pausedUnreadable: true };
 }
 
-function readFest(db: DB, now: Date): FestInputs | null {
-  if (currentOrNextFests(db, now).length === 0) return null;
+function readFest(db: DB, now: Date, eyes: { mcp: boolean; server: boolean }): FestInputs | null {
+  const fest = recentOrNextFests(db, now)[0];
+  if (!fest) return null;
+  const sessions = festSessions(db, fest.id);
+  const t = now.getTime();
+  const on = sessions.find((s) => Date.parse(s.start_at) <= t && t <= Date.parse(s.end_at));
+  const last = [...sessions].reverse().find((s) => Date.parse(s.end_at) < t && t - Date.parse(s.end_at) <= STATUS_AFTER_FEST_MS);
+  const judged = on ? { from: on.start_at, to: now.toISOString() } : last ? { from: last.start_at, to: last.end_at } : null;
+  const spansOf = (eye: string) => (judged === null ? [] : db.prepare(
+    `SELECT from_at, to_at FROM fest_coverage WHERE venue_id = ? AND eye = ? AND to_at >= ? AND from_at <= ? ORDER BY from_at`,
+  ).all(fest.menu_venue_id, eye, judged.from, judged.to) as { from_at: string; to_at: string }[]);
+  const laptop = spansOf('laptop');
   return {
     menuLastAt: getJobState(db, FEST_MENU_LAST_KEY),
     menuCycleMs: MENU_INTERVAL_RUN_UP_MS,
     keepaliveLastAt: getJobState(db, KEEPALIVE_LAST_KEY),
     keepaliveCycleMs: KEEPALIVE_EVERY_MS,
+    over: sessions.every((s) => Date.parse(s.end_at) < t),
+    session: judged === null ? null : {
+      ...judged,
+      eyes: {
+        mcp_venue: { enabled: eyes.mcp, spans: spansOf('mcp_venue') },
+        server: { enabled: eyes.server, spans: spansOf('server') },
+        laptop: { enabled: laptop.length > 0, spans: laptop },
+      },
+    },
   };
 }
 
@@ -155,6 +176,6 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
     hostPatch: readHostPatchInput(now, opts),
     upstream: readHostUpstream(db, now),
     runtimeNode: process.versions.node,
-    fest: readFest(db, now),
+    fest: readFest(db, now, opts.festEyes ?? { mcp: false, server: false }),
   };
 }

@@ -397,10 +397,14 @@ describe('dailyStatusEnvDeps', () => {
   const base = { TELEGRAM_BOT_TOKEN: 'abc:1234567', DATABASE_PATH: '/tmp/bot.db', OSRM_BASE_URL: 'https://osrm.example', NOMINATIM_USER_AGENT: 'ua' };
   it('carries WBB_OPERATOR_UID as the monitor owner', () => {
     expect(dailyStatusEnvDeps(loadEnv({ ...base, WBB_OPERATOR_UID: '1001' })))
-      .toEqual({ repo: 'ysilvestrov/warsaw-beer-bot', testDiagnosticsUid: 1001 });
+      .toEqual({ repo: 'ysilvestrov/warsaw-beer-bot', testDiagnosticsUid: 1001, festEyes: { mcp: false, server: false } });
   });
   it('without it the owner is left to the reader (`id -u ysi`, as before)', () => {
-    expect(dailyStatusEnvDeps(loadEnv(base))).toEqual({ repo: 'ysilvestrov/warsaw-beer-bot', testDiagnosticsUid: undefined });
+    expect(dailyStatusEnvDeps(loadEnv(base))).toEqual({ repo: 'ysilvestrov/warsaw-beer-bot', testDiagnosticsUid: undefined, festEyes: { mcp: false, server: false } });
+  });
+  it('tells the status which fest eyes are configured (#885)', () => {
+    expect(dailyStatusEnvDeps(loadEnv({ ...base, FEST_MCP_URL: 'https://mcp.example/mcp', UNTAPPD_SESSION_COOKIE: 'c' })).festEyes)
+      .toEqual({ mcp: true, server: true });
   });
 });
 
