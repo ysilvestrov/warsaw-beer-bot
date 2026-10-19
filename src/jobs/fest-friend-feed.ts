@@ -38,6 +38,26 @@ export interface FestFriendFeedDeps {
 }
 
 export class McpToolError extends Error {}
+/**
+ * The MCP answered, but in a shape the bot cannot read (spec 2026-10-19-fest-mcp-shape-breaker-design.md):
+ * a bug in parsing, not an outage. It never opens the shared breaker — on WFP22 such a failure, first in
+ * every half-open probe, kept the breaker open and starved the venue eye for the rest of the fest (#883).
+ */
+export class McpShapeError extends McpToolError {}
+
+const SHAPE_ALERT_KEY = 'fest_mcp_shape_alert_at';
+const SHAPE_ALERT_EVERY_MS = 24 * 60 * 60 * 1000;
+
+/** Logs an answer of an unknown shape and tells the admin, at most once a day. */
+export async function alertShape(deps: FestFriendFeedDeps, tool: string, now: Date): Promise<void> {
+  deps.log.warn({ tool }, 'fest mcp: answer of an unknown shape; read skipped');
+  const notify = deps.notifyAdmin;
+  if (!notify) return;
+  await sendThrottledAlert(deps.db, {
+    key: SHAPE_ALERT_KEY, everyMs: SHAPE_ALERT_EVERY_MS, now,
+    send: () => notify(`Фест: MCP ${tool} відповідає у формі, яку бот не розуміє — читання пропущено`),
+  });
+}
 
 interface Stream {
   tool: string;
@@ -52,7 +72,7 @@ async function readStream(mcp: FestMcp, s: Stream, cursor: number | null): Promi
   for (let pageNo = 1; ; pageNo++) {
     const args = { ...s.args, limit: MCP_PAGE_CAP, ...(cursor !== null ? { minId: cursor } : {}), ...(maxId !== undefined ? { maxId } : {}) };
     const page = parseMcpCheckins(await mcp.call(s.tool, args));
-    if ('error' in page) throw new McpToolError(`${s.tool}: ${page.error}`);
+    if ('error' in page) throw new (page.error === 'bad_shape' ? McpShapeError : McpToolError)(`${s.tool}: ${page.error}`);
     items.push(...page.items);
     const step = pageStep({ cursor, pageNo, count: page.count });
     if (step !== 'more') return { items, hole: step === 'hole' };
@@ -102,7 +122,16 @@ export async function runFestFriendFeed(deps: FestFriendFeedDeps, now: Date): Pr
     for (const s of streams) {
       const cursorText = getJobState(deps.db, s.cursorKey);
       const cursor = cursorText === null ? null : Number(cursorText);
-      const { items, hole } = await readStream(deps.mcp, s, cursor);
+      let read: { items: McpCheckin[]; hole: boolean };
+      try {
+        read = await readStream(deps.mcp, s, cursor);
+      } catch (e) {
+        // The MCP answered: the other streams are still read, and the breaker is not told of an outage.
+        if (!(e instanceof McpShapeError)) throw e;
+        await alertShape(deps, s.tool, now);
+        continue;
+      }
+      const { items, hole } = read;
       // Rows and the cursor that vouches for them land together, or not at all.
       deps.db.transaction(() => {
         store(deps.db, active.fest.id, venueIds, items, now.toISOString());

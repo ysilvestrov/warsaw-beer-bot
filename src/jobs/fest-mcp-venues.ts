@@ -2,7 +2,7 @@ import { activeFest, festVenues } from '../storage/fests';
 import { getJobState, setJobState } from '../storage/job_state';
 import { MCP_PAGE_CAP, nextCursor, venuePageStep } from '../domain/fest/mcp-paging';
 import { parseMcpCheckins, type McpCheckin } from '../sources/untappd/mcp-checkins';
-import { McpToolError, type FestFriendFeedDeps } from './fest-friend-feed';
+import { alertShape, McpShapeError, McpToolError, type FestFriendFeedDeps } from './fest-friend-feed';
 import { ingestCheckinRows } from './fest-ingest';
 
 // MCP venue eye (spec 2026-10-02-wfp-mcp-venue-eye-design.md): the server reads each festival
@@ -78,7 +78,7 @@ async function readVenue(deps: FestFriendFeedDeps, cursorKey: string, venueId: n
     const page = parseMcpCheckins(await deps.mcp.call('get_venue_checkins', {
       venueId, limit: MCP_PAGE_CAP, ...(maxId !== null ? { maxId } : {}),
     }));
-    if ('error' in page) throw new McpToolError(`get_venue_checkins ${venueId}: ${page.error}`);
+    if ('error' in page) throw new (page.error === 'bad_shape' ? McpShapeError : McpToolError)(`get_venue_checkins ${venueId}: ${page.error}`);
     // A page below maxId proves its span up to that check-in, which the page above just stored. A
     // record the parser could not read is a check-in we cannot vouch for: no coverage from that page.
     inserted += ingestCheckinRows(deps.db, {
@@ -133,6 +133,11 @@ export async function runFestMcpVenues(deps: FestFriendFeedDeps, now: Date): Pro
     } catch (e) {
       // Only an MCP call throws past the budget check, so a failure is always a read.
       read = true;
+      // An answer of an unknown shape is a parsing bug, not an outage: logged, not counted (#883).
+      if (e instanceof McpShapeError) {
+        await alertShape(deps, 'get_venue_checkins', now);
+        continue;
+      }
       failed = true;
       deps.log.warn({ venueId: v.venue_id, err: e instanceof Error ? e.message : String(e) }, 'fest mcp venue: read failed');
     }

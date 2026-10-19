@@ -110,6 +110,45 @@ describe('runFestFriendFeed', () => {
     expect([alerts.length, getJobState(db, 'fest_mcp_open_until')]).toEqual([1, new Date(IN_SESSION.getTime() + 35 * 60 * 1000).toISOString()]);
   });
 
+  it('an owner stream of an unknown shape skips that stream only: the friends are stored, the breaker stays closed, the admin hears once (#883)', async () => {
+    const odd = { content: [{ type: 'text', text: '{"unexpected":true}' }] };
+    const { db, deps, alerts } = setup({
+      get_my_friend_feed: [page([record(510, 'x', null)]), page([record(511, 'x', null)])],
+      get_user_checkins: [odd, odd],
+    });
+    await runFestFriendFeed(deps, IN_SESSION);
+    await runFestFriendFeed(deps, new Date(IN_SESSION.getTime() + 5 * 60 * 1000));
+    expect([getJobState(db, FRIEND_CURSOR_KEY), getJobState(db, OWNER_CURSOR_KEY), getJobState(db, 'fest_mcp_open_until'), alerts])
+      .toEqual(['511', null, null, ['Фест: MCP get_user_checkins відповідає у формі, яку бот не розуміє — читання пропущено']]);
+  });
+
+  it('a first stream of an unknown shape does not stop the second', async () => {
+    const { db, deps } = setup({
+      get_my_friend_feed: [{ content: [{ type: 'text', text: 'not json' }] }],
+      get_user_checkins: [page([record(520, 'ownerName', null)])],
+    });
+    await runFestFriendFeed(deps, IN_SESSION);
+    expect([getJobState(db, FRIEND_CURSOR_KEY), getJobState(db, OWNER_CURSOR_KEY)]).toEqual([null, '520']);
+  });
+
+  it('a tool error still counts as an outage: two ticks open the breaker', async () => {
+    const err = { isError: true, content: [{ type: 'text', text: 'UNTAPPD_RATE_LIMITED' }] };
+    const { db, deps } = setup({ get_my_friend_feed: [err, err] });
+    await runFestFriendFeed(deps, IN_SESSION);
+    await runFestFriendFeed(deps, new Date(IN_SESSION.getTime() + 5 * 60 * 1000));
+    expect(getJobState(db, 'fest_mcp_open_until')).toBe(new Date(IN_SESSION.getTime() + 35 * 60 * 1000).toISOString());
+  });
+
+  it('in half-open, a probe answered in an unknown shape closes the breaker instead of opening it again', async () => {
+    const { db, deps } = setup({
+      get_my_friend_feed: [page([])],
+      get_user_checkins: [{ content: [{ type: 'text', text: '{"unexpected":true}' }] }],
+    });
+    setJobState(db, 'fest_mcp_open_until', new Date(IN_SESSION.getTime() - 1000).toISOString());
+    await runFestFriendFeed(deps, IN_SESSION);
+    expect([getJobState(db, 'fest_mcp_open_until'), deps.breaker.canAttempt(new Date(IN_SESSION.getTime() + 1000))]).toEqual([null, true]);
+  });
+
   it('outside a polling window and before its 5 minutes it calls nothing', async () => {
     const { deps, calls } = setup({ get_my_friend_feed: [page([])], get_user_checkins: [page([])] });
     await runFestFriendFeed(deps, new Date('2026-10-16T02:00:00.000Z'));

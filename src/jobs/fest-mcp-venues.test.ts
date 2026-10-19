@@ -129,6 +129,16 @@ describe('runFestMcpVenues', () => {
     ]).toEqual(['100', null, '2026-10-15T18:00:00.000Z', '203', null]);
   });
 
+  it('a venue answered in an unknown shape keeps its cursor and never trips the breaker, however often (#883)', async () => {
+    const odd = { content: [{ type: 'text', text: '{"unexpected":true}' }] };
+    const { db, deps } = setup({ [FEST]: [odd, odd], [KONF]: [page([rec(203, KONF, 1)])], [STADIUM]: [page([])] });
+    setJobState(db, venueCursorKey(db, FEST), '100');
+    await runFestMcpVenues(deps, IN_SESSION);
+    await runFestMcpVenues(deps, minutesLater(3));
+    expect([getJobState(db, venueCursorKey(db, FEST)), getJobState(db, venueCursorKey(db, KONF)), getJobState(db, 'fest_mcp_open_until')])
+      .toEqual(['100', '203', null]);
+  });
+
   it('a failing venue is retried at its cadence, not on the next minute', async () => {
     const { deps, calls } = setup({ [FEST]: [new Error('mcp down'), page([])], [KONF]: [page([])], [STADIUM]: [page([])] });
     await runFestMcpVenues(deps, IN_SESSION);
