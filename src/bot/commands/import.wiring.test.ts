@@ -54,6 +54,15 @@ function setup() {
   return { db, festId, bot, replies };
 }
 
+// The fest's commands answer only while a fest is current or ahead: every test runs at a fixed moment of
+// WFP22's first session, never at the real clock, which passed the fest's end on 2026-10-17 and turned
+// these tests red. A test that needs another moment sets its own.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-15T18:00:00.000Z'));
+});
+afterEach(() => vi.useRealTimers());
+
 describe('documents with /import before /fest', () => {
   it('a CSV captioned /fest stands reaches /fest stands, not the Untappd import', async () => {
     const { db, festId, bot, replies } = setup();

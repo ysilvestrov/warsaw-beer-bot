@@ -59,6 +59,15 @@ function setup(extra: Partial<FestCommandDeps> = {}): {
   return { db, bot, teamId, replies, answers, extras, replyExtras, edits };
 }
 
+// The fest's commands answer only while a fest is current or ahead: every test runs at a fixed moment of
+// WFP22's first session, never at the real clock, which passed the fest's end on 2026-10-17 and turned
+// these tests red. A test that needs another moment sets its own.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-15T18:00:00.000Z'));
+});
+afterEach(() => vi.useRealTimers());
+
 describe('«Я в команді» (fest:j)', () => {
   it('someone without a linked Untappd is told so in an alert only they see, and is not added', async () => {
     const { db, bot, teamId, replies, answers, extras } = setup();
