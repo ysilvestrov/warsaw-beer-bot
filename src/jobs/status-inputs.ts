@@ -103,17 +103,26 @@ function readPaused(db: DB, now: Date): { paused: { since: string; status: numbe
 }
 
 function readFest(db: DB, now: Date, eyes: { mcp: boolean; server: boolean }): FestInputs | null {
-  const fest = recentOrNextFests(db, now)[0];
+  const t = now.getTime();
+  const isOn = (s: { start_at: string; end_at: string }) => Date.parse(s.start_at) <= t && t <= Date.parse(s.end_at);
+  // A fest in session wins over one that ended within the day or is still ahead.
+  const fests = recentOrNextFests(db, now);
+  const fest = fests.find((f) => festSessions(db, f.id).some(isOn)) ?? fests[0];
   if (!fest) return null;
   const sessions = festSessions(db, fest.id);
-  const t = now.getTime();
-  const on = sessions.find((s) => Date.parse(s.start_at) <= t && t <= Date.parse(s.end_at));
+  const on = sessions.find(isOn);
   const last = [...sessions].reverse().find((s) => Date.parse(s.end_at) < t && t - Date.parse(s.end_at) <= STATUS_AFTER_FEST_MS);
   const judged = on ? { from: on.start_at, to: now.toISOString() } : last ? { from: last.start_at, to: last.end_at } : null;
   const spansOf = (eye: string) => (judged === null ? [] : db.prepare(
     `SELECT from_at, to_at FROM fest_coverage WHERE venue_id = ? AND eye = ? AND to_at >= ? AND from_at <= ? ORDER BY from_at`,
   ).all(fest.menu_venue_id, eye, judged.from, judged.to) as { from_at: string; to_at: string }[]);
   const laptop = spansOf('laptop');
+  // The laptop is a person's choice: it counts once it covered any fest venue in this session, so a
+  // laptop that reads the others but not the main venue is reported, not taken for switched off.
+  const laptopOn = judged !== null && db.prepare(
+    `SELECT 1 FROM fest_coverage c JOIN fest_venues v ON v.venue_id = c.venue_id
+      WHERE v.fest_id = ? AND c.eye = 'laptop' AND c.to_at >= ? AND c.from_at <= ? LIMIT 1`,
+  ).get(fest.id, judged.from, judged.to) !== undefined;
   const notices = judged === null ? [] : (db.prepare(
     `SELECT substr(key, ?) AS key, value AS at FROM job_state
       WHERE substr(key, 1, ?) = ? AND value >= ? AND value <= ? ORDER BY value, key`,
@@ -129,7 +138,7 @@ function readFest(db: DB, now: Date, eyes: { mcp: boolean; server: boolean }): F
       eyes: {
         mcp_venue: { enabled: eyes.mcp, spans: spansOf('mcp_venue') },
         server: { enabled: eyes.server, spans: spansOf('server') },
-        laptop: { enabled: laptop.length > 0, spans: laptop },
+        laptop: { enabled: laptopOn, spans: laptop },
       },
       notices,
     },

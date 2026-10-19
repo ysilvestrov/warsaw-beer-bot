@@ -323,6 +323,21 @@ describe('fest eyes in the status (#885)', () => {
     expect(i.fest?.session?.notices).toEqual([{ key: 'mcp_down', at: '2026-10-16T15:40:00.000Z' }]);
   });
 
+  it('a laptop that covered only another fest venue counts as on, with no spans on the main one', () => {
+    const db = emptyDb();
+    addCoverage(db, 2167060, { from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T22:00:00.000Z' }, 'laptop', '2026-10-16T22:00:00.000Z');
+    const i = collectStatusInputs(db, new Date('2026-10-17T05:00:00.000Z'), '2026-10-17', missing);
+    expect(i.fest?.session?.eyes.laptop).toEqual({ enabled: true, spans: [] });
+  });
+
+  it('a fest in session is judged over one that ended within the day', () => {
+    const db = emptyDb();
+    db.prepare(`INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES ('next', 'Next', 42, 3.5, '[]')`).run();
+    db.prepare(`INSERT INTO fest_sessions (fest_id, session_no, start_at, end_at) SELECT id, 1, '2026-10-18T10:00:00.000Z', '2026-10-18T20:00:00.000Z' FROM fests WHERE slug = 'next'`).run();
+    const i = collectStatusInputs(db, new Date('2026-10-18T12:00:00.000Z'), '2026-10-18', missing);
+    expect([i.fest?.session?.from, i.fest?.over]).toEqual(['2026-10-18T10:00:00.000Z', false]);
+  });
+
   it('the next morning judges the session that ended in the night, whole', () => {
     const i = collectStatusInputs(covered(), new Date('2026-10-17T05:00:00.000Z'), '2026-10-17', missing);
     expect([i.fest?.session?.from, i.fest?.session?.to, i.fest?.over]).toEqual(['2026-10-16T12:00:00.000Z', '2026-10-16T22:00:00.000Z', false]);
