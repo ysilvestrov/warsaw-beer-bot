@@ -88,6 +88,18 @@ function staleness(what: string, lastAt: string | null, cycleMs: number, now: Da
 const EYE_SILENT: Record<FestEye, string> = { mcp_venue: 'MCP-око не покривало', server: 'серверне око не покривало', laptop: 'ноутбук не покривав' };
 const minutes = (ms: number): number => Math.round(ms / 60_000);
 
+// Alerts held quiet during a session (fest-notice.ts), by key. An unknown key still gets a line.
+const NOTICE_TEXT: Record<string, string> = {
+  cookie: 'протухла Untappd-кука',
+  server_block: 'Untappd блокував серверне око',
+  server_recover: 'серверне око відновилося',
+  mcp_down: 'MCP не відповідав',
+  mcp_recover: 'MCP знову відповідав',
+  mcp_login: 'MCP-токен не приймався',
+  mcp_shape: 'MCP відповідав незрозуміло',
+  mcp_hole: 'MCP пропускав чекіни',
+};
+
 // Each eye on its own (spec 2026-10-19-fest-status-eyes-design.md): the sum of all eyes was 99–100% on
 // every WFP22 session while the MCP eye was dead for 391 minutes, so only per-eye gaps show a breakage.
 function eyeFindings(session: NonNullable<FestInputs['session']>): Finding[] {
@@ -108,6 +120,9 @@ function eyeFindings(session: NonNullable<FestInputs['session']>): Finding[] {
     if (gap.ms > FAST_EYES_GAP_MS) {
       out.push(yellow(`головну локацію ${minutes(gap.ms)} хв не покривали ні MCP, ні ноутбук (з ${warsawClock(new Date(gap.from).toISOString())})`));
     }
+  }
+  for (const n of session.notices) {
+    out.push(yellow(`у сесії: ${NOTICE_TEXT[n.key] ?? n.key} (востаннє о ${warsawClock(n.at)})`));
   }
   return out;
 }

@@ -310,7 +310,17 @@ describe('fest eyes in the status (#885)', () => {
         server: { enabled: false, spans: [] },
         laptop: { enabled: true, spans: [{ from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T22:00:00.000Z' }] },
       },
+      notices: [],
     });
+  });
+
+  it('alerts held quiet in the judged session are read with their time; one from an earlier session is not', () => {
+    const db = covered();
+    setJobState(db, 'fest_notice_at:mcp_down', '2026-10-16T15:40:00.000Z');
+    setJobState(db, 'fest_notice_at:cookie', '2026-10-15T20:00:00.000Z');
+    setJobState(db, 'fest_mcp_login_alert_at', '2026-10-16T15:00:00.000Z');
+    const i = collectStatusInputs(db, new Date('2026-10-17T05:00:00.000Z'), '2026-10-17', missing);
+    expect(i.fest?.session?.notices).toEqual([{ key: 'mcp_down', at: '2026-10-16T15:40:00.000Z' }]);
   });
 
   it('the next morning judges the session that ended in the night, whole', () => {

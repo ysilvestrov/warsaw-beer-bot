@@ -2,6 +2,7 @@ import type { DB } from '../storage/db';
 import type { Avail, FestInputs, StatusInputs } from '../domain/status/types';
 import { collectStatus } from '../storage/stats';
 import { getJobState } from '../storage/job_state';
+import { NOTICE_PREFIX } from './fest-notice';
 import { summarizeSince } from '../storage/bug_reports';
 import { handlerFailuresSince } from '../storage/handler_failures';
 import { listStatusSnapshots } from '../storage/status_snapshots';
@@ -113,6 +114,10 @@ function readFest(db: DB, now: Date, eyes: { mcp: boolean; server: boolean }): F
     `SELECT from_at, to_at FROM fest_coverage WHERE venue_id = ? AND eye = ? AND to_at >= ? AND from_at <= ? ORDER BY from_at`,
   ).all(fest.menu_venue_id, eye, judged.from, judged.to) as { from_at: string; to_at: string }[]);
   const laptop = spansOf('laptop');
+  const notices = judged === null ? [] : (db.prepare(
+    `SELECT substr(key, ?) AS key, value AS at FROM job_state
+      WHERE substr(key, 1, ?) = ? AND value >= ? AND value <= ? ORDER BY value, key`,
+  ).all(NOTICE_PREFIX.length + 1, NOTICE_PREFIX.length, NOTICE_PREFIX, judged.from, judged.to) as { key: string; at: string }[]);
   return {
     menuLastAt: getJobState(db, FEST_MENU_LAST_KEY),
     menuCycleMs: MENU_INTERVAL_RUN_UP_MS,
@@ -126,6 +131,7 @@ function readFest(db: DB, now: Date, eyes: { mcp: boolean; server: boolean }): F
         server: { enabled: eyes.server, spans: spansOf('server') },
         laptop: { enabled: laptop.length > 0, spans: laptop },
       },
+      notices,
     },
   };
 }

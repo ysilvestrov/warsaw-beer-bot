@@ -61,6 +61,8 @@ export interface FestInputs {
     from: string;
     to: string;
     eyes: Record<FestEye, { enabled: boolean; spans: { from_at: string; to_at: string }[] }>;
+    /** Admin alerts held quiet during the session (fest-notice.ts): key and time of the last one. */
+    notices: { key: string; at: string }[];
   } | null;
 }
 

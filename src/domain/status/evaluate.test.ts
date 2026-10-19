@@ -145,10 +145,11 @@ describe('Фест: кожне око окремо (#885)', () => {
   const span = (from: string, to: string) => ({ from_at: `2026-10-16T${from}:00.000Z`, to_at: `2026-10-16T${to}:00.000Z` });
   const eye = (enabled: boolean, spans: ReturnType<typeof span>[]) => ({ enabled, spans });
   const FULL = [span('12:00', '22:00')];
-  const withEyes = (eyes: { mcp_venue: ReturnType<typeof eye>; server: ReturnType<typeof eye>; laptop: ReturnType<typeof eye> }): FestInputs => ({
+  type Notices = NonNullable<FestInputs['session']>['notices'];
+  const withEyes = (eyes: { mcp_venue: ReturnType<typeof eye>; server: ReturnType<typeof eye>; laptop: ReturnType<typeof eye> }, notices: Notices = []): FestInputs => ({
     menuLastAt: '2026-10-06T06:00:00.000Z', menuCycleMs: 6 * 3_600_000,
     keepaliveLastAt: '2026-10-05T21:26:00.000Z', keepaliveCycleMs: 24 * 3_600_000, over: false,
-    session: { from: '2026-10-16T12:00:00.000Z', to: '2026-10-16T22:00:00.000Z', eyes },
+    session: { from: '2026-10-16T12:00:00.000Z', to: '2026-10-16T22:00:00.000Z', eyes, notices },
   });
   // The server eye covers only part of each 11 minutes; its gaps of up to 20 minutes are its normal.
   const serverNormal = Array.from({ length: 30 }, (_, i) => span(`${String(12 + Math.floor(i / 3)).padStart(2, '0')}:${String((i % 3) * 20).padStart(2, '0')}`, `${String(12 + Math.floor(i / 3)).padStart(2, '0')}:${String((i % 3) * 20 + 5).padStart(2, '0')}`));
@@ -184,6 +185,12 @@ describe('Фест: кожне око окремо (#885)', () => {
       evaluateFest(withEyes({ mcp_venue: eye(true, []), server: eye(false, []), laptop: eye(false, []) }), NOW).reasons,
       evaluateFest(withEyes({ mcp_venue: eye(false, []), server: eye(false, []), laptop: eye(false, []) }), NOW).reasons,
     ]).toEqual([['MCP-око не покривало головну локацію 600 хв (з 14:00)'], []]);
+  });
+
+  test('an alert held quiet in the session is a line with its time; an unknown key still shows', () => {
+    const off = { mcp_venue: eye(false, []), server: eye(false, []), laptop: eye(false, []) };
+    expect(evaluateFest(withEyes(off, [{ key: 'mcp_down', at: '2026-10-16T15:40:00.000Z' }, { key: 'new_kind', at: '2026-10-16T16:00:00.000Z' }]), NOW))
+      .toEqual({ subsystem: 'fest', colour: 'yellow', reasons: ['у сесії: MCP не відповідав (востаннє о 17:40)', 'у сесії: new_kind (востаннє о 18:00)'] });
   });
 
   test('after the fest the menu age is not judged', () => {
