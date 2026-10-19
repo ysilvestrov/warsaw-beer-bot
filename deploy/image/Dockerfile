@@ -17,7 +17,7 @@
 # wbb.content changes exactly when the runtime base does. No default: package_runtime.py refuses
 # an empty or malformed digest.
 
-FROM mirror.gcr.io/library/node:24-bookworm@sha256:3d27e5c11e5786e309ec3e03f93ae536eb36e6e5eb3714d5eb3300a36157add0 AS build
+FROM mirror.gcr.io/library/node:25-bookworm@sha256:78839ac448c23517f8eab2e8f7943d9b4f73979eb7f8bed2c73dbf72ff869e7b AS build
 WORKDIR /src
 COPY . .
 # An optional CA bundle for builds behind a TLS-intercepting proxy (local runs); CI passes none.
@@ -51,7 +51,7 @@ RUN python3 deploy/release/package_runtime.py --repo . --dist /tmp/dist --module
 #   and the runtime base digest before it exists, and is not in the manifest, so it never feeds
 #   itself; CI reads it to set the wbb.content label.
 # Modes are set in the build stage (a-w, a+rX): a chmod layer here would copy every file again.
-FROM mirror.gcr.io/library/node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+FROM mirror.gcr.io/library/node:26-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913
 ARG SOURCE_SHA
 LABEL org.opencontainers.image.revision="${SOURCE_SHA}" \
       org.opencontainers.image.source="https://github.com/ysilvestrov/warsaw-beer-bot"
