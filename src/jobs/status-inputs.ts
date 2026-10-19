@@ -119,10 +119,10 @@ function readFest(db: DB, now: Date, eyes: { mcp: boolean; server: boolean }): F
   const laptop = spansOf('laptop');
   // The laptop is a person's choice: it counts once it covered any fest venue in this session, so a
   // laptop that reads the others but not the main venue is reported, not taken for switched off.
-  const laptopOn = judged !== null && db.prepare(
+  const laptopOn = laptop.length > 0 || (judged !== null && db.prepare(
     `SELECT 1 FROM fest_coverage c JOIN fest_venues v ON v.venue_id = c.venue_id
       WHERE v.fest_id = ? AND c.eye = 'laptop' AND c.to_at >= ? AND c.from_at <= ? LIMIT 1`,
-  ).get(fest.id, judged.from, judged.to) !== undefined;
+  ).get(fest.id, judged.from, judged.to) !== undefined);
   const notices = judged === null ? [] : (db.prepare(
     `SELECT substr(key, ?) AS key, value AS at FROM job_state
       WHERE substr(key, 1, ?) = ? AND value >= ? AND value <= ? ORDER BY value, key`,

@@ -330,6 +330,14 @@ describe('fest eyes in the status (#885)', () => {
     expect(i.fest?.session?.eyes.laptop).toEqual({ enabled: true, spans: [] });
   });
 
+  it('a laptop that covered the main venue counts as on even when the main venue is not among the fest venues', () => {
+    const db = emptyDb();
+    db.prepare('DELETE FROM fest_venues WHERE venue_id = ?').run(MAIN);
+    addCoverage(db, MAIN, { from_at: '2026-10-16T12:00:00.000Z', to_at: '2026-10-16T13:00:00.000Z' }, 'laptop', '2026-10-16T13:00:00.000Z');
+    const i = collectStatusInputs(db, new Date('2026-10-17T05:00:00.000Z'), '2026-10-17', missing);
+    expect(i.fest?.session?.eyes.laptop.enabled).toBe(true);
+  });
+
   it('a fest in session is judged over one that ended within the day', () => {
     const db = emptyDb();
     db.prepare(`INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES ('next', 'Next', 42, 3.5, '[]')`).run();
