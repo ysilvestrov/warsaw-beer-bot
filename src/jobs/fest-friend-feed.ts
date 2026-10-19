@@ -13,6 +13,7 @@ import { MCP_PAGE_CAP, nextCursor, pageStep } from '../domain/fest/mcp-paging';
 import { parseMcpCheckins, type McpCheckin } from '../sources/untappd/mcp-checkins';
 import { isMcpAuthError, type FestMcp } from '../sources/untappd/mcp-client';
 import { sendThrottledAlert } from './alert-slot';
+import { festNotice, type FestNoticeKey } from './fest-notice';
 
 // Team check-ins through the Untappd MCP (spec §4.5): the owner's friend feed and the owner's own
 // feed, every 5 minutes in a polling window. A check-in at a festival venue is a venue check-in
@@ -56,7 +57,7 @@ const SHAPE_ALERT_EVERY_MS = 24 * 60 * 60 * 1000;
 export async function alertShape(deps: FestFriendFeedDeps, tool: string, now: Date): Promise<void> {
   deps.log.warn({ tool }, 'fest mcp: answer of an unknown shape; read skipped');
   const notify = deps.notifyAdmin;
-  if (!notify) return;
+  if (!notify || festNotice(deps.db, now, 'mcp_shape')) return;
   try {
     await sendThrottledAlert(deps.db, {
       key: SHAPE_ALERT_KEY, everyMs: SHAPE_ALERT_EVERY_MS, now,
@@ -167,7 +168,8 @@ export async function runFestFriendFeed(deps: FestFriendFeedDeps, now: Date): Pr
 
 async function alert(deps: FestFriendFeedDeps, key: string, now: Date, msg: string): Promise<void> {
   const notify = deps.notifyAdmin;
-  if (!notify) return;
+  const quietKey: FestNoticeKey = key === HOLE_ALERT_KEY ? 'mcp_hole' : 'mcp_login';
+  if (!notify || festNotice(deps.db, now, quietKey)) return;
   await sendThrottledAlert(deps.db, { key, everyMs: ALERT_EVERY_MS, now, send: () => notify(msg) });
 }
 

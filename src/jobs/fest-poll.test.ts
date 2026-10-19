@@ -15,6 +15,8 @@ const MENU = readFileSync(join(FIX, 'venue-menu.html'), 'utf8');
 // The raw more_feed fragment doubles as a head page: its rows link to the festival venue.
 const FEED = readFileSync(join(FIX, 'venue-more-feed-raw.html'), 'utf8');
 const IN_SESSION = new Date('2026-10-15T15:00:00.000Z');
+// In the polling margin after session 1: polled, but admin alerts are not held for the status.
+const AFTER_SESSION = new Date('2026-10-15T22:05:00.000Z');
 
 type FakeResponse = string | Error | { body: string; redirectTo?: string };
 
@@ -173,12 +175,20 @@ describe('runFestPoll', () => {
     expect([trips, getJobState(db, 'fest_poll_open_until')]).toEqual([[], null]);
   });
 
-  it('an expired cookie alerts the admin once per 6 hours and does not count as a block', async () => {
+  it('after a session an expired cookie alerts the admin once per 6 hours and does not count as a block', async () => {
     const { db, deps, alerts } = setup([new CookieExpiredError(), new CookieExpiredError(), new CookieExpiredError()]);
-    expect(await runFestPoll(deps, IN_SESSION)).toBeNull();
-    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
-    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 6 * 60 * 60 * 1000));
+    expect(await runFestPoll(deps, AFTER_SESSION)).toBeNull();
+    await runFestPoll(deps, new Date(AFTER_SESSION.getTime() + 10 * 60 * 1000));
+    // The next polling margin: before session 2, 13.5 hours later.
+    await runFestPoll(deps, new Date('2026-10-16T11:35:00.000Z'));
     expect([alerts.length, getJobState(db, 'fest_poll_open_until')]).toEqual([2, null]);
+  });
+
+  it('in a session an expired cookie stays quiet: its time goes to the status and the 6-hour slot stays free', async () => {
+    const { db, deps, alerts } = setup([new CookieExpiredError()]);
+    await runFestPoll(deps, IN_SESSION);
+    expect([alerts, getJobState(db, 'fest_notice_at:cookie'), getJobState(db, 'fest_cookie_alert_at')])
+      .toEqual([[], IN_SESSION.toISOString(), null]);
   });
 });
 
@@ -188,9 +198,9 @@ describe('cookie alert throttle', () => {
     const sent: string[] = [];
     const outcomes = [() => Promise.reject(new Error('tg down')), () => Promise.resolve()];
     const withFlaky = { ...deps, notifyAdmin: async (m: string) => { await outcomes.shift()!(); sent.push(m); } };
-    await runFestPoll(withFlaky, IN_SESSION);
-    await runFestPoll(withFlaky, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
-    expect([sent.length, getJobState(db, 'fest_cookie_alert_at')]).toEqual([1, new Date(IN_SESSION.getTime() + 10 * 60 * 1000).toISOString()]);
+    await runFestPoll(withFlaky, AFTER_SESSION);
+    await runFestPoll(withFlaky, new Date(AFTER_SESSION.getTime() + 10 * 60 * 1000));
+    expect([sent.length, getJobState(db, 'fest_cookie_alert_at')]).toEqual([1, new Date(AFTER_SESSION.getTime() + 10 * 60 * 1000).toISOString()]);
   });
 
   it('two expired-cookie reads in flight at once send one alert', async () => {
@@ -198,14 +208,14 @@ describe('cookie alert throttle', () => {
     const sent: string[] = [];
     const slow = { ...deps, notifyAdmin: async (m: string) => { await new Promise((r) => setTimeout(r, 5)); sent.push(m); } };
     const fest = getFestBySlug(deps.db, 'wfp22')!;
-    await Promise.all([refreshFestMenu(slow, fest, IN_SESSION), refreshFestMenu(slow, fest, IN_SESSION)]);
+    await Promise.all([refreshFestMenu(slow, fest, AFTER_SESSION), refreshFestMenu(slow, fest, AFTER_SESSION)]);
     expect(sent.length).toBe(1);
   });
   it('a failed alert never rolls back a newer claim that another read made meanwhile', async () => {
     const { db, deps } = setup([new CookieExpiredError()]);
-    const later = new Date(IN_SESSION.getTime() + 7 * 60 * 60 * 1000).toISOString();
+    const later = new Date(AFTER_SESSION.getTime() + 7 * 60 * 60 * 1000).toISOString();
     const flaky = { ...deps, notifyAdmin: async () => { setJobState(db, 'fest_cookie_alert_at', later); throw new Error('tg down'); } };
-    await refreshFestMenu(flaky, getFestBySlug(db, 'wfp22')!, IN_SESSION);
+    await refreshFestMenu(flaky, getFestBySlug(db, 'wfp22')!, AFTER_SESSION);
     expect(getJobState(db, 'fest_cookie_alert_at')).toBe(later);
   });
 });

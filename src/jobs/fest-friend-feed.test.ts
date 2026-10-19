@@ -11,6 +11,8 @@ import type { FestMcp, ToolCallResult } from '../sources/untappd/mcp-client';
 import { FRIEND_CURSOR_KEY, OWNER_CURSOR_KEY, runFestFriendFeed, runFestMcpKeepalive } from './fest-friend-feed';
 
 const IN_SESSION = new Date('2026-10-15T18:00:00.000Z');
+// In the polling margin after session 1: polled, but admin alerts are not held for the status.
+const AFTER_SESSION = new Date('2026-10-15T22:05:00.000Z');
 const STADIUM = 2167060;
 
 const record = (id: number, user: string, venueId: number | null, bid = 6000011) => ({
@@ -103,21 +105,28 @@ describe('runFestFriendFeed', () => {
     ], '1100']);
   });
 
-  it('a rejected token opens the breaker after two ticks and alerts the admin once', async () => {
+  it('after a session a rejected token opens the breaker after two ticks and alerts the admin once', async () => {
     const { db, deps, alerts } = setup({ get_my_friend_feed: [new UnauthorizedError('401'), new UnauthorizedError('401')] });
-    await runFestFriendFeed(deps, IN_SESSION);
-    await runFestFriendFeed(deps, new Date(IN_SESSION.getTime() + 5 * 60 * 1000));
-    expect([alerts.length, getJobState(db, 'fest_mcp_open_until')]).toEqual([1, new Date(IN_SESSION.getTime() + 35 * 60 * 1000).toISOString()]);
+    await runFestFriendFeed(deps, AFTER_SESSION);
+    await runFestFriendFeed(deps, new Date(AFTER_SESSION.getTime() + 5 * 60 * 1000));
+    expect([alerts.length, getJobState(db, 'fest_mcp_open_until')]).toEqual([1, new Date(AFTER_SESSION.getTime() + 35 * 60 * 1000).toISOString()]);
   });
 
-  it('an owner stream of an unknown shape skips that stream only: the friends are stored, the breaker stays closed, the admin hears once (#883)', async () => {
+  it('in a session a rejected token stays quiet: its time goes to the status and the alert slot stays free', async () => {
+    const { db, deps, alerts } = setup({ get_my_friend_feed: [new UnauthorizedError('401')] });
+    await runFestFriendFeed(deps, IN_SESSION);
+    expect([alerts, getJobState(db, 'fest_notice_at:mcp_login'), getJobState(db, 'fest_mcp_login_alert_at')])
+      .toEqual([[], IN_SESSION.toISOString(), null]);
+  });
+
+  it('after a session an owner stream of an unknown shape skips that stream only: the friends are stored, the breaker stays closed, the admin hears once (#883)', async () => {
     const odd = { content: [{ type: 'text', text: '{"unexpected":true}' }] };
     const { db, deps, alerts } = setup({
       get_my_friend_feed: [page([record(510, 'x', null)]), page([record(511, 'x', null)])],
       get_user_checkins: [odd, odd],
     });
-    await runFestFriendFeed(deps, IN_SESSION);
-    await runFestFriendFeed(deps, new Date(IN_SESSION.getTime() + 5 * 60 * 1000));
+    await runFestFriendFeed(deps, AFTER_SESSION);
+    await runFestFriendFeed(deps, new Date(AFTER_SESSION.getTime() + 5 * 60 * 1000));
     expect([getJobState(db, FRIEND_CURSOR_KEY), getJobState(db, OWNER_CURSOR_KEY), getJobState(db, 'fest_mcp_open_until'), alerts])
       .toEqual(['511', null, null, ['Фест: MCP get_user_checkins відповідає у формі, яку бот не розуміє — читання пропущено']]);
   });
@@ -177,9 +186,9 @@ describe('runFestMcpKeepalive', () => {
   it('a failure alerts at once and is retried an hour later, not a day later', async () => {
     const { deps, alerts } = setup({ get_untappd_api_usage: [new UnauthorizedError('401'), { content: [] }] });
     const r = [
-      await runFestMcpKeepalive(deps, IN_SESSION),
-      await runFestMcpKeepalive(deps, new Date(IN_SESSION.getTime() + 59 * 60 * 1000)),
-      await runFestMcpKeepalive(deps, new Date(IN_SESSION.getTime() + 60 * 60 * 1000)),
+      await runFestMcpKeepalive(deps, AFTER_SESSION),
+      await runFestMcpKeepalive(deps, new Date(AFTER_SESSION.getTime() + 59 * 60 * 1000)),
+      await runFestMcpKeepalive(deps, new Date(AFTER_SESSION.getTime() + 60 * 60 * 1000)),
     ];
     expect([r, alerts.length]).toEqual([['failed', null, 'ok'], 1]);
   });

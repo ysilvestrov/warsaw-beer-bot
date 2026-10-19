@@ -35,6 +35,8 @@ import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { refreshFestMenu, runFestMenu, runFestPoll } from './jobs/fest-poll';
 import { runFestAlerts } from './jobs/fest-alerts';
+import { runFestBlindCheck } from './jobs/fest-blind';
+import { festNotice, type FestNoticeKey } from './jobs/fest-notice';
 import { runFestFriendFeed, runFestMcpKeepalive } from './jobs/fest-friend-feed';
 import { runFestMcpVenues } from './jobs/fest-mcp-venues';
 import { createFestMcp } from './sources/untappd/mcp-client';
@@ -219,6 +221,8 @@ async function main(): Promise<void> {
   if (!triageGithub) log.warn('orphan-triage GitHub disabled (GITHUB_TOKEN not set)');
 
   const adminAlert = (msg: string) => { notifyAdmin?.(msg)?.catch(() => {}); };
+  // Fest breaker alerts stay quiet in a session and go to the morning status (fest-notice.ts).
+  const festAdminAlert = (key: FestNoticeKey, msg: string) => { if (!festNotice(db, new Date(), key)) adminAlert(msg); };
   // Two independent Untappd breakers. The Algolia search path (enrich /
   // ontap refresh) and the HTML-scrape path (profile had-list + tap ratings)
   // fail for different reasons (see #298) and must not gate each other.
@@ -251,8 +255,8 @@ async function main(): Promise<void> {
     db, log, http: untappdHttp, notifyAdmin,
     breaker: createPersistentCircuitBreaker({
       db, key: 'fest_poll_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
-      onTrip: () => adminAlert('Фест: Untappd блокує серверне око — пауза 30 хв'),
-      onRecover: () => adminAlert('Фест: серверне око знову бачить Untappd'),
+      onTrip: () => festAdminAlert('server_block', 'Фест: Untappd блокує серверне око — пауза 30 хв'),
+      onRecover: () => festAdminAlert('server_recover', 'Фест: серверне око знову бачить Untappd'),
     }),
   } : null;
 
@@ -490,6 +494,9 @@ async function main(): Promise<void> {
       send: (chatId, html) => bot.telegram.sendMessage(chatId, html, { parse_mode: 'HTML' }).then(() => {}),
     }, new Date())
       .catch((e) => log.error({ err: e }, 'fest alerts cron'))
+      // The one fest alert that reaches the admin mid-session: no eye covers the main venue.
+      .then(() => runFestBlindCheck({ db, log, notifyAdmin }, new Date()))
+      .catch((e) => log.error({ err: e }, 'fest blind check'))
       .finally(() => { festAlertsInFlight = false; });
   }));
 
@@ -503,8 +510,8 @@ async function main(): Promise<void> {
       mcp: festMcp,
       breaker: createPersistentCircuitBreaker({
         db, key: 'fest_mcp_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
-        onTrip: () => adminAlert('Фест: Untappd MCP не відповідає — пауза 30 хв'),
-        onRecover: () => adminAlert('Фест: Untappd MCP знову відповідає'),
+        onTrip: () => festAdminAlert('mcp_down', 'Фест: Untappd MCP не відповідає — пауза 30 хв'),
+        onRecover: () => festAdminAlert('mcp_recover', 'Фест: Untappd MCP знову відповідає'),
       }),
     };
     let mcpInFlight = false;

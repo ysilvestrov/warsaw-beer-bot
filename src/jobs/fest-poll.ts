@@ -6,6 +6,7 @@ import { isBlockStatus } from '../sources/untappd/block';
 import { activeFest, currentOrNextFests, festSessions, festVenues, updateFestVenueFeedPath, POLL_MARGIN_MS, type Fest } from '../storage/fests';
 import { getJobState, setJobState } from '../storage/job_state';
 import { sendThrottledAlert } from './alert-slot';
+import { festNotice } from './fest-notice';
 import { parseVenueMenu } from '../sources/untappd/venue-menu';
 import { dueMenuRefresh, dueServerPoll, type Window } from '../domain/fest/schedule';
 import type { CircuitBreaker } from '../domain/untappd-circuit';
@@ -49,7 +50,7 @@ async function guardedGet(
     if (e instanceof CookieExpiredError) {
       deps.log.warn('fest: untappd cookie expired');
       // Once per 6 h, not on every 10-minute poll.
-      if (deps.notifyAdmin) {
+      if (deps.notifyAdmin && !festNotice(deps.db, now, 'cookie')) {
         const notify = deps.notifyAdmin;
         await sendThrottledAlert(deps.db, {
           key: COOKIE_ALERT_KEY, everyMs: COOKIE_ALERT_EVERY_MS, now,
