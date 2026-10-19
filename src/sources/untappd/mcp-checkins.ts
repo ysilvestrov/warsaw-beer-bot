@@ -43,6 +43,10 @@ const recordSchema = z.object({
 });
 
 const bodySchema = z.object({ mem: z.unknown().optional(), checkins: z.object({ items: z.array(z.unknown()) }) });
+// With nothing newer than minId the tool answers the bare list, unwrapped: {"count":0,"items":[]}
+// (probe 2026-10-19, get_user_checkins of the owner). Only that exact empty shape is read as an empty
+// page; the stream of the owner, who rarely checks in within 5 minutes, failed bad_shape on it (#884).
+const emptySchema = z.object({ count: z.literal(0), items: z.array(z.unknown()).length(0) }).strict();
 
 interface ToolResult {
   isError?: boolean;
@@ -69,6 +73,8 @@ export function parseMcpCheckins(result: ToolResult): McpPage {
   } catch {
     return { error: 'bad_shape' };
   }
+  // No mem field: an empty page vouches for nothing, as any page without it (see McpPage).
+  if (emptySchema.safeParse(json).success) return { items: [], count: 0, cached: true };
   const body = bodySchema.safeParse(json);
   if (!body.success) return { error: 'bad_shape' };
   const items: McpCheckin[] = [];

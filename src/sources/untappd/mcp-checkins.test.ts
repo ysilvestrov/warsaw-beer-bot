@@ -36,6 +36,18 @@ describe('parseMcpCheckins', () => {
     ]).toEqual([{ error: 'UNTAPPD_NOT_CONNECTED' }, { error: 'bad_shape' }, { error: 'bad_shape' }, { error: 'bad_shape' }]);
   });
 
+  it('nothing newer than minId comes back unwrapped, {count: 0, items: []}, and is an empty page (#884)', () => {
+    expect(parseMcpCheckins(asTool('{"count":0,"items":[]}'))).toEqual({ items: [], count: 0, cached: true });
+  });
+
+  it('a bare list that is not that empty answer is still bad_shape', () => {
+    expect([
+      parseMcpCheckins(asTool('{"count":1,"items":[{}]}')),
+      parseMcpCheckins(asTool('{"count":0,"items":[],"extra":1}')),
+      parseMcpCheckins(asTool('{"items":[]}')),
+    ]).toEqual([{ error: 'bad_shape' }, { error: 'bad_shape' }, { error: 'bad_shape' }]);
+  });
+
   it('a page is vouched for as live only when Untappd says mem: false', () => {
     const withMem = (mem: unknown) => JSON.stringify({ ...JSON.parse(BODY), mem });
     expect([
