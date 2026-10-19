@@ -48,15 +48,23 @@ export class McpShapeError extends McpToolError {}
 const SHAPE_ALERT_KEY = 'fest_mcp_shape_alert_at';
 const SHAPE_ALERT_EVERY_MS = 24 * 60 * 60 * 1000;
 
-/** Logs an answer of an unknown shape and tells the admin, at most once a day. */
+/**
+ * Logs an answer of an unknown shape and tells the admin, at most once a day. Never throws: the alert
+ * is a side note, and a failure of it (a busy database, a throwing notifier) must not reach the
+ * callers' catch blocks, where it would count as an MCP outage after all.
+ */
 export async function alertShape(deps: FestFriendFeedDeps, tool: string, now: Date): Promise<void> {
   deps.log.warn({ tool }, 'fest mcp: answer of an unknown shape; read skipped');
   const notify = deps.notifyAdmin;
   if (!notify) return;
-  await sendThrottledAlert(deps.db, {
-    key: SHAPE_ALERT_KEY, everyMs: SHAPE_ALERT_EVERY_MS, now,
-    send: () => notify(`Фест: MCP ${tool} відповідає у формі, яку бот не розуміє — читання пропущено`),
-  });
+  try {
+    await sendThrottledAlert(deps.db, {
+      key: SHAPE_ALERT_KEY, everyMs: SHAPE_ALERT_EVERY_MS, now,
+      send: async () => notify(`Фест: MCP ${tool} відповідає у формі, яку бот не розуміє — читання пропущено`),
+    });
+  } catch (e) {
+    deps.log.warn({ tool, err: e instanceof Error ? e.message : String(e) }, 'fest mcp: shape alert not sent');
+  }
 }
 
 interface Stream {

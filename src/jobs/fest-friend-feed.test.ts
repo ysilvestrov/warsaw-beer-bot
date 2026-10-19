@@ -122,6 +122,15 @@ describe('runFestFriendFeed', () => {
       .toEqual(['511', null, null, ['Фест: MCP get_user_checkins відповідає у формі, яку бот не розуміє — читання пропущено']]);
   });
 
+  it('an admin notifier that throws while reporting an unknown shape still leaves the breaker closed', async () => {
+    const odd = { content: [{ type: 'text', text: '{"unexpected":true}' }] };
+    const { db, deps } = setup({ get_my_friend_feed: [page([]), page([])], get_user_checkins: [odd, odd] });
+    const throwing = { ...deps, notifyAdmin: (() => { throw new Error('telegram down'); }) as unknown as (m: string) => Promise<void> };
+    await runFestFriendFeed(throwing, IN_SESSION);
+    await runFestFriendFeed(throwing, new Date(IN_SESSION.getTime() + 5 * 60 * 1000));
+    expect(getJobState(db, 'fest_mcp_open_until')).toBe(null);
+  });
+
   it('a first stream of an unknown shape does not stop the second', async () => {
     const { db, deps } = setup({
       get_my_friend_feed: [{ content: [{ type: 'text', text: 'not json' }] }],
