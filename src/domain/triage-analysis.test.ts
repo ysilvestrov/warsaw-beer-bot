@@ -277,7 +277,7 @@ test('a new_issue without a scope fails to parse', () => {
 // The tool schema must admit exactly the col↔op pairings zod accepts. A flat col × op
 // space let the model emit `style contains "Cydr"` (2026-10-20): tool-valid, zod-invalid,
 // and the whole run failed instead of the one term.
-type JsonType = { type: string; enum?: readonly string[] };
+type JsonType = { type: string; enum?: readonly string[]; minLength?: number };
 type TermBranch = { properties: { col: JsonType; op: JsonType; value: JsonType } };
 const termBranches = (ANALYSIS_TOOL_SCHEMA.properties.new_issues.items.properties as unknown as {
   scope: { properties: { where: { items: { anyOf: readonly TermBranch[] } } } };
@@ -285,7 +285,8 @@ const termBranches = (ANALYSIS_TOOL_SCHEMA.properties.new_issues.items.propertie
 const valueFits = (t: JsonType, v: unknown): boolean =>
   (t.type === 'null' && v === null)
   || (t.type === 'number' && typeof v === 'number')
-  || (t.type === 'string' && typeof v === 'string' && (t.enum ?? [v]).includes(v));
+  || (t.type === 'string' && typeof v === 'string' && (t.enum ?? [v]).includes(v)
+    && v.length >= (t.minLength ?? 0));
 const toolAdmits = (term: { col: string; op: string; value: unknown }): boolean =>
   termBranches.some((b) => b.properties.col.enum!.includes(term.col)
     && b.properties.op.enum!.includes(term.op)
@@ -302,8 +303,9 @@ test('the tool schema admits a col↔op pairing exactly when zod accepts one', (
     'style', 'review_class', 'secret'];
   const ops = ['=', '!=', '<', '<=', '>', '>=', 'empty', 'non_empty', 'contains', 'is_null',
     'is_not_null', 'LIKE'];
-  // One sample per JSON value type the branches use; review_class needs a real class.
-  const values = [0, 'x', 'matcher_bug', null];
+  // One sample per JSON value type the branches use; review_class needs a real class,
+  // and '' probes `contains`, which zod requires to be non-empty.
+  const values = [0, 'x', '', 'matcher_bug', null];
   const pairs = cols.flatMap((col) => ops.map((op) => ({ col, op })));
   const zodOk = (t: { col: string; op: string; value: unknown }) => ScopeTermSchema.safeParse(t).success;
   // `value: null` is how strict tool use spells "no value" (zod strips it), so every term

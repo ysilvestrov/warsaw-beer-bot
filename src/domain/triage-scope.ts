@@ -35,8 +35,9 @@ export type Scope = z.infer<typeof ScopeSchema>;
 // It used to be two flat enums (any col × any op), on the belief that Anthropic strict
 // tool use rejects anyOf. It does not (live probe 2026-10-20), and the flat form let the
 // model emit a tool-valid `style contains "Cydr"` that zod rejected — which failed the
-// whole 2026-10-20 run, not the one term. zod stays the gate (the OpenAI path has no
-// tool schema, and `contains` with an empty string is not expressed here).
+// whole 2026-10-20 run, not the one term. zod stays the gate: the OpenAI path has no
+// tool schema. `minLength` mirrors `.min(1)` on `contains` (strict accepts and enforces it,
+// probe 2026-10-20).
 // `value` is required-and-typed in every branch: strict tool use demands properties ==
 // required, so operators that take no value carry `value: null`, which zod strips.
 const termBranch = (cols: readonly string[], ops: readonly string[], value: object) => ({
@@ -54,7 +55,7 @@ export const SCOPE_TERM_JSON_SCHEMA = {
   anyOf: [
     termBranch(NUMERIC_COLS, NUMERIC_OPS, { type: 'number' }),
     termBranch(TEXT_COLS, PRESENCE_OPS, { type: 'null' }),
-    termBranch(TEXT_COLS, ['contains'], { type: 'string' }),
+    termBranch(TEXT_COLS, ['contains'], { type: 'string', minLength: 1 }),
     termBranch(NULLABLE_COLS, NULL_OPS, { type: 'null' }),
     termBranch(['review_class'], ['='], { type: 'string', enum: [...REVIEW_CLASSES] }),
   ],
