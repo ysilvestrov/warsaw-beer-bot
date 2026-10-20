@@ -11,15 +11,15 @@ export const NUMERIC_COLS = ['candidates_count', 'fail_count'] as const;
 export const TEXT_COLS = ['source_url', 'brewery', 'name'] as const;
 export const NULLABLE_COLS = ['abv', 'style'] as const;
 
+const NUMERIC_OPS = ['=', '!=', '<', '<=', '>', '>='] as const;
+const PRESENCE_OPS = ['empty', 'non_empty'] as const;
+const NULL_OPS = ['is_null', 'is_not_null'] as const;
+
 export const ScopeTermSchema = z.union([
-  z.object({
-    col: z.enum(NUMERIC_COLS),
-    op: z.enum(['=', '!=', '<', '<=', '>', '>=']),
-    value: z.number(),
-  }),
-  z.object({ col: z.enum(TEXT_COLS), op: z.enum(['empty', 'non_empty']) }),
+  z.object({ col: z.enum(NUMERIC_COLS), op: z.enum(NUMERIC_OPS), value: z.number() }),
+  z.object({ col: z.enum(TEXT_COLS), op: z.enum(PRESENCE_OPS) }),
   z.object({ col: z.enum(TEXT_COLS), op: z.literal('contains'), value: z.string().min(1) }),
-  z.object({ col: z.enum(NULLABLE_COLS), op: z.enum(['is_null', 'is_not_null']) }),
+  z.object({ col: z.enum(NULLABLE_COLS), op: z.enum(NULL_OPS) }),
   z.object({ col: z.literal('review_class'), op: z.literal('='), value: z.enum(REVIEW_CLASSES) }),
 ]);
 export type ScopeTerm = z.infer<typeof ScopeTermSchema>;
@@ -30,18 +30,35 @@ export const ScopeSchema = z.object({
 });
 export type Scope = z.infer<typeof ScopeSchema>;
 
-// Flat vocabularies for the JSON-Schema mirror in triage-analysis.ts. Derived from the
-// lists above rather than re-typed, so the tool schema cannot drift from what zod will
-// actually accept. They are deliberately flat: JSON Schema could only express the real
-// col↔op pairing with anyOf, which Anthropic strict tool use does not take, so the mirror
-// narrows the space (no invented column, no invented operator) without reproducing it —
-// zod remains the authority on which COMBINATIONS are valid.
-export const SCOPE_COLS = [
-  ...NUMERIC_COLS, ...TEXT_COLS, ...NULLABLE_COLS, 'review_class',
-] as const;
-export const SCOPE_OPS = [
-  '=', '!=', '<', '<=', '>', '>=', 'empty', 'non_empty', 'contains', 'is_null', 'is_not_null',
-] as const;
+// JSON-Schema mirror of ScopeTermSchema for the tool schema in triage-analysis.ts: one
+// anyOf branch per zod union member, built from the same lists so the two cannot drift.
+// It used to be two flat enums (any col × any op), on the belief that Anthropic strict
+// tool use rejects anyOf. It does not (live probe 2026-10-20), and the flat form let the
+// model emit a tool-valid `style contains "Cydr"` that zod rejected — which failed the
+// whole 2026-10-20 run, not the one term. zod stays the gate (the OpenAI path has no
+// tool schema, and `contains` with an empty string is not expressed here).
+// `value` is required-and-typed in every branch: strict tool use demands properties ==
+// required, so operators that take no value carry `value: null`, which zod strips.
+const termBranch = (cols: readonly string[], ops: readonly string[], value: object) => ({
+  type: 'object',
+  properties: {
+    col: { type: 'string', enum: [...cols] },
+    op: { type: 'string', enum: [...ops] },
+    value,
+  },
+  required: ['col', 'op', 'value'],
+  additionalProperties: false,
+}) as const;
+
+export const SCOPE_TERM_JSON_SCHEMA = {
+  anyOf: [
+    termBranch(NUMERIC_COLS, NUMERIC_OPS, { type: 'number' }),
+    termBranch(TEXT_COLS, PRESENCE_OPS, { type: 'null' }),
+    termBranch(TEXT_COLS, ['contains'], { type: 'string' }),
+    termBranch(NULLABLE_COLS, NULL_OPS, { type: 'null' }),
+    termBranch(['review_class'], ['='], { type: 'string', enum: [...REVIEW_CLASSES] }),
+  ],
+} as const;
 
 // Legality: an enumerated cohort is the narrowest scope there is, so it always
 // qualifies. A `where` qualifies only if it constrains something other than the class

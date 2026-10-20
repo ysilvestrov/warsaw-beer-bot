@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
 import {
-  ScopeSchema, SCOPE_COLS, SCOPE_OPS, renderScopeBlock, stripScopeBlocks, type Scope,
+  ScopeSchema, SCOPE_TERM_JSON_SCHEMA, renderScopeBlock, stripScopeBlocks, type Scope,
 } from './triage-scope';
 import { eligibleFamiliesForPrompt } from './drink-boundary';
 
@@ -112,30 +112,9 @@ export const ANALYSIS_TOOL_SCHEMA = {
             type: 'object',
             properties: {
               beer_ids: { type: 'array', items: { type: 'integer' } },
-              where: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    // Enumerated, not free strings: an unconstrained `col`/`op` lets the
-                    // provider emit a tool-VALID term that ScopeTermSchema then rejects,
-                    // which fails the whole run rather than the one term. The lists come
-                    // from triage-scope.ts so they cannot drift. JSON Schema can only
-                    // express the real col-to-op pairing with anyOf, which strict tool use
-                    // does not accept, so this narrows the space without reproducing it —
-                    // zod stays the authority on valid COMBINATIONS.
-                    col: { type: 'string', enum: [...SCOPE_COLS] },
-                    op: { type: 'string', enum: [...SCOPE_OPS] },
-                    // Nullable-and-required rather than optional: strict tool use demands
-                    // properties == required, and `value` is genuinely absent for operators
-                    // like empty/non_empty/is_null/is_not_null (see ScopeTermSchema). Same
-                    // convention as proposed_query/expected_target on VerdictSchema above.
-                    value: { type: ['string', 'number', 'null'] },
-                  },
-                  required: ['col', 'op', 'value'],
-                  additionalProperties: false,
-                },
-              },
+              // One anyOf branch per legal col↔op pairing (see triage-scope.ts): a flat
+              // col × op space let a tool-valid term fail zod and sink the whole run.
+              where: { type: 'array', items: SCOPE_TERM_JSON_SCHEMA },
             },
             required: ['beer_ids', 'where'],
             additionalProperties: false,

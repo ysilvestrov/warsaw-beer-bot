@@ -1,7 +1,7 @@
 import {
   AnalysisSchema, VerdictSchema, buildTriagePrompt, ANALYSIS_TOOL_SCHEMA, type ScopedOpenIssue,
 } from './triage-analysis';
-import { ScopeSchema, SCOPE_COLS, parseScopeBlock } from './triage-scope';
+import { ScopeSchema, ScopeTermSchema, parseScopeBlock } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import { ELIGIBLE_TOKENS } from './drink-boundary';
 
@@ -274,21 +274,47 @@ test('a new_issue without a scope fails to parse', () => {
   }).success).toBe(false);
 });
 
-// An unconstrained col/op lets the provider emit a tool-VALID term that zod then
-// rejects, which fails the entire run instead of the one term.
-test('the tool schema enumerates scope columns and operators', () => {
-  const term = (ANALYSIS_TOOL_SCHEMA.properties.new_issues.items.properties as unknown as {
-    scope: { properties: { where: { items: { properties: Record<string, { enum?: readonly string[] }> } } } };
-  }).scope.properties.where.items.properties;
-  expect(term.col.enum).toContain('candidates_count');
-  expect(term.col.enum).toContain('review_class');
-  expect(term.col.enum).not.toContain('secret');
-  expect(term.op.enum).toContain('is_null');
-  expect(term.op.enum).not.toContain('LIKE');
-  // Drift guard: every enumerated value must be one zod actually accepts.
-  for (const col of term.col.enum!) {
-    expect(SCOPE_COLS as readonly string[]).toContain(col);
-  }
+// The tool schema must admit exactly the col↔op pairings zod accepts. A flat col × op
+// space let the model emit `style contains "Cydr"` (2026-10-20): tool-valid, zod-invalid,
+// and the whole run failed instead of the one term.
+type JsonType = { type: string; enum?: readonly string[] };
+type TermBranch = { properties: { col: JsonType; op: JsonType; value: JsonType } };
+const termBranches = (ANALYSIS_TOOL_SCHEMA.properties.new_issues.items.properties as unknown as {
+  scope: { properties: { where: { items: { anyOf: readonly TermBranch[] } } } };
+}).scope.properties.where.items.anyOf;
+const valueFits = (t: JsonType, v: unknown): boolean =>
+  (t.type === 'null' && v === null)
+  || (t.type === 'number' && typeof v === 'number')
+  || (t.type === 'string' && typeof v === 'string' && (t.enum ?? [v]).includes(v));
+const toolAdmits = (term: { col: string; op: string; value: unknown }): boolean =>
+  termBranches.some((b) => b.properties.col.enum!.includes(term.col)
+    && b.properties.op.enum!.includes(term.op)
+    && valueFits(b.properties.value, term.value));
+
+test('the tool schema rejects the term that failed the 2026-10-20 run', () => {
+  const term = { col: 'style', op: 'contains', value: 'Cydr' };
+  expect(ScopeTermSchema.safeParse(term).success).toBe(false);
+  expect(toolAdmits(term)).toBe(false);
+});
+
+test('the tool schema admits a col↔op pairing exactly when zod accepts one', () => {
+  const cols = ['candidates_count', 'fail_count', 'source_url', 'brewery', 'name', 'abv',
+    'style', 'review_class', 'secret'];
+  const ops = ['=', '!=', '<', '<=', '>', '>=', 'empty', 'non_empty', 'contains', 'is_null',
+    'is_not_null', 'LIKE'];
+  // One sample per JSON value type the branches use; review_class needs a real class.
+  const values = [0, 'x', 'matcher_bug', null];
+  const pairs = cols.flatMap((col) => ops.map((op) => ({ col, op })));
+  const zodOk = (t: { col: string; op: string; value: unknown }) => ScopeTermSchema.safeParse(t).success;
+  // `value: null` is how strict tool use spells "no value" (zod strips it), so every term
+  // the tool admits must parse...
+  const toolOnly = pairs.flatMap((p) => values.map((value) => ({ ...p, value })))
+    .filter((t) => toolAdmits(t) && !zodOk(t));
+  expect(toolOnly).toEqual([]);
+  // ...and every pairing zod accepts must be emittable through the tool.
+  const unreachable = pairs.filter((p) => values.some((value) => zodOk({ ...p, value }))
+    && !values.some((value) => toolAdmits({ ...p, value })));
+  expect(unreachable).toEqual([]);
 });
 
 test('the tool schema requires scope on every new_issue', () => {
