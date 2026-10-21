@@ -781,12 +781,39 @@ describe('(р-б) resolve-incident refuses (1) without changing anything', () =>
       (r) => `/health answers releaseSha fffffff, not ${short(r.s.sha)} — production does not run what --settled names\n`, resolveProbe],
     ['/health does not answer', (r) => hostSet(r.w, 'unhealthy', ''),
       (r) => `/health answers releaseSha (no answer), not ${short(r.s.sha)} — production does not run what --settled names\n`, resolveProbe],
+    // Plan b2 п.22: the window's NRestarts base is a precondition, read before the incident is cleared.
+    ['NRestarts unreadable', (r) => fault(r.w, 'restarts', 0, 99999), () => 'could not read NRestarts — run again\n', resolveProbe],
+    ['the boot id unreadable', (r) => hostSet(r.w, 'boot_id', null), () => 'could not read the boot id — run again\n', resolveProbe],
   ])('%s', (_name, setup, out, evs) => {
     const r = incidentWorld();
     setup(r);
     const before = stateText(r.w);
     const res = resolveRun(r);
     expect([res.code, res.out, stateText(r.w), events(r.w), notes(r.w)]).toEqual([1, out(r), before, evs(r), []]);
+  });
+
+  it('API_PORT cannot be read', () => {
+    const r = incidentWorld();
+    const before = stateText(r.w);
+    const res = resolveRun(r, { WBB_API_PORT_CMD: stub(r.w.bin, 'port-fail', 'exit 1') });
+    expect([res.code, res.out, stateText(r.w), events(r.w), notes(r.w)])
+      .toEqual([1, 'could not resolve API_PORT — run again\n', before, resolveProbe(r), []]);
+  });
+
+  it('no DEPLOYED_SHA: refused before the leftover window of the incident is touched (plan b2 п.25)', () => {
+    const r = incidentWorld(false);
+    const { DEPLOYED_SHA: _d, DEPLOYED_DIGEST: _g, DEPLOYED_ID: _i, DEPLOYED_CONTENT: _c, ...rest } = r.seed;
+    seedState(r.w, {
+      ...rest,
+      WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
+      WINDOW_KIND: 'bootstrap', WINDOW_MODE: 'manual', WINDOW_PHASE: 'activating', WINDOW_PRE: join(r.w.snapshots, `19700102T034640Z-${short(r.x)}-pre.db`),
+      WINDOW_BOOT: BOOT_ID,
+    });
+    const before = stateText(r.w);
+    const res = resolveRun(r);
+    expect([res.code, res.out, stateText(r.w), events(r.w), notes(r.w)]).toEqual([
+      1, 'the state records no deployed commit — there is nothing a resolve window could start from\n', before, [], [],
+    ]);
   });
 
   it('no incident is open', () => {
@@ -1126,5 +1153,80 @@ describe('(б-з) a bootstrap activation refused before it changed anything', ()
     ]);
     expect(events(b.w)).toEqual([...bootToActivate(b), 'image current', `discard ${b.pre}`]);
     expect([readState(b.w), notes(b.w), readdirSync(b.w.snapshots)]).toEqual([{ DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base }, [], []]);
+  });
+});
+
+describe('(р-и) plan b2 п.23–24 and the review of Task 3: what a resolve settles besides S', () => {
+  it('a retained pre that is gone (no file, no unmarked target) leaves the list as "already removed"', () => {
+    const r = incidentWorld();
+    rmSync(r.pres[1]);
+    rmSync(`${r.pres[1]}.sha256`);
+    expect(resolveRun(r).code).toBe(0);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(events(r.w).filter((e) => e.startsWith('unmark '))).toEqual([`unmark 19700101T000000Z-${short(r.x)}-rollback-pre.db`]);
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, [unmarkedOf(r.pres[0])])}\nAlready removed: ${r.pres[1]}`]);
+  });
+
+  it('five gone entries do not eat the limit: the sixth, a real one, is unmarked', () => {
+    const r = incidentWorld();
+    const dead = ['2', '3', '4', '5', '6'].map((n) => join(r.w.snapshots, `19700101T0${n}0000Z-${n.repeat(7)}-rollback-pre.db`));
+    patchState(r.w, { RETAINED_PRE: [...dead, r.pres[0]].join(' ') });
+    expect(resolveRun(r).code).toBe(0);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, [unmarkedOf(r.pres[0])])}\nAlready removed: ${dead.join(' ')}`]);
+  });
+
+  it('PENDING_MARK whose mark keeps failing: cleared by the settle, the pre stays an ordinary one, and prune runs', () => {
+    const r = incidentWorld();
+    const p = join(r.w.snapshots, `19700101T020000Z-${short(r.x)}-pre.db`);
+    writeFileSync(p, 'pre\n');
+    writeFileSync(`${p}.sha256`, `${'0'.repeat(64)}\n`);
+    patchState(r.w, { PENDING_MARK: p });
+    const failMark = stub(r.w.bin, 'mark-fail', `echo "mark $(basename "$1")" >> "${r.w.eventsLog}"; exit 1`);
+    expect(resolveRun(r, { WBB_MARK_CMD: failMark }).code).toBe(0);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(events(r.w)[0]).toBe(`mark 19700101T020000Z-${short(r.x)}-pre.db`);
+    expect(events(r.w).slice(-1)).toEqual(['prune']);
+    expect([existsSync(p), notes(r.w)]).toEqual([true, [`[manual] ${resolvedNote(r, r.pres.map(unmarkedOf))}`]]);
+  });
+
+  it('no retained pre at all: the note has no retention lines', () => {
+    const r = incidentWorld();
+    const { RETAINED_PRE: _p, ...rest } = r.seed;
+    seedState(r.w, rest);
+    expect(resolveRun(r).code).toBe(0);
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, [])}`]);
+  });
+
+  it('a leftover incident window whose mark fails: the pre goes to PENDING_MARK, the resolve proceeds and settles', () => {
+    const r = incidentWorld();
+    const pre = join(r.w.snapshots, `19700102T034640Z-${short(r.x)}-pre.db`);
+    writeFileSync(pre, 'pre\n');
+    writeFileSync(`${pre}.sha256`, `${'0'.repeat(64)}\n`);
+    seedState(r.w, {
+      ...r.seed,
+      WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
+      WINDOW_PREV_DIGEST: r.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'manual', WINDOW_PHASE: 'watching', WINDOW_PRE: pre,
+      WINDOW_START: '99000', WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '99320',
+    });
+    const failMark = stub(r.w.bin, 'mark-fail', `echo "mark $(basename "$1")" >> "${r.w.eventsLog}"; exit 1`);
+    expect(resolveRun(r, { WBB_MARK_CMD: failMark }).code).toBe(0);
+    expect(writes(r.w)[0]).toEqual({ ...r.seed, PENDING_MARK: pre });
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(existsSync(pre)).toBe(true);
+  });
+
+  it('resolving to X itself, main\'s head, whose window fails: no blame — LAST_FAILED_SHA stays absent', () => {
+    const r = incidentWorld();
+    git(r.w.repo, 'fetch', '-q', 'origin');
+    runImage(r.w, r.img);
+    const { LAST_FAILED_SHA: _f, ...rest } = r.seed;
+    seedState(r.w, rest);
+    fault(r.w, 'health', 300, 99999, r.img.digest);
+    const res = manual(r.w, ['resolve-incident', '--settled', r.x]);
+    expect(res.code).toBe(3);
+    expect(readState(r.w)).toEqual({
+      ...rest, INCIDENT: `${r.x} ${r.img.digest} the resolve window failed: health check failed 3 times in a row (last at +320s)`,
+    });
   });
 });

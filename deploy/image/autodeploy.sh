@@ -1486,6 +1486,9 @@ settle() {
     # proof of forward motion (#768 would only fence what he decided). Keyed on the window, not on
     # MANUAL: a tick that finishes an interrupted resolve records it the same.
     LAST_SEEN_DEPLOYED_SHA="$x"
+    # Plan b2 п.24: a pre whose mark never succeeded is an ordinary unmarked snapshot, and the
+    # incident it was evidence for is closed — it is no longer pending, and pruning resumes.
+    PENDING_MARK=""
   else
     observed "$x"
   fi
@@ -1524,20 +1527,29 @@ settle() {
 # original gone, the new name there) counts too. What is not unmarked stays retained, and is named.
 # Sets RELEASE_NOTE.
 release_retained() {
-  local -a items back=() left=()
+  local -a items back=() left=() gone=()
   local p want out n=0
   RELEASE_NOTE=""
   [ -n "$RETAINED_PRE" ] || return 0
   read -r -a items <<< "$RETAINED_PRE"
   for p in "${items[@]}"; do
     want="${p%-rollback-pre.db}-pre.db"
+    # Plan b2 п.23: what is not there any more — removed by the human, as the incident notice
+    # suggests — leaves the list without a call, and without eating the limit.
+    if [ ! -e "$p" ] && [ ! -e "$want" ]; then
+      gone+=("$p")
+      continue
+    fi
+    if [ ! -e "$p" ] && [ -e "$want" ]; then
+      back+=("$want")
+      continue
+    fi
     if [ "$n" -ge "$UNMARK_MAX_PER_RUN" ]; then
       left+=("$p")
       continue
     fi
     n=$(( n + 1 ))
-    if { [ ! -e "$p" ] && [ -e "$want" ]; } \
-       || { out=$("$UNMARK_CMD" "$p" 2>/dev/null) && [ "$(tail -n 1 <<< "$out")" = "$want" ]; }; then
+    if out=$("$UNMARK_CMD" "$p" 2>/dev/null) && [ "$(tail -n 1 <<< "$out")" = "$want" ]; then
       echo "returned to ordinary retention: $want"
       back+=("$want")
     else
@@ -1547,6 +1559,7 @@ release_retained() {
   RETAINED_PRE="${left[*]:-}"
   write_state
   if [ "${#back[@]}" -gt 0 ]; then RELEASE_NOTE+=$'\n'"Back in ordinary retention: ${back[*]}"; fi
+  if [ "${#gone[@]}" -gt 0 ]; then RELEASE_NOTE+=$'\n'"Already removed: ${gone[*]}"; fi
   if [ "${#left[@]}" -gt 0 ]; then
     RELEASE_NOTE+=$'\n'"Still retained — not unmarked; by hand: db-snapshot.sh unmark <path>: ${left[*]}"
   fi
@@ -2167,6 +2180,10 @@ Nothing is recorded against the commit." ;;
 # before resume_window), never both and never neither. Never returns.
 resolve_incident() {
   local kind d i c rev h boot
+  # A refusal leaves the state as it is (plan b2 п.25): this check comes before anything is written.
+  if [ -z "$DEPLOYED_SHA" ]; then
+    manual_refuse "the state records no deployed commit — there is nothing a resolve window could start from"
+  fi
   # An incident whose second write never happened still carries its window (open_incident): what
   # that write would have done — the pre kept, the window cleared — comes first.
   if [ -n "$WINDOW_PHASE" ]; then
@@ -2174,9 +2191,6 @@ resolve_incident() {
     clear_window
     write_state
     echo "the incident's window was still in the state; its pre: ${PRE_NOTE}"
-  fi
-  if [ -z "$DEPLOYED_SHA" ]; then
-    manual_refuse "the state records no deployed commit — there is nothing a resolve window could start from"
   fi
   X="$SETTLED_ARG"
   resolve_digest
@@ -2201,6 +2215,11 @@ resolve_incident() {
   fi
   if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
     manual_refuse "could not read the boot id — run again"
+  fi
+  # Plan b2 п.22: the window's base is read before the write that clears the incident — a counter
+  # that cannot be read now is the human's to retry, not a window that fails before it exists.
+  if ! read_restarts >/dev/null; then
+    manual_refuse "could not read NRestarts — run again"
   fi
   INCIDENT=""
   WINDOW_SHA="$X"
