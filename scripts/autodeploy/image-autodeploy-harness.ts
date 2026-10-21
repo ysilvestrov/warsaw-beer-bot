@@ -633,6 +633,14 @@ export function tick(w: ImageWorld, over: Record<string, string> = {}, args: str
   }
 }
 
+/**
+ * One manual run (plan 2026-10-21 b2-core, Task 2): the same controller, the same fakes, with
+ * `--manual` and `args` after it. Killed by the same `kill` faults: argv[1] is the controller.
+ */
+export function manual(w: ImageWorld, args: string[], over: Record<string, string> = {}): { code: number | null; out: string } {
+  return tick(w, over, ['--manual', ...args]);
+}
+
 /** The tick that first sees the head, then QUIET_S of quiet: the next tick decides. */
 export function ready(w: ImageWorld, over: Record<string, string> = {}): void {
   tick(w, over);

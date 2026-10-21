@@ -45,7 +45,7 @@ function recoveryWorld(): Rec {
 const activating = (r: Rec): Record<string, string> => ({
   ...settledState(r.s), LAST_SEEN_DEPLOYED_SHA: r.s.sha, MAIN_SEEN_SHA: r.x, MAIN_SEEN_S: '100000',
   WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
-  WINDOW_PREV_DIGEST: r.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating', WINDOW_PRE: r.pre, WINDOW_BOOT: BOOT_ID,
+  WINDOW_PREV_DIGEST: r.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating', WINDOW_PRE: r.pre, WINDOW_BOOT: BOOT_ID,
 });
 const watching = (r: Rec, extra: Record<string, string> = {}): Record<string, string> => ({
   ...activating(r), DEPLOYED_SHA: r.x, LAST_SEEN_DEPLOYED_SHA: r.x,

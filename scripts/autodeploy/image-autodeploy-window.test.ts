@@ -97,7 +97,7 @@ describe('(а) the happy path', () => {
 describe('(б) the window is in the state before production changes', () => {
   const windowState = (d: Deploy) => settledAt(d.s, d.x, {
     WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content,
-    WINDOW_OLD: d.w.base, WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating',
+    WINDOW_OLD: d.w.base, WINDOW_PREV_DIGEST: d.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating',
     WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1',
   });
 
@@ -338,7 +338,7 @@ describe('(є) the code-only rollback', () => {
       ...settledAt(d.img, d.x), SETTLED_SHA: d.s.sha, SETTLED_DIGEST: d.s.digest, SETTLED_ID: d.s.id, SETTLED_CONTENT: d.s.content,
       LAST_FAILED_SHA: d.x, RETAINED_PRE: marked(d),
       WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content, WINDOW_OLD: d.w.base,
-      WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'rolling-back', WINDOW_PRE: marked(d), WINDOW_START: '100600',
+      WINDOW_PREV_DIGEST: d.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'auto', WINDOW_PHASE: 'rolling-back', WINDOW_PRE: marked(d), WINDOW_START: '100600',
       WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '100920',
       WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1',
     });

@@ -659,7 +659,7 @@ describe('(і) the state: parsed, validated, written atomically', () => {
   /** A whole window of the given phase, every key it stands on. */
   const fullWindow = (w: ImageWorld, phase: string, extra: string[] = []) => [
     `WINDOW_SHA=${w.base}`, `WINDOW_DIGEST=${w.settled.digest}`, `WINDOW_ID=${w.settled.id}`, `WINDOW_CONTENT=${w.settled.content}`,
-    `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
+    `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_KIND=deploy', 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
     'WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_START=100000', `WINDOW_BOOT=${BOOT_ID}`,
     'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
   ].join('\n');
@@ -691,6 +691,12 @@ describe('(і) the state: parsed, validated, written atomically', () => {
       'WINDOW_PHASE is set but ROLLBACK_ATTEMPTS is not'],
     ['a manual window rolling back', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ROLLING)}`.replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
       'WINDOW_PHASE is rolling-back but WINDOW_MODE is manual (a manual window never rolls back)'],
+    // Spec amendment 3 (§7.1): every window says where it came from.
+    ['a window without WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_KIND=.*\n/m, ''),
+      'WINDOW_PHASE is set but WINDOW_KIND is not'],
+    ['an unknown WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=manual'),
+      'WINDOW_KIND has a value that is not of its format'],
+    ['WINDOW_KIND without a window', (w) => `${good(w)}WINDOW_KIND=deploy\n`, 'WINDOW_KIND is set but WINDOW_PHASE is not'],
     ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
     // Round 2, item 3: snapshot paths — no glob character, no space, one space between list elements.
     ['a PENDING_MARK path with a glob character', (w) => `${good(w)}PENDING_MARK=/s/*-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],

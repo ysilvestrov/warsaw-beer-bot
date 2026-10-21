@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Merge-deploy for the OCI image — the host deploys the head of origin/main by itself, as an image.
 # Spec: docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md §4, §5, §7.
-# Plan: docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md ("Рішення" 1–18).
+# Plan: docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md ("Рішення" 1–18);
+#       docs/superpowers/plans/2026-10/2026-10-21-wbb-image-transition-b2-core.md (the manual mode,
+#       cited as "plan b2 п.N").
 #
 # Stage «б»: this file is installed NOWHERE. The timer still runs the installed copy of
 # deploy/autodeploy.sh (the flat tree); stage «в» moves this file over it (`git mv`). Until then
@@ -14,6 +16,10 @@
 # candidate whose wbb.content equals the deployed one changes nothing that runs (spec §4.1):
 # it is recorded as deployed (noop) without a restart.
 #
+# The same file is the human's manual entry (spec §7.4): `--manual deploy --target <sha>` deploys X
+# through the same state, gates (minus the ones a human's presence releases) and window, in the
+# foreground; a run that is interrupted is finished by the next tick from the state.
+#
 # Runs as the operator user (ysi). Root steps go through `sudo -n wbb-image <verb>`, one sudoers
 # rule per verb. Git runs in a private clone, only for the gates — nothing is checked out.
 #
@@ -23,16 +29,77 @@
 # the flat deployer and deploy.sh, so they exclude each other.
 #
 # Exit (plan п.16): 0 idle / wait / hold / noop / settled, 1 refused, 2 rolled back (code only),
-#       3 incident opened or state corrupt, 4 state write failed, 64 usage.
+#       3 incident opened or state corrupt, 4 state write failed, 64 usage. A manual run uses the
+#       same codes; every refusal, a busy lock and an open window included, is 1 (plan b2 п.6).
+#       Until Tasks 3–4 of plan b2, `--manual bootstrap|resolve-incident` parse and exit 70.
 set -euo pipefail
 # notify() cuts messages by CHARACTERS. Under systemd's default C locale bash counts bytes and
 # can cut a UTF-8 character in half, which Telegram rejects.
 export LC_ALL=C.UTF-8
 
-# Plan п.18: the manual entry (deploy.sh) is a later stage; until it exists, no interface.
-if [ "$#" -ne 0 ]; then
-  echo "usage: autodeploy.sh   (no arguments; the timer runs it)" >&2
+# --- the entry (plan 2026-10-21 b2-core "Рішення" п.1) -------------------------------------------
+# No arguments: the timer's tick, as it always was. `--manual …`: a human's run, through the same
+# state, gates and window (spec §7.4). The target is given, never guessed: the controller does not
+# know the human's checkout, its wrapper (deploy.sh) passes HEAD. Anything else is 64, before
+# anything is read or written.
+# Assigned here, never taken from the environment: a stray MANUAL=1 must not make a tick manual.
+MANUAL=0
+MANUAL_CMD=""
+TARGET=""
+SETTLED_ARG=""
+FORCE=0
+ACK_INCOMPATIBLE=0
+# The mode of the window a deploy opens (spec §7.1): the tick's is always auto.
+DEPLOY_MODE=auto
+usage() {
+  cat >&2 <<'USAGE'
+usage: autodeploy.sh                     (no arguments: the timer's tick)
+       autodeploy.sh --manual deploy --target <sha> [--force] [--ack-incompatible]
+       autodeploy.sh --manual bootstrap --target <sha>
+       autodeploy.sh --manual resolve-incident --settled <sha>
+USAGE
   exit 64
+}
+# A full commit SHA as git prints it: 40 hex, lower case.
+_is_sha() { [[ ${1:-} =~ ^[0-9a-f]{40}$ ]]; }
+if [ "$#" -gt 0 ]; then
+  [ "$1" = --manual ] && [ "$#" -ge 2 ] || usage
+  MANUAL=1
+  MANUAL_CMD="$2"
+  shift 2
+  case "$MANUAL_CMD" in deploy|bootstrap|resolve-incident) ;; *) usage ;; esac
+  _seen=" "
+  while [ "$#" -gt 0 ]; do
+    # Each option once, and only where its subcommand takes it.
+    case "$_seen" in *" $1 "*) usage ;; esac
+    _seen+="$1 "
+    case "$MANUAL_CMD:$1" in
+      deploy:--target|bootstrap:--target)
+        [ "$#" -ge 2 ] && _is_sha "$2" || usage
+        TARGET="$2"
+        shift 2 ;;
+      resolve-incident:--settled)
+        [ "$#" -ge 2 ] && _is_sha "$2" || usage
+        SETTLED_ARG="$2"
+        shift 2 ;;
+      deploy:--force) FORCE=1; shift ;;
+      deploy:--ack-incompatible) ACK_INCOMPATIBLE=1; shift ;;
+      *) usage ;;
+    esac
+  done
+  unset _seen
+  case "$MANUAL_CMD" in
+    deploy|bootstrap) [ -n "$TARGET" ] || usage ;;
+    resolve-incident) [ -n "$SETTLED_ARG" ] || usage ;;
+  esac
+  # Plan b2 п.9: --ack-incompatible gives up the automatic rollback, needed or not — the human
+  # said a code-only rollback is not to be trusted.
+  if [ "$ACK_INCOMPATIBLE" = 1 ]; then DEPLOY_MODE=manual; fi
+  # Plan Tasks 3–4: the other two entries parse, and do nothing yet.
+  if [ "$MANUAL_CMD" != deploy ]; then
+    echo "autodeploy.sh --manual ${MANUAL_CMD}: not implemented yet" >&2
+    exit 70
+  fi
 fi
 
 REPO_URL=https://github.com/ysilvestrov/warsaw-beer-bot.git
@@ -281,12 +348,35 @@ now() { "$CLOCK_CMD"; }
 today() { date -u -d "@$(now)" +%Y-%m-%d; }
 
 # I6: Telegram caps sendMessage at 4096 chars, and a notify failure must never abort the run.
+# Plan b2 п.5: a manual run says the same things, marked — the reader of the chat must know a
+# human ran it, not the timer. The human in front of the run reads them too (stdout).
 notify() {
   local msg="$1"
+  if [ "$MANUAL" = 1 ]; then
+    msg="[manual] $msg"
+    printf '%s\n' "$msg"
+  fi
   if [ "${#msg}" -gt "$NOTIFY_LIMIT" ]; then
     msg="${msg:0:$NOTIFY_LIMIT}"$'\n… truncated'
   fi
   "$NOTIFY_CMD" "$msg" || echo "WARNING: notify failed: $msg"
+}
+
+# "Could not verify" (or "wait"): the tick says so once a day and exits — the next tick looks again
+# (exit $3, default 0). A manual run is refused at once (1): the human is in front of it and runs
+# again; nothing is recorded, not even the daily marker, so the timer's own notice is not muted.
+halt() { # <daily marker> <message> [the tick's exit]
+  if [ "$MANUAL" = 1 ]; then
+    printf '%s\n' "$2" >&2
+    exit 1
+  fi
+  once_a_day "$1" "$2"
+  exit "${3:-0}"
+}
+# A manual run's own refusal: told to the human in front of it; this writes nothing, sends nothing.
+manual_refuse() {
+  printf '%s\n' "$1" >&2
+  exit 1
 }
 
 # --- verdict parsers (pure: no state, no seams) -------------------------------------- BEGIN
@@ -388,6 +478,10 @@ parse_verdict() {
 # Unprivileged emergency stop (#435 §7). Checked before anything else; a paused tick writes
 # nothing and says nothing.
 if [ -f "$STATE_DIR/PAUSED" ]; then
+  # A human who asked for a deploy is owed an answer (plan b2 п.2); the timer is not.
+  if [ "$MANUAL" = 1 ]; then
+    manual_refuse "wbb-autodeploy: paused ($STATE_DIR/PAUSED exists) — a manual run is refused; remove the file to deploy"
+  fi
   echo "wbb-autodeploy: paused ($STATE_DIR/PAUSED exists); exiting quietly"
   exit 0
 fi
@@ -395,6 +489,11 @@ mkdir -p "$DATA_DIR" "$STATE_DIR"
 # The same lock as the flat deployer and deploy.sh: whoever holds it, the others wait.
 exec 9>"$LOCK"
 if ! flock -n 9; then
+  # Plan b2 п.2: a manual run never waits — a tick may hold the lock for a whole window — and the
+  # stall count below is the timer's: a human who found the lock busy says nothing about a stall.
+  if [ "$MANUAL" = 1 ]; then
+    manual_refuse "the deploy lock is held (a tick or another deploy.sh) — nothing was done; run again when it is free (fuser -v $LOCK)"
+  fi
   # A holder that never lets go blocks every tick, and "another tick holds the lock" alone says
   # nothing. These two files live outside the state on purpose: state is written only under the
   # lock, and this path runs because we do not have it.
@@ -415,7 +514,7 @@ if ! flock -n 9; then
   echo "another process holds the lock (${held_s}s); exiting"
   exit 0
 fi
-rm -f "$STATE_DIR/lock-busy-since"
+if [ "$MANUAL" = 0 ]; then rm -f "$STATE_DIR/lock-busy-since"; fi
 TICK_TMP=$(mktemp -d)
 trap 'rm -rf "$TICK_TMP"' EXIT
 
@@ -427,19 +526,22 @@ STATE_KEYS=(
   LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA
   LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE LAST_INCIDENT_NOTICE
   DEPLOYED_DIGEST DEPLOYED_ID DEPLOYED_CONTENT SETTLED_SHA SETTLED_DIGEST SETTLED_ID SETTLED_CONTENT
-  WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
+  WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_KIND WINDOW_MODE
   WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ
   WINDOW_REASON ROLLBACK_ATTEMPTS ACTIVATE_ATTEMPTS PENDING_PRE PENDING_MARK
   CANDIDATE_HELD CANDIDATE_HELD_WHY CANDIDATE_RETRY_X CANDIDATE_RETRY_AT
   RETAINED_PRE
   INCIDENT
 )
-WINDOW_KEYS=(WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
+WINDOW_KEYS=(WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_KIND WINDOW_MODE
   WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ WINDOW_REASON)
 for _k in "${STATE_KEYS[@]}"; do printf -v "$_k" '%s' ''; done
 unset _k
 HOLDS=()
 RANGE_PRS=()
+CONTRACT_PRS=()
+UNREAD=()
+SCAN_UNREAD=0
 
 is_state_key() {
   local k
@@ -492,6 +594,9 @@ value_ok() {
     LAST_HOLD_NOTICE|LAST_STALE_NOTICE|LAST_ASSESS_NOTICE|LAST_INCIDENT_NOTICE)
       [[ $v =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] ;;
     WINDOW_MODE) [[ $v =~ ^(auto|manual)$ ]] ;;
+    # Spec §7.1 (amendment 3): where the window came from — a candidate's deploy (the timer's or a
+    # human's), the first image release, an incident's closing.
+    WINDOW_KIND) [[ $v =~ ^(deploy|bootstrap|resolve)$ ]] ;;
     WINDOW_PHASE) [[ $v =~ ^(activating|watching|rolling-back)$ ]] ;;
     WINDOW_BOOT) [[ $v =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] ;;
     CANDIDATE_HELD) [[ $v =~ $_RE_CANDIDATE_HELD ]] ;;
@@ -548,7 +653,7 @@ check_state() {
   _requires DEPLOYED_CONTENT DEPLOYED_DIGEST || return 1
   _together MAIN_SEEN_SHA MAIN_SEEN_S || return 1
   _together REGRESSION_FROM_SHA REGRESSION_TO_SHA || return 1
-  _requires WINDOW_PHASE WINDOW_SHA WINDOW_DIGEST WINDOW_MODE || return 1
+  _requires WINDOW_PHASE WINDOW_SHA WINDOW_DIGEST WINDOW_MODE WINDOW_KIND || return 1
   for w in "${WINDOW_KEYS[@]}"; do
     _requires "$w" WINDOW_PHASE || return 1
   done
@@ -725,22 +830,28 @@ add_unique() {
 
 # Fills HOLDS (reasons) and RANGE_PRS (#n of every PR in DEPLOYED_SHA..$1).
 # A failure to look is a hold, never a pass (fail closed).
+# Plan b2 п.8, for a manual run, which skips the holds a human releases by running it: CONTRACT_PRS
+# (the PRs whose code-only rollback is not proven safe) and SCAN_UNREAD=1 with the reasons in
+# UNREAD (what could not be read could carry such a label). HOLDS keeps every reason as before.
 scan_range() {
   local x="$1" paths commits c out pr labels f l start up last
   HOLDS=()
   RANGE_PRS=()
+  CONTRACT_PRS=()
+  UNREAD=()
+  SCAN_UNREAD=0
   if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$x"); then
-    HOLDS+=("could not list the changed paths")
+    _unread "could not list the changed paths"
   fi
   while IFS= read -r f; do
     if [ -n "$f" ] && path_is_held "$f"; then HOLDS+=("path $f needs a human step"); fi
   done <<< "$paths"
   if ! commits=$(git -C "$REPO" rev-list "${DEPLOYED_SHA}..${x}"); then
-    HOLDS+=("could not list the commits")
+    _unread "could not list the commits"
     return 0
   fi
   if ! start=$(uptime_now); then
-    add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
+    _unread "could not read the monotonic clock for the PR-label scan"
     return 0
   fi
   last=$start
@@ -749,16 +860,16 @@ scan_range() {
     # A range too long to read in time is a hold, never a pass (a monotonic deadline).
     # Unreadable, or behind its previous reading: a clock that cannot bound the scan is a hold.
     if ! up=$(uptime_now) || [ "$up" -lt "$last" ]; then
-      add_unique HOLDS "could not read the monotonic clock for the PR-label scan"
+      _unread "could not read the monotonic clock for the PR-label scan"
       break
     fi
     last=$up
     if [ $(( up - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
-      add_unique HOLDS "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
+      _unread "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
       break
     fi
     if ! out=$("$PR_LABELS_CMD" "$c" 2>/dev/null); then
-      add_unique HOLDS "could not read PR labels for ${c:0:7}"
+      _unread "could not read PR labels for ${c:0:7}"
       continue
     fi
     while IFS=$'\t' read -r pr labels; do
@@ -771,11 +882,19 @@ scan_range() {
       # and its window is manual (no automatic rollback).
       for l in rollback:unsafe migration:contract; do
         case ",$labels," in
-          *",$l,"*) add_unique HOLDS "PR #$pr carries $l — a code-only rollback is not proven safe; deploy it by hand with bash deploy/deploy.sh --ack-incompatible — https://github.com/${GH_REPO}/pull/$pr" ;;
+          *",$l,"*)
+            add_unique HOLDS "PR #$pr carries $l — a code-only rollback is not proven safe; deploy it by hand with bash deploy/deploy.sh --ack-incompatible — https://github.com/${GH_REPO}/pull/$pr"
+            add_unique CONTRACT_PRS "PR #$pr carries $l — https://github.com/${GH_REPO}/pull/$pr" ;;
         esac
       done
     done <<< "$out"
   done <<< "$commits"
+}
+# Something of the range could not be read: a hold for the timer, unknown for a manual run.
+_unread() {
+  add_unique HOLDS "$1"
+  add_unique UNREAD "$1"
+  SCAN_UNREAD=1
 }
 
 # #768: observe the recorded deployment, never infer runtime health from it. A durable recovery
@@ -903,12 +1022,10 @@ resolve_digest() {
   local out rc
   out=$("$RESOLVE_CMD" "$X" 2>/dev/null) && rc=0 || rc=$?
   if [ "$rc" -eq 3 ]; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: no image is published for ${X:0:7} (no tag ${X} in ${IMAGE_REPOSITORY}) — waiting; NOT a finding against the commit."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: no image is published for ${X:0:7} (no tag ${X} in ${IMAGE_REPOSITORY}) — waiting; NOT a finding against the commit."
   fi
   if [ "$rc" -ne 0 ] || ! [[ $out =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not resolve the image of ${X:0:7} (exit ${rc}) — NOT a finding; retrying next tick."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not resolve the image of ${X:0:7} (exit ${rc}) — NOT a finding; retrying next tick."
   fi
   D="$out"
 }
@@ -919,9 +1036,8 @@ attest_image() {
   local out rc
   out=$("$ATTEST_CMD" "$D" "$X" 2>&1) && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
-    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: the image of ${X:0:7} (${D}) did not pass attestation (exit ${rc}) — not deploying it; NOT recorded as a failed commit.
+    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: the image of ${X:0:7} (${D}) did not pass attestation (exit ${rc}) — not deploying it; NOT recorded as a failed commit.
 $(tail -n 5 <<< "$out")"
-    exit 0
   fi
 }
 
@@ -932,8 +1048,7 @@ pull_candidate() {
   image_call pull --sha "$X" --digest "$D"
   read -r kind d i c x <<< "$IMG_VERDICT"
   if [ "$kind" != PULLED ] || [ "$d" != "$D" ] || [ "$x" != "$X" ]; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the image of ${X:0:7} (${D}) was not pulled as asked: ${IMG_VERDICT} — NOT a finding; retrying next tick."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the image of ${X:0:7} (${D}) was not pulled as asked: ${IMG_VERDICT} — NOT a finding; retrying next tick."
   fi
   CAND_ID="$i"
   CAND_CONTENT="$c"
@@ -945,8 +1060,7 @@ read_current() {
   image_call current
   read -r kind CUR_QUADLET CUR_IMAGE CUR_DIGEST CUR_UNIT <<< "$IMG_VERDICT"
   if [ "$kind" != CURRENT ]; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read what production runs: ${IMG_VERDICT} — not deploying ${X:0:7}; retrying next tick."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read what production runs: ${IMG_VERDICT} — not deploying ${X:0:7}; retrying next tick."
   fi
 }
 
@@ -966,13 +1080,12 @@ noop_or_continue() {
   local keeps
   [ -n "$DEPLOYED_CONTENT" ] && [ "$CAND_CONTENT" = "$DEPLOYED_CONTENT" ] || return 0
   if ! production_is_record; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: ${X:0:7} changes nothing that runs (wbb.content ${CAND_CONTENT}), but production does not match the record: $(record_mismatch). Not recording it as deployed; check the host."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: ${X:0:7} changes nothing that runs (wbb.content ${CAND_CONTENT}), but production does not match the record: $(record_mismatch). Not recording it as deployed; check the host."
   fi
   # Advancing DEPLOYED_SHA is the point: a hold released by a manual deploy of a noop commit
   # would otherwise never be released (plan п.7).
   DEPLOYED_SHA="$X"
-  LAST_SEEN_DEPLOYED_SHA="$X"
+  observed "$X"
   write_state
   keeps=(--keep "$DEPLOYED_DIGEST")
   if [ "$SETTLED_DIGEST" != "$DEPLOYED_DIGEST" ]; then keeps+=(--keep "$SETTLED_DIGEST"); fi
@@ -986,6 +1099,12 @@ noop_or_continue() {
 }
 
 # --- the path to production (plan п.9–14) -----------------------------------------------------------
+# Plan b2 п.11 (#768): only the timer observes a transition of production. A manual run records what
+# it deployed (DEPLOYED_SHA) but not that it was observed, so a downgrade forced by hand is seen by
+# the next tick as one — "went BACKWARDS" — and fenced, as with the old deploy.sh.
+observed() {
+  if [ "$MANUAL" = 0 ]; then LAST_SEEN_DEPLOYED_SHA="$1"; fi
+}
 # Every key of an open window (spec §7.1). Cleared together when the window ends in any way.
 clear_window() {
   local k
@@ -1162,7 +1281,7 @@ wait_for_settled() {
 rolled_back() {
   local x="$WINDOW_SHA" old="$WINDOW_OLD" reason="$WINDOW_REASON" pre="${PRE_NOTE:-$WINDOW_PRE}"
   DEPLOYED_SHA="$old"
-  LAST_SEEN_DEPLOYED_SHA="$old"
+  observed "$old"
   DEPLOYED_DIGEST="$SETTLED_DIGEST"
   DEPLOYED_ID="$SETTLED_ID"
   DEPLOYED_CONTENT="$SETTLED_CONTENT"
@@ -1253,7 +1372,10 @@ settle() {
   local x="$WINDOW_SHA" d="$WINDOW_DIGEST" prs="${RANGE_PRS[*]:-}"
   PREVIOUS_SHA="$WINDOW_OLD"
   DEPLOYED_SHA="$x"
-  LAST_SEEN_DEPLOYED_SHA="$x"
+  observed "$x"
+  # Plan b2 п.12: X that failed before has now passed a full window — the record is no longer
+  # true of it. (Only a manual run deploys a failed SHA; a tick that finishes its window clears it too.)
+  if [ "$LAST_FAILED_SHA" = "$x" ]; then LAST_FAILED_SHA=""; fi
   SETTLED_SHA="$x"
   SETTLED_DIGEST="$d"
   SETTLED_ID="$WINDOW_ID"
@@ -1348,8 +1470,7 @@ cancel_window() {
   "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
   clear_window
   write_state
-  once_a_day LAST_ASSESS_NOTICE "$1"
-  exit 0
+  halt LAST_ASSESS_NOTICE "$1"
 }
 
 # Plan п.9, the activate rows. Each `activate D` is counted in the state BEFORE it runs: a window
@@ -1371,7 +1492,7 @@ activate_candidate() {
   case "$IMG_VERDICT" in
     "ACTIVATED $D")
       DEPLOYED_SHA="$X"
-      LAST_SEEN_DEPLOYED_SHA="$X"
+      observed "$X"
       DEPLOYED_DIGEST="$D"
       DEPLOYED_ID="$CAND_ID"
       DEPLOYED_CONTENT="$CAND_CONTENT"
@@ -1387,8 +1508,7 @@ activate_candidate() {
       image_call current
       read -r kind q i d u <<< "$IMG_VERDICT"
       if [ "$kind" != CURRENT ]; then
-        once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}) and what production runs could not be read: ${IMG_VERDICT}. The window stays open; the next tick looks again."
-        exit 0
+        halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}) and what production runs could not be read: ${IMG_VERDICT}. The window stays open; the next tick looks again."
       fi
       if [ "$u" = foreign ]; then
         open_incident 0 "the unit is not our Quadlet (unit=foreign); the activation was refused"
@@ -1397,16 +1517,14 @@ activate_candidate() {
         cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
       fi
       if [ "$q" = "$WINDOW_DIGEST" ]; then
-        once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}), but the Quadlet file already names it; the window stays activating and the next tick activates again."
-        exit 0
+        halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}), but the Quadlet file already names it; the window stays activating and the next tick activates again."
       fi
       open_incident 0 "the activation of ${X:0:7} was refused and the Quadlet file names ${q}, neither ${X:0:7} nor the settled image"
       ;;
     *)
       # 75 or anything else: whether production changed is not known. The window stays
       # `activating`; the next tick looks at what runs (spec §7.2 rows 1–3).
-      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
-      exit 0
+      halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
       ;;
   esac
 }
@@ -1429,10 +1547,9 @@ settled_is_local() {
 # The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
 # activate, the window watched. Never returns.
 deploy_pipeline() {
-  local pre name boot kind err
+  local pre name boot kind err acked
   if ! production_is_record; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
   fi
   # Spec §4.2: the advisory is a verdict on X; anything else is "could not verify".
   image_call audit --digest "$D"
@@ -1442,20 +1559,16 @@ deploy_pipeline() {
       refuse "$X" "npm audit --omit=dev in its image reports a high or critical advisory.
 $(tail -n +2 <<< "$IMG_VERDICT")" ;;
     *)
-      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the audit of ${X:0:7} (${D}) could not run: ${IMG_VERDICT%%$'\n'*} — NOT a finding; retrying next tick."
-      exit 0 ;;
+      halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the audit of ${X:0:7} (${D}) could not run: ${IMG_VERDICT%%$'\n'*} — NOT a finding; retrying next tick." ;;
   esac
   if ! settled_is_local; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the settled image ${SETTLED_DIGEST} is not usable as the rollback target: ${IMG_VERDICT%%$'\n'*} (expected id ${SETTLED_ID}, revision ${SETTLED_SHA}). Not deploying ${X:0:7}; retrying next tick."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the settled image ${SETTLED_DIGEST} is not usable as the rollback target: ${IMG_VERDICT%%$'\n'*} (expected id ${SETTLED_ID}, revision ${SETTLED_SHA}). Not deploying ${X:0:7}; retrying next tick."
   fi
   if ! PORT=$("$API_PORT_CMD"); then
-    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not resolve API_PORT — not deploying ${X:0:7}."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: could not resolve API_PORT — not deploying ${X:0:7}."
   fi
   if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — not deploying ${X:0:7}; retrying next tick."
-    exit 0
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — not deploying ${X:0:7}; retrying next tick."
   fi
 
   # The trial runs on a pre snapshot of production, by NAME (the helper takes no paths).
@@ -1469,13 +1582,16 @@ $(tail -n +2 <<< "$IMG_VERDICT")" ;;
     "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
     PENDING_PRE=""
     write_state
-    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${X:0:7}.
+    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${X:0:7}.
 ${err}"
-    exit 0
   fi
   image_call trial --digest "$D" --previous "$SETTLED_DIGEST" --snapshot "$name"
   kind="${IMG_VERDICT%% *}"
-  if [ "$IMG_VERDICT" != "OK $SETTLED_DIGEST" ]; then
+  # Plan b2 п.10, spec §6.4: a human who acknowledged the incompatibility deploys it anyway, in a
+  # manual window — no automatic rollback, which is exactly what COMPAT FAILED rules out.
+  acked=0
+  if [ "$kind" = COMPAT_FAILED ] && [ "$MANUAL" = 1 ] && [ "$ACK_INCOMPATIBLE" = 1 ]; then acked=1; fi
+  if [ "$IMG_VERDICT" != "OK $SETTLED_DIGEST" ] && [ "$acked" = 0 ]; then
     # No deploy happened: this pre must not count among the settled ones.
     "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
     PENDING_PRE=""
@@ -1487,19 +1603,30 @@ ${err}"
       refuse "$X" "the trial on a copy of production failed: ${IMG_VERDICT#FAILED }
 $(tail -n 20 <<< "$IMG_ERR")" ;;
     COMPAT_FAILED:*)
-      # Spec §6.3: proven incompatibility — a hold, not a failed SHA. It concerns exactly this
-      # pair of images: a new head or a new settled image clears it.
-      CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
-      CANDIDATE_HELD_WHY="${IMG_VERDICT#COMPAT_FAILED }"
-      LAST_HOLD_NOTICE=$(today)
-      write_state
-      notify "⏸ merge-deploy: ${X:0:7} is HELD — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated, so a code-only rollback is not possible: ${CANDIDATE_HELD_WHY}
+      if [ "$acked" = 1 ]; then
+        echo "${IMG_VERDICT#COMPAT_FAILED } — acknowledged (--ack-incompatible): deploying in a manual window"
+      else
+        # Spec §6.3: proven incompatibility — a hold, not a failed SHA. It concerns exactly this
+        # pair of images: a new head or a new settled image clears it. A manual run records the
+        # same proven fact (plan b2 п.10), and is refused: 1, where the tick holds with 0.
+        CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
+        CANDIDATE_HELD_WHY="${IMG_VERDICT#COMPAT_FAILED }"
+        LAST_HOLD_NOTICE=$(today)
+        write_state
+        notify "⏸ merge-deploy: ${X:0:7} is HELD — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated, so a code-only rollback is not possible: ${CANDIDATE_HELD_WHY}
 $(tail -n 20 <<< "$IMG_ERR")
 Deploy it by hand, without an automatic rollback: bash deploy/deploy.sh --ack-incompatible"
-      exit 0 ;;
+        exit "$MANUAL"
+      fi ;;
     REFUSED:*)
       # A precondition (rights, the snapshot, an old S) is fixed on the host, not by a commit:
       # not a hold of X, just not before an hour has passed.
+      if [ "$MANUAL" = 1 ]; then
+        # Plan b2 п.10: the human fixes the host and runs again — no retry is scheduled for him.
+        manual_refuse "the trial of ${X:0:7} was refused: ${IMG_VERDICT#REFUSED }
+$(tail -n 20 <<< "$IMG_ERR")
+Nothing is recorded against the commit; fix the host and run again."
+      fi
       CANDIDATE_RETRY_X="$X"
       CANDIDATE_RETRY_AT=$(( $(now) + CANDIDATE_RETRY_S ))
       write_state
@@ -1508,8 +1635,7 @@ $(tail -n 20 <<< "$IMG_ERR")
 It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded against the commit."
       exit 0 ;;
     *)
-      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick."
-      exit 0 ;;
+      halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick." ;;
   esac
 
   # Spec §7.1: the window is in the state BEFORE anything changes production.
@@ -1519,7 +1645,8 @@ It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded agai
   WINDOW_CONTENT="$CAND_CONTENT"
   WINDOW_OLD="$DEPLOYED_SHA"
   WINDOW_PREV_DIGEST="$SETTLED_DIGEST"
-  WINDOW_MODE=auto
+  WINDOW_KIND=deploy
+  WINDOW_MODE="$DEPLOY_MODE"
   WINDOW_PHASE=activating
   WINDOW_PRE="$pre"
   WINDOW_BOOT="$boot"
@@ -1639,17 +1766,152 @@ resume_window() {
   esac
 }
 
-# --- the tick ----------------------------------------------------------------------------------------
+# --- the gates --------------------------------------------------------------------------------------
+# The timer's gates, between the fetch and the candidate's path. Each one that stops exits.
+tick_gates() {
+  local verdict
+  observe_deployment || exit 0
+  if [ -n "$REGRESSION_FROM_SHA" ]; then
+    report_regression_hold
+    exit 0
+  fi
+
+  # Plan п.10: the rollback target is the last settled image; without one there is nothing to roll
+  # back to, so the first image release is a human's (spec §8 п.2).
+  if [ -z "$DEPLOYED_SHA" ] || [ -z "$SETTLED_DIGEST" ]; then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: there is no settled image yet — the first image release is deployed by hand (manual window, spec §8 п.2); until then nothing deploys automatically."
+    exit 0
+  fi
+  if [ "$X" = "$DEPLOYED_SHA" ]; then
+    report_stale_once
+    echo "up to date at $X"
+    exit 0
+  fi
+  if ! git -C "$REPO" rev-parse -q --verify "${DEPLOYED_SHA}^{commit}" >/dev/null \
+     || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production (${DEPLOYED_SHA:0:7}) is not an ancestor of main (${X:0:7}) — refusing what could be a downgrade. Deploy main by hand to reseed."
+    exit 0
+  fi
+  if [ "$X" = "$LAST_FAILED_SHA" ]; then
+    report_stale_once
+    echo "main $X is recorded as LAST_FAILED_SHA; waiting for the next merge"
+    exit 0
+  fi
+  # D1: ten minutes of quiet, measured from the first tick that saw this head.
+  if [ "$MAIN_SEEN_SHA" != "$X" ]; then
+    MAIN_SEEN_SHA="$X"
+    MAIN_SEEN_S="$NOW"
+    write_state
+    echo "new main head $X; waiting ${QUIET_S}s of quiet"
+    exit 0
+  fi
+  if [ $(( NOW - MAIN_SEEN_S )) -lt "$QUIET_S" ]; then
+    echo "main moved $(( NOW - MAIN_SEEN_S ))s ago; waiting"
+    exit 0
+  fi
+  if installed_is_stale; then
+    echo "$STALE_REPORT"
+    once_a_day LAST_STALE_NOTICE "⚠️ merge-deploy is waiting: the installed deployer is out of date — a merged fix is not live until it is installed.
+${STALE_REPORT}
+${STALE_ADVICE}"
+    exit 0
+  fi
+  # Plan п.7: holds BEFORE the noop — a change outside the image (sudoers, a unit) is not "nothing".
+  scan_range "$X"
+  if [ "${#HOLDS[@]}" -gt 0 ]; then
+    printf '%s\n' "${HOLDS[@]}"
+    once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: production is behind main and HELD:
+$(printf '• %s\n' "${HOLDS[@]}")
+Do the steps, then run bash deploy/deploy.sh on the host — that releases the hold."
+    exit 0
+  fi
+  if ! verdict=$(ci_verdict "$X"); then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy cannot read CI status for ${X:0:7} (gh api failed). Waiting."
+    exit 0
+  fi
+  case "$verdict" in
+    PASS) ;;
+    WAIT)
+      if [ $(( NOW - MAIN_SEEN_S )) -ge "$CI_STUCK_S" ]; then
+        once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: CI has not concluded on ${X:0:7} after $(( (NOW - MAIN_SEEN_S) / 60 )) min (the required 'ci' and 'image' checks of one run are pending or absent)."
+      fi
+      echo "CI not concluded on $X"
+      exit 0
+      ;;
+    FAIL*)
+      if [ "$LAST_CI_NOTICE_SHA" != "$X" ]; then
+        notify "⛔ merge-deploy: CI failed on ${X:0:7} — not deploying. ${verdict#FAIL }
+Re-running the failed job releases it; nothing else to do here."
+        LAST_CI_NOTICE_SHA="$X"
+        write_state
+      fi
+      exit 0
+      ;;
+  esac
+}
+
+# Spec §7.4, plan b2 п.7–8: a human's deploy of X. No quiet main (the human is there), no observation
+# of production and no regression fence (#768: "deploy main by hand" IS its resolution), LAST_FAILED_SHA
+# allowed, path holds and deploy:hold released by the run itself. What stays: a settled image to roll
+# back to, ancestry (unless --force), the installed copies, CI. A range whose code-only rollback is
+# not proven safe — or whose labels could not be read — needs --ack-incompatible. Nothing here writes
+# the state: every stop is a refusal (1) or "up to date" (0).
+manual_gates() {
+  local verdict
+  if [ -z "$DEPLOYED_SHA" ] || [ -z "$SETTLED_DIGEST" ]; then
+    manual_refuse "there is no settled image yet — the first image release is bash deploy/deploy.sh --bootstrap"
+  fi
+  if [ "$X" = "$DEPLOYED_SHA" ]; then
+    echo "up to date at $X"
+    exit 0
+  fi
+  if [ "$FORCE" = 0 ] && { ! git -C "$REPO" rev-parse -q --verify "${DEPLOYED_SHA}^{commit}" >/dev/null \
+       || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; }; then
+    manual_refuse "production (${DEPLOYED_SHA:0:7}) is not an ancestor of ${X:0:7} — a downgrade or a jump across histories; if it is deliberate, run again with --force"
+  fi
+  if installed_is_stale; then
+    manual_refuse "the installed deployer is out of date — a merged fix is not live until it is installed.
+${STALE_REPORT}
+${STALE_ADVICE}"
+  fi
+  scan_range "$X"
+  if [ "$ACK_INCOMPATIBLE" = 0 ] && { [ "${#CONTRACT_PRS[@]}" -gt 0 ] || [ "$SCAN_UNREAD" = 1 ]; }; then
+    manual_refuse "a code-only rollback of ${DEPLOYED_SHA:0:7}..${X:0:7} is not proven safe:
+$(printf '• %s\n' "${CONTRACT_PRS[@]}" "${UNREAD[@]}")
+Run again with --ack-incompatible: the window is then manual — no automatic rollback; a failure is an incident."
+  fi
+  # Spec §7.4: without a published, tested image there is nothing to deploy — a WAIT of the timer is
+  # a refusal with its reason for the human.
+  if ! verdict=$(ci_verdict "$X"); then
+    manual_refuse "cannot read CI status for ${X:0:7} (gh api failed)"
+  fi
+  case "$verdict" in
+    PASS) ;;
+    WAIT) manual_refuse "CI has not concluded on ${X:0:7} — the required 'ci' and 'image' checks of one run are pending or absent; there is no image to deploy yet" ;;
+    FAIL*) manual_refuse "CI failed on ${X:0:7} — not deploying: ${verdict#FAIL }" ;;
+  esac
+}
+
+# --- the run -----------------------------------------------------------------------------------------
 read_state || state_corrupt
 retry_pending_marks
 # Spec §7.3: an open incident blocks everything but PAUSED and the lock — before the window,
 # before git, before CI.
 if [ -n "$INCIDENT" ]; then
   read -r _inc_sha _inc_digest _inc_reason <<< "$INCIDENT"
+  if [ "$MANUAL" = 1 ]; then
+    manual_refuse "an INCIDENT is open — ${_inc_sha:0:7} (${_inc_digest}): ${_inc_reason}
+Nothing deploys until it is resolved: bash deploy/deploy.sh --resolve-incident --settled <sha>"
+  fi
   once_a_day LAST_INCIDENT_NOTICE "🔥 merge-deploy: an INCIDENT is open — ${_inc_sha:0:7} (${_inc_digest}): ${_inc_reason}
 Nothing deploys until a human resolves it: bash deploy/deploy.sh --resolve-incident --settled <sha>."
   echo "incident open; nothing to do"
   exit 0
+fi
+# Plan b2 п.2: an open window is the timer's to finish (spec §7.2) — a manual run never takes it
+# over, nor opens a second one.
+if [ "$MANUAL" = 1 ] && [ -n "$WINDOW_PHASE" ]; then
+  manual_refuse "a window of ${WINDOW_SHA:0:7} is open (${WINDOW_PHASE}) — the timer finishes it; run again after it"
 fi
 resume_window
 # F10: a pre snapshot whose window was never written was never trialled into a deploy.
@@ -1659,101 +1921,31 @@ if [ -n "$PENDING_PRE" ]; then
   write_state
 fi
 if [ ! -d "$REPO/.git" ]; then
-  timeout "$STEP_TIMEOUT_GIT_S" git clone -q "$REPO_URL" "$REPO" || {
-    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git clone of $REPO_URL failed."
-    exit 1
-  }
+  timeout "$STEP_TIMEOUT_GIT_S" git clone -q "$REPO_URL" "$REPO" || halt LAST_ASSESS_NOTICE "⛔ merge-deploy: git clone of $REPO_URL failed." 1
 fi
 if ! timeout "$STEP_TIMEOUT_GIT_S" git -C "$REPO" fetch -q --prune origin; then
-  once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git fetch failed."
-  exit 1
+  halt LAST_ASSESS_NOTICE "⛔ merge-deploy: git fetch failed." 1
 fi
 
-X=$(git -C "$REPO" rev-parse origin/main)
+if [ "$MANUAL" = 1 ]; then
+  X="$TARGET"
+  # Plan b2 п.4: the attestation requires refs/heads/main (spec §1 п.2) — a commit that is not on
+  # main has no image this controller would ever trust.
+  if ! git -C "$REPO" merge-base --is-ancestor "$X" origin/main 2>/dev/null; then
+    manual_refuse "${X:0:7} is not on origin/main — only a commit of main is deployed (its image's attestation requires refs/heads/main)"
+  fi
+else
+  X=$(git -C "$REPO" rev-parse origin/main)
+fi
 NOW=$(now)
 
-observe_deployment || exit 0
-if [ -n "$REGRESSION_FROM_SHA" ]; then
-  report_regression_hold
-  exit 0
-fi
+if [ "$MANUAL" = 1 ]; then manual_gates; else tick_gates; fi
 
-# Plan п.10: the rollback target is the last settled image; without one there is nothing to roll
-# back to, so the first image release is a human's (spec §8 п.2).
-if [ -z "$DEPLOYED_SHA" ] || [ -z "$SETTLED_DIGEST" ]; then
-  once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: there is no settled image yet — the first image release is deployed by hand (manual window, spec §8 п.2); until then nothing deploys automatically."
-  exit 0
-fi
-if [ "$X" = "$DEPLOYED_SHA" ]; then
-  report_stale_once
-  echo "up to date at $X"
-  exit 0
-fi
-if ! git -C "$REPO" rev-parse -q --verify "${DEPLOYED_SHA}^{commit}" >/dev/null \
-   || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; then
-  once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production (${DEPLOYED_SHA:0:7}) is not an ancestor of main (${X:0:7}) — refusing what could be a downgrade. Deploy main by hand to reseed."
-  exit 0
-fi
-if [ "$X" = "$LAST_FAILED_SHA" ]; then
-  report_stale_once
-  echo "main $X is recorded as LAST_FAILED_SHA; waiting for the next merge"
-  exit 0
-fi
-# D1: ten minutes of quiet, measured from the first tick that saw this head.
-if [ "$MAIN_SEEN_SHA" != "$X" ]; then
-  MAIN_SEEN_SHA="$X"
-  MAIN_SEEN_S="$NOW"
-  write_state
-  echo "new main head $X; waiting ${QUIET_S}s of quiet"
-  exit 0
-fi
-if [ $(( NOW - MAIN_SEEN_S )) -lt "$QUIET_S" ]; then
-  echo "main moved $(( NOW - MAIN_SEEN_S ))s ago; waiting"
-  exit 0
-fi
-if installed_is_stale; then
-  echo "$STALE_REPORT"
-  once_a_day LAST_STALE_NOTICE "⚠️ merge-deploy is waiting: the installed deployer is out of date — a merged fix is not live until it is installed.
-${STALE_REPORT}
-${STALE_ADVICE}"
-  exit 0
-fi
-# Plan п.7: holds BEFORE the noop — a change outside the image (sudoers, a unit) is not "nothing".
-scan_range "$X"
-if [ "${#HOLDS[@]}" -gt 0 ]; then
-  printf '%s\n' "${HOLDS[@]}"
-  once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: production is behind main and HELD:
-$(printf '• %s\n' "${HOLDS[@]}")
-Do the steps, then run bash deploy/deploy.sh on the host — that releases the hold."
-  exit 0
-fi
-if ! verdict=$(ci_verdict "$X"); then
-  once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy cannot read CI status for ${X:0:7} (gh api failed). Waiting."
-  exit 0
-fi
-case "$verdict" in
-  PASS) ;;
-  WAIT)
-    if [ $(( NOW - MAIN_SEEN_S )) -ge "$CI_STUCK_S" ]; then
-      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: CI has not concluded on ${X:0:7} after $(( (NOW - MAIN_SEEN_S) / 60 )) min (the required 'ci' and 'image' checks of one run are pending or absent)."
-    fi
-    echo "CI not concluded on $X"
-    exit 0
-    ;;
-  FAIL*)
-    if [ "$LAST_CI_NOTICE_SHA" != "$X" ]; then
-      notify "⛔ merge-deploy: CI failed on ${X:0:7} — not deploying. ${verdict#FAIL }
-Re-running the failed job releases it; nothing else to do here."
-      LAST_CI_NOTICE_SHA="$X"
-      write_state
-    fi
-    exit 0
-    ;;
-esac
-
-candidate_retry
+# Plan b2 п.7: a retried or held candidate waits for the timer; a human's run is the retry, and
+# its COMPAT FAILED is answered in the pipeline (refused, or deployed in a manual window).
+if [ "$MANUAL" = 0 ]; then candidate_retry; fi
 resolve_digest
-candidate_held
+if [ "$MANUAL" = 0 ]; then candidate_held; fi
 attest_image
 pull_candidate
 read_current
