@@ -31,7 +31,7 @@
 # Exit (plan п.16): 0 idle / wait / hold / noop / settled, 1 refused, 2 rolled back (code only),
 #       3 incident opened or state corrupt, 4 state write failed, 64 usage. A manual run uses the
 #       same codes; every refusal, a busy lock and an open window included, is 1 (plan b2 п.6).
-#       Until Tasks 3–4 of plan b2, `--manual bootstrap|resolve-incident` parse and exit 70.
+#       Until Task 4 of plan b2, `--manual bootstrap` parses and exits 70.
 set -euo pipefail
 # notify() cuts messages by CHARACTERS. Under systemd's default C locale bash counts bytes and
 # can cut a UTF-8 character in half, which Telegram rejects.
@@ -95,8 +95,8 @@ if [ "$#" -gt 0 ]; then
   # Plan b2 п.9: --ack-incompatible gives up the automatic rollback, needed or not — the human
   # said a code-only rollback is not to be trusted.
   if [ "$ACK_INCOMPATIBLE" = 1 ]; then DEPLOY_MODE=manual; fi
-  # Plan Tasks 3–4: the other two entries parse, and do nothing yet.
-  if [ "$MANUAL_CMD" != deploy ]; then
+  # Plan b2 Task 4: bootstrap parses, and does nothing yet.
+  if [ "$MANUAL_CMD" = bootstrap ]; then
     echo "autodeploy.sh --manual ${MANUAL_CMD}: not implemented yet" >&2
     exit 70
   fi
@@ -149,6 +149,10 @@ ROLLBACK_ATTEMPTS_MAX=2
 ROLLBACK_RETRY_S=30
 # A tick retries at most this many failed marks (each a db-snapshot.sh call), the rest the next.
 PENDING_MARK_MAX_PER_TICK=2
+# A settled resolve returns at most this many retained pres (each a db-snapshot.sh call) to ordinary
+# retention; the rest stay retained and its notice names them. 5 × STEP_TIMEOUT_SNAPSHOT_OP_S on a
+# resolve tick, which runs no pull, audit, trial, activation or rollback, is far inside WORST_PATH_S.
+UNMARK_MAX_PER_RUN=5
 # The worst tick, every call at the edge of its bound (plan п.17), from the loops as they are:
 # - a poll is health + NRestarts + the unit state + `current`; the window settles on the first
 #   clean poll at t >= WINDOW_S, or fails OBSERVE_MAX_S after the last fully read one: the last
@@ -335,6 +339,8 @@ _prune_default() { _as_bot "$SNAPSHOT_BIN" prune "$SNAPSHOT_DIR" "$KEEP_SNAPSHOT
 PRUNE_CMD="${WBB_PRUNE_CMD:-_prune_default}"
 _mark_default() { _as_bot "$SNAPSHOT_BIN" mark-rollback "$1"; }
 MARK_CMD="${WBB_MARK_CMD:-_mark_default}"
+_unmark_default() { _as_bot "$SNAPSHOT_BIN" unmark "$1"; }
+UNMARK_CMD="${WBB_UNMARK_CMD:-_unmark_default}"
 _discard_default() { _as_bot "$SNAPSHOT_BIN" discard "$1"; }
 DISCARD_CMD="${WBB_DISCARD_CMD:-_discard_default}"
 
@@ -682,7 +688,32 @@ check_state() {
   _requires ROLLBACK_ATTEMPTS WINDOW_PHASE || return 1
   _requires ACTIVATE_ATTEMPTS WINDOW_PHASE || return 1
   # What each phase stands on (a window is written whole, then grows phase by phase).
-  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_PRE WINDOW_BOOT || return 1
+  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_BOOT || return 1
+  # Plan b2 п.15. A resolve window closes an incident: the human's image already runs, so it is
+  # always manual, only watches, takes no pre snapshot, and rolls back to whatever was settled —
+  # nothing, when the incident came before any settled image. Every other window has both.
+  if [ "$WINDOW_KIND" = resolve ]; then
+    if [ "$WINDOW_MODE" != manual ]; then
+      STATE_PROBLEM="WINDOW_KIND is resolve but WINDOW_MODE is $WINDOW_MODE (a resolve window is always manual)"
+      return 1
+    fi
+    if [ "$WINDOW_PHASE" != watching ]; then
+      STATE_PROBLEM="WINDOW_KIND is resolve but WINDOW_PHASE is $WINDOW_PHASE (a resolve window only watches)"
+      return 1
+    fi
+    if [ -n "$WINDOW_PRE" ]; then
+      STATE_PROBLEM="WINDOW_KIND is resolve but WINDOW_PRE is set (closing an incident takes no snapshot)"
+      return 1
+    fi
+    if [ -n "$SETTLED_DIGEST" ]; then
+      _requires WINDOW_PHASE WINDOW_PREV_DIGEST || return 1
+    elif [ -n "$WINDOW_PREV_DIGEST" ]; then
+      STATE_PROBLEM="WINDOW_KIND is resolve and nothing is settled, but WINDOW_PREV_DIGEST is set"
+      return 1
+    fi
+  else
+    _requires WINDOW_PHASE WINDOW_PREV_DIGEST WINDOW_PRE || return 1
+  fi
   case "$WINDOW_PHASE" in
     watching)
       _requires WINDOW_PHASE WINDOW_START WINDOW_LAST_READ WINDOW_FAILS WINDOW_NRESTARTS || return 1 ;;
@@ -1384,6 +1415,9 @@ rollback_loop() {
 # Plan п.13: the window failed. auto → code-only rollback; manual → incident. Never returns.
 window_failed() {
   local reason="${1//$'\n'/ }"
+  # Plan b2 п.13: a resolve window watches the image the human named, not a candidate — its failure
+  # is an incident again, and no commit is to blame for it.
+  if [ "$WINDOW_KIND" = resolve ]; then open_incident 0 "the resolve window failed: ${reason}"; fi
   if [ "$WINDOW_MODE" = manual ]; then open_incident 1 "the manual window failed: ${reason}"; fi
   # The FIRST write: whatever happens below, X is not retried.
   if is_main_head "$WINDOW_SHA"; then LAST_FAILED_SHA="$WINDOW_SHA"; fi
@@ -1429,10 +1463,21 @@ new_window() {
 
 # Spec §7.1: settled — D becomes the rollback target. Never returns.
 settle() {
-  local x="$WINDOW_SHA" d="$WINDOW_DIGEST" prs="${RANGE_PRS[*]:-}"
+  local x="$WINDOW_SHA" d="$WINDOW_DIGEST" prs="${RANGE_PRS[*]:-}" kind="$WINDOW_KIND"
   PREVIOUS_SHA="$WINDOW_OLD"
   DEPLOYED_SHA="$x"
-  observed "$x"
+  # What runs is the window's image — after an activation already recorded, after a resolve not.
+  DEPLOYED_DIGEST="$d"
+  DEPLOYED_ID="$WINDOW_ID"
+  DEPLOYED_CONTENT="$WINDOW_CONTENT"
+  if [ "$kind" = resolve ]; then
+    # Plan b2 п.13: the human just named the base — the one transition recorded as observed without
+    # proof of forward motion (#768 would only fence what he decided). Keyed on the window, not on
+    # MANUAL: a tick that finishes an interrupted resolve records it the same.
+    LAST_SEEN_DEPLOYED_SHA="$x"
+  else
+    observed "$x"
+  fi
   # Plan b2 п.12: X that failed before has now passed a full window — the record is no longer
   # true of it. (Only a manual run deploys a failed SHA; a tick that finishes its window clears it too.)
   if [ "$LAST_FAILED_SHA" = "$x" ]; then LAST_FAILED_SHA=""; fi
@@ -1444,14 +1489,54 @@ settle() {
   write_state
   image_call prune --keep "$d"
   case "$IMG_VERDICT" in PRUNED\ *) ;; *) echo "WARNING: image prune: ${IMG_VERDICT}" ;; esac
+  # Spec §7.3: the incident is closed, its evidence is no longer needed — only now, after the
+  # settled write, never before (a failed resolve window keeps every pre retained).
+  if [ "$kind" = resolve ]; then release_retained; fi
   local skipped=""
   if [ -n "$PENDING_MARK" ]; then
     skipped=" Snapshot pruning skipped: not yet marked ${PENDING_MARK}."
   else
     "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
   fi
-  notify "✅ merge-deploy ${x:0:7} is live and settled${prs:+ — $prs}.${skipped}"
+  if [ "$kind" = resolve ]; then
+    notify "✅ merge-deploy: the incident is resolved — ${x:0:7} is live and settled.${skipped}${RELEASE_NOTE}"
+  else
+    notify "✅ merge-deploy ${x:0:7} is live and settled${prs:+ — $prs}.${skipped}"
+  fi
   exit 0
+}
+
+# Plan b2 п.13: each RETAINED_PRE back to ordinary retention with db-snapshot.sh unmark. Only the
+# one name the rename can produce counts (as mark_pre); a rename that already happened (the
+# original gone, the new name there) counts too. What is not unmarked stays retained, and is named.
+# Sets RELEASE_NOTE.
+release_retained() {
+  local -a items back=() left=()
+  local p want out n=0
+  RELEASE_NOTE=""
+  [ -n "$RETAINED_PRE" ] || return 0
+  read -r -a items <<< "$RETAINED_PRE"
+  for p in "${items[@]}"; do
+    want="${p%-rollback-pre.db}-pre.db"
+    if [ "$n" -ge "$UNMARK_MAX_PER_RUN" ]; then
+      left+=("$p")
+      continue
+    fi
+    n=$(( n + 1 ))
+    if { [ ! -e "$p" ] && [ -e "$want" ]; } \
+       || { out=$("$UNMARK_CMD" "$p" 2>/dev/null) && [ "$(tail -n 1 <<< "$out")" = "$want" ]; }; then
+      echo "returned to ordinary retention: $want"
+      back+=("$want")
+    else
+      left+=("$p")
+    fi
+  done
+  RETAINED_PRE="${left[*]:-}"
+  write_state
+  if [ "${#back[@]}" -gt 0 ]; then RELEASE_NOTE+=$'\n'"Back in ordinary retention: ${back[*]}"; fi
+  if [ "${#left[@]}" -gt 0 ]; then
+    RELEASE_NOTE+=$'\n'"Still retained — not unmarked; by hand: db-snapshot.sh unmark <path>: ${left[*]}"
+  fi
 }
 
 # Plan п.11: a poll every POLL_S reads health, NRestarts, the unit state and `current`, and its
@@ -1957,12 +2042,73 @@ Run again with --ack-incompatible: the window is then manual — no automatic ro
   esac
 }
 
+# --- resolve-incident (plan b2 п.13, spec §7.3) -------------------------------------------------------
+# The human restored production and names what runs: S. It is proven to be S — the tag's digest D,
+# attested; local as a build of S; the Quadlet file and the container are D, from our unit; /health
+# answers S — before anything is written; any difference refuses with what differed, and the state
+# is not touched. Then ONE write clears the incident and opens a watching resolve window, so an
+# interruption leaves either the incident or a window the timer finishes (the incident gate stands
+# before resume_window), never both and never neither. Never returns.
+resolve_incident() {
+  local kind d i c rev h boot
+  # An incident whose second write never happened still carries its window (open_incident): what
+  # that write would have done — the pre kept, the window cleared — comes first.
+  if [ -n "$WINDOW_PHASE" ]; then
+    retain_pre
+    clear_window
+    write_state
+    echo "the incident's window was still in the state; its pre: ${PRE_NOTE}"
+  fi
+  if [ -z "$DEPLOYED_SHA" ]; then
+    manual_refuse "the state records no deployed commit — there is nothing a resolve window could start from"
+  fi
+  X="$SETTLED_ARG"
+  resolve_digest
+  attest_image
+  image_call local --digest "$D"
+  read -r kind d i c rev <<< "$IMG_VERDICT"
+  if [ "$kind" != LOCAL ] || [ "$d" != "$D" ] || [ "$rev" != "$X" ]; then
+    manual_refuse "the local image ${D} is not a build of ${X:0:7}: local answered ${IMG_VERDICT}"
+  fi
+  CAND_ID="$i"
+  CAND_CONTENT="$c"
+  read_current
+  if [ "$CUR_UNIT" != quadlet ] || [ "$CUR_QUADLET" != "$D" ] || [ "$CUR_DIGEST" != "$D" ] || [ "$CUR_IMAGE" != "$CAND_ID" ]; then
+    manual_refuse "production does not run ${X:0:7} from our Quadlet: expected quadlet=${D} container-image=${CAND_ID} container-digest=${D} unit=quadlet, found quadlet=${CUR_QUADLET} container-image=${CUR_IMAGE} container-digest=${CUR_DIGEST} unit=${CUR_UNIT}"
+  fi
+  if ! PORT=$("$API_PORT_CMD"); then
+    manual_refuse "could not resolve API_PORT — run again"
+  fi
+  h=$(read_health) || h=""
+  if [ "$h" != "$X" ]; then
+    manual_refuse "/health answers releaseSha $([ -n "$h" ] && printf '%s' "${h:0:7}" || printf '(no answer)'), not ${X:0:7} — production does not run what --settled names"
+  fi
+  if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
+    manual_refuse "could not read the boot id — run again"
+  fi
+  INCIDENT=""
+  WINDOW_SHA="$X"
+  WINDOW_DIGEST="$D"
+  WINDOW_ID="$CAND_ID"
+  WINDOW_CONTENT="$CAND_CONTENT"
+  WINDOW_OLD="$DEPLOYED_SHA"
+  WINDOW_PREV_DIGEST="$SETTLED_DIGEST"
+  WINDOW_KIND=resolve
+  WINDOW_MODE=manual
+  WINDOW_PRE=""
+  WINDOW_BOOT="$boot"
+  # No activation: the base is the counter as it is (spec §7.3). S was just seen up and answering.
+  start_watching
+  watch_window 1
+}
+
 # --- the run -----------------------------------------------------------------------------------------
 read_state || state_corrupt
 retry_pending_marks
 # Spec §7.3: an open incident blocks everything but PAUSED and the lock — before the window,
 # before git, before CI.
 if [ -n "$INCIDENT" ]; then
+  if [ "$MANUAL_CMD" = resolve-incident ]; then resolve_incident; fi
   read -r _inc_sha _inc_digest _inc_reason <<< "$INCIDENT"
   if [ "$MANUAL" = 1 ]; then
     manual_refuse "an INCIDENT is open — ${_inc_sha:0:7} (${_inc_digest}): ${_inc_reason}
@@ -1972,6 +2118,9 @@ Nothing deploys until it is resolved: bash deploy/deploy.sh --resolve-incident -
 Nothing deploys until a human resolves it: bash deploy/deploy.sh --resolve-incident --settled <sha>."
   echo "incident open; nothing to do"
   exit 0
+fi
+if [ "$MANUAL_CMD" = resolve-incident ]; then
+  manual_refuse "no INCIDENT is open — there is nothing to resolve"
 fi
 # Plan b2 п.2: an open window is the timer's to finish (spec §7.2) — a manual run never takes it
 # over, nor opens a second one.

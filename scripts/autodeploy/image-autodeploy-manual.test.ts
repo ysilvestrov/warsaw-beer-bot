@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
   advance, checksStub, commitTo, events, fault, git, golden, hostRead, hostSet, imageOf, imageWorld, manual, notes, patchState, publish, push,
-  readState, reply, runImage, seedState, settledState, short, stateAtActivate, stateText, stub, tick, writeStateText,
+  readState, reply, runImage, seedState, settledState, short, stateAtActivate, stateText, stub, tick, writeStateText, writes,
   type Image, type ImageWorld,
 } from './image-autodeploy-harness';
 
@@ -706,5 +706,222 @@ describe('(н) plan b2 п.21: a manual run that cannot verify is refused, and sa
       + 'TEMPFAIL systemctl restart timed out after 180s. The next tick looks at what runs and finishes or cancels it.';
     expect([r.code, r.out, events(m.w), notes(m.w)]).toEqual([1, `${note}\n`, toActivate(m), [note]]);
     expect(readState(m.w)).toEqual(windowAt(m, 'auto'));
+  });
+});
+
+// --- Task 3 of plan b2: `--manual resolve-incident --settled <sha>` ------------------------------------------
+
+interface Inc { w: ImageWorld; x: string; img: Image; s: Image; pres: string[]; seed: Record<string, string> }
+const INC_REASON = 'the manual window failed: health check failed 3 times in a row (last at +320s)';
+const unmarkedOf = (p: string) => p.replace(/-rollback-pre\.db$/, '-pre.db');
+
+/**
+ * X failed in a manual window: an incident, two retained pre snapshots (real files). A human has put the
+ * settled S (base) back: it runs from our Quadlet and answers. `activated_at` is the human's activation,
+ * the clock of the faults.
+ */
+function incidentWorld(settled = true): Inc {
+  const w = imageWorld();
+  const x = push(w, { 'src/a.ts': 'export const a = 2;\n' }, 'feat');
+  const img = publish(w, imageOf(x));
+  hostSet(w, `local/${img.digest}`, '');
+  mkdirSync(w.snapshots, { recursive: true });
+  const pres = [`19700101T000000Z-${short(x)}-rollback-pre.db`, '19700101T010000Z-1111111-rollback-pre.db'].map((n) => join(w.snapshots, n));
+  for (const p of pres) {
+    writeFileSync(p, 'pre\n');
+    writeFileSync(`${p}.sha256`, `${'0'.repeat(64)}\n`);
+  }
+  const s = w.settled;
+  const seed: Record<string, string> = {
+    ...(settled ? settledState(s) : {}),
+    DEPLOYED_SHA: x, DEPLOYED_DIGEST: img.digest, DEPLOYED_ID: img.id, DEPLOYED_CONTENT: img.content,
+    LAST_SEEN_DEPLOYED_SHA: s.sha, LAST_FAILED_SHA: x, RETAINED_PRE: pres.join(' '), INCIDENT: `${x} ${img.digest} ${INC_REASON}`,
+  };
+  seedState(w, seed);
+  hostSet(w, 'activated_at', '100000');
+  return { w, x, img, s, pres, seed };
+}
+const resolveRun = (r: Inc, over: Record<string, string> = {}) => manual(r.w, ['resolve-incident', '--settled', r.s.sha], over);
+const resolveProbe = (r: Inc) => [`resolve ${r.s.sha}`, `attest ${r.s.digest} ${r.s.sha}`, `image local --digest ${r.s.digest}`, 'image current'];
+const resolvedNote = (r: Inc, back: string[], left: string[] = []) =>
+  `✅ merge-deploy: the incident is resolved — ${short(r.s.sha)} is live and settled.`
+  + (back.length > 0 ? `\nBack in ordinary retention: ${back.join(' ')}` : '')
+  + (left.length > 0 ? `\nStill retained — not unmarked; by hand: db-snapshot.sh unmark <path>: ${left.join(' ')}` : '');
+/** S settled by the resolve: the human named the base, so it is observed too (plan b2 п.13). */
+const resolvedState = (r: Inc, extra: Record<string, string> = {}) => ({
+  ...settledState(r.s), PREVIOUS_SHA: r.x, LAST_SEEN_DEPLOYED_SHA: r.s.sha, LAST_FAILED_SHA: r.x, ...extra,
+});
+
+describe('(р-б) resolve-incident refuses (1) without changing anything', () => {
+  const other = imageOf('9'.repeat(40));
+  const found = (r: Inc, q: string, i: string, d: string, u: string) =>
+    `production does not run ${short(r.s.sha)} from our Quadlet: expected quadlet=${r.s.digest} container-image=${r.s.id} `
+    + `container-digest=${r.s.digest} unit=quadlet, found quadlet=${q} container-image=${i} container-digest=${d} unit=${u}\n`;
+  it.each<[string, (r: Inc) => void, (r: Inc) => string, (r: Inc) => string[]]>([
+    ['no image published for S', (r) => hostSet(r.w, `tags/${r.s.sha}`, null),
+      (r) => `⚠️ merge-deploy: no image is published for ${short(r.s.sha)} (no tag ${r.s.sha} in ghcr.io/ysilvestrov/warsaw-beer-bot) — NOT a finding against the commit — run again\n`,
+      (r) => [`resolve ${r.s.sha}`]],
+    ['the attestation fails', (r) => reply(r.w, 'attest', r.s.digest, { code: 1, stdout: 'Error: no attestations found\n' }),
+      (r) => `⛔ merge-deploy: the image of ${short(r.s.sha)} (${r.s.digest}) did not pass attestation (exit 1) — not deploying it; NOT recorded as a failed commit.\nError: no attestations found — run again\n`,
+      (r) => resolveProbe(r).slice(0, 2)],
+    ['the local image has another revision', (r) => reply(r.w, 'local', r.s.digest,
+      { code: 0, stdout: `LOCAL ${r.s.digest} ${r.s.id} content=${r.s.content} revision=${'e'.repeat(40)}\n` }),
+      (r) => `the local image ${r.s.digest} is not a build of ${short(r.s.sha)}: local answered LOCAL ${r.s.digest} ${r.s.id} ${r.s.content} ${'e'.repeat(40)}\n`,
+      (r) => resolveProbe(r).slice(0, 3)],
+    ['the image is not local', (r) => hostSet(r.w, `local/${r.s.digest}`, null),
+      (r) => `the local image ${r.s.digest} is not a build of ${short(r.s.sha)}: local answered NOT_LOCAL ${r.s.digest}\n`,
+      (r) => resolveProbe(r).slice(0, 3)],
+    ['the Quadlet file names another image', (r) => { publish(r.w, other); hostSet(r.w, 'quadlet', other.digest); },
+      (r) => found(r, other.digest, r.s.id, r.s.digest, 'quadlet'), resolveProbe],
+    ['another container runs', (r) => { publish(r.w, other); hostSet(r.w, 'container', other.digest); },
+      (r) => found(r, r.s.digest, other.id, other.digest, 'quadlet'), resolveProbe],
+    ['the unit is not our Quadlet', (r) => hostSet(r.w, 'unit', 'foreign'),
+      (r) => found(r, r.s.digest, r.s.id, r.s.digest, 'foreign'), resolveProbe],
+    ['/health answers another releaseSha', (r) => hostSet(r.w, 'running_sha', 'f'.repeat(40)),
+      (r) => `/health answers releaseSha fffffff, not ${short(r.s.sha)} — production does not run what --settled names\n`, resolveProbe],
+    ['/health does not answer', (r) => hostSet(r.w, 'unhealthy', ''),
+      (r) => `/health answers releaseSha (no answer), not ${short(r.s.sha)} — production does not run what --settled names\n`, resolveProbe],
+  ])('%s', (_name, setup, out, evs) => {
+    const r = incidentWorld();
+    setup(r);
+    const before = stateText(r.w);
+    const res = resolveRun(r);
+    expect([res.code, res.out, stateText(r.w), events(r.w), notes(r.w)]).toEqual([1, out(r), before, evs(r), []]);
+  });
+
+  it('no incident is open', () => {
+    const w = imageWorld();
+    const before = stateText(w);
+    const res = manual(w, ['resolve-incident', '--settled', w.base]);
+    expect([res.code, res.out, stateText(w), events(w), notes(w)])
+      .toEqual([1, 'no INCIDENT is open — there is nothing to resolve\n', before, [], []]);
+  });
+});
+
+describe('(р-в) resolve-incident: the happy path', () => {
+  it('one write clears the incident and opens a watching resolve window; 600 s settle S and return both pres', () => {
+    const r = incidentWorld();
+    const res = resolveRun(r);
+    expect(res.code).toBe(0);
+    const { INCIDENT: _incident, ...rest } = r.seed;
+    expect(writes(r.w)[0]).toEqual({
+      ...rest,
+      WINDOW_SHA: r.s.sha, WINDOW_DIGEST: r.s.digest, WINDOW_ID: r.s.id, WINDOW_CONTENT: r.s.content, WINDOW_OLD: r.x,
+      WINDOW_PREV_DIGEST: r.s.digest, WINDOW_KIND: 'resolve', WINDOW_MODE: 'manual', WINDOW_PHASE: 'watching',
+      WINDOW_START: '100000', WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '0', WINDOW_LAST_READ: '100000',
+    });
+    expect(events(r.w)).toEqual([
+      ...resolveProbe(r), ...polls(61), `image prune --keep ${r.s.digest}`,
+      'unmark 19700101T000000Z-' + short(r.x) + '-rollback-pre.db', 'unmark 19700101T010000Z-1111111-rollback-pre.db', 'prune',
+    ]);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(readdirSync(r.w.snapshots).sort()).toEqual(r.pres.map(unmarkedOf).flatMap((p) => [p, `${p}.sha256`]).map((p) => p.slice(r.w.snapshots.length + 1)).sort());
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, r.pres.map(unmarkedOf))}`]);
+  });
+
+  it('an incident whose second write never happened (the window still in the state): its pre is kept first', () => {
+    const r = incidentWorld();
+    const pre = join(r.w.snapshots, `19700102T034640Z-${short(r.x)}-pre.db`);
+    writeFileSync(pre, 'pre\n');
+    writeFileSync(`${pre}.sha256`, `${'0'.repeat(64)}\n`);
+    seedState(r.w, {
+      ...r.seed,
+      WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
+      WINDOW_PREV_DIGEST: r.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'manual', WINDOW_PHASE: 'watching', WINDOW_PRE: pre,
+      WINDOW_START: '99000', WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '99320',
+    });
+    const res = resolveRun(r);
+    expect(res.code).toBe(0);
+    const marked = pre.replace(/-pre\.db$/, '-rollback-pre.db');
+    expect(writes(r.w)[0]).toEqual({ ...r.seed, RETAINED_PRE: [...r.pres, marked].join(' ') });
+    expect(events(r.w).slice(0, 5)).toEqual([`mark 19700102T034640Z-${short(r.x)}-pre.db`, ...resolveProbe(r)]);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, [...r.pres, marked].map(unmarkedOf))}`]);
+  });
+});
+
+describe('(р-г) one unmark fails', () => {
+  it('it stays retained and the notice names it; S settles all the same (0)', () => {
+    const r = incidentWorld();
+    rmSync(`${r.pres[1]}.sha256`);
+    const res = resolveRun(r);
+    expect(res.code).toBe(0);
+    expect(readState(r.w)).toEqual(resolvedState(r, { RETAINED_PRE: r.pres[1] }));
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, [unmarkedOf(r.pres[0])], [r.pres[1]])}`]);
+  });
+});
+
+describe('(р-ґ) the resolve window fails', () => {
+  it('the incident again, without blame (3): LAST_FAILED_SHA as it was, no activation, the pres still retained', () => {
+    const r = incidentWorld();
+    fault(r.w, 'health', 300, 99999, r.s.digest);
+    const res = resolveRun(r);
+    const reason = 'the resolve window failed: health check failed 3 times in a row (last at +320s)';
+    expect(res.code).toBe(3);
+    expect(events(r.w)).toEqual([...resolveProbe(r), ...polls(33)]);
+    expect(readState(r.w)).toEqual({ ...r.seed, INCIDENT: `${r.s.sha} ${r.s.digest} ${reason}` });
+    expect(readdirSync(r.w.snapshots).sort()).toEqual(r.pres.flatMap((p) => [p, `${p}.sha256`]).map((p) => p.slice(r.w.snapshots.length + 1)).sort());
+    expect(notes(r.w)).toEqual([
+      `[manual] 🔥 merge-deploy INCIDENT: ${short(r.s.sha)} (${r.s.digest}) — ${reason}. Nothing was rolled back automatically (a manual window); the database is untouched.\n`
+      + 'Pre-deploy snapshot: none (the window had no pre snapshot)\n'
+      + 'Nothing deploys until a human restores production and runs: bash deploy/deploy.sh --resolve-incident --settled <sha>',
+    ]);
+  });
+});
+
+describe('(р-д) an interrupted resolve window is finished by the tick', () => {
+  it('killed mid-window: no incident in the state, so the tick resumes it, settles S and unmarks', () => {
+    const r = incidentWorld();
+    fault(r.w, 'kill', 300, 301, r.s.digest);
+    expect(resolveRun(r).code).toBe(null);
+    const mid = readState(r.w);
+    expect([mid.INCIDENT, mid.WINDOW_KIND, mid.WINDOW_MODE, mid.WINDOW_PHASE]).toEqual([undefined, 'resolve', 'manual', 'watching']);
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w).slice(4 + 30)).toEqual([
+      'image current', ...polls(31), `image prune --keep ${r.s.digest}`,
+      'unmark 19700101T000000Z-' + short(r.x) + '-rollback-pre.db', 'unmark 19700101T010000Z-1111111-rollback-pre.db', 'prune',
+    ]);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(notes(r.w)).toEqual([resolvedNote(r, r.pres.map(unmarkedOf))]);
+  });
+});
+
+describe('(р-е) resolve when nothing was ever settled (an incident of the first image release)', () => {
+  it('WINDOW_PREV_DIGEST is empty and valid; the settle gives the first SETTLED_*', () => {
+    const r = incidentWorld(false);
+    const res = resolveRun(r);
+    expect(res.code).toBe(0);
+    expect(writes(r.w)[0].WINDOW_PREV_DIGEST).toBe(undefined);
+    expect(writes(r.w)[0].WINDOW_KIND).toBe('resolve');
+    expect(readState(r.w)).toEqual(resolvedState(r));
+  });
+});
+
+describe('(р-ж) the resolved base is observed, whoever settles it', () => {
+  it('a resolve to a commit behind the last observation, finished by the tick: LAST_SEEN is S, and no fence follows', () => {
+    const r = incidentWorld();
+    patchState(r.w, { LAST_SEEN_DEPLOYED_SHA: r.x });
+    fault(r.w, 'kill', 300, 301, r.s.digest);
+    expect(resolveRun(r).code).toBe(null);
+    expect(tick(r.w).code).toBe(0);
+    expect(readState(r.w)).toEqual(resolvedState(r));
+    expect(tick(r.w).code).toBe(0);
+    expect([readState(r.w).REGRESSION_FROM_SHA, notes(r.w)]).toEqual([undefined, [resolvedNote(r, r.pres.map(unmarkedOf))]]);
+  });
+});
+
+describe('(р-з) at most five unmarks per settle', () => {
+  it('six retained: five go back, the sixth stays and is named', () => {
+    const r = incidentWorld();
+    const more = ['2', '3', '4', '5'].map((n) => join(r.w.snapshots, `19700101T0${n}0000Z-${n.repeat(7)}-rollback-pre.db`));
+    for (const p of more) {
+      writeFileSync(p, 'pre\n');
+      writeFileSync(`${p}.sha256`, `${'0'.repeat(64)}\n`);
+    }
+    const all = [...r.pres, ...more];
+    patchState(r.w, { RETAINED_PRE: all.join(' ') });
+    expect(resolveRun(r).code).toBe(0);
+    expect(readState(r.w)).toEqual(resolvedState(r, { RETAINED_PRE: all[5] }));
+    expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, all.slice(0, 5).map(unmarkedOf), [all[5]])}`]);
   });
 });

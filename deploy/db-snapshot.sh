@@ -11,6 +11,7 @@
 #   db-snapshot.sh post <db> <out-dir>         file copy of db, -wal, -shm (bot STOPPED)
 #   db-snapshot.sh mark-rollback <x-pre.db>    rename to x-rollback-pre.db, print it
 #   db-snapshot.sh mark-unverified <x-pre.db>  rename to x-unverified-pre.db, print it
+#   db-snapshot.sh unmark <x-*-pre.db>         rename a marked one back to x-pre.db, print it
 #   db-snapshot.sh discard <x-pre.db>          delete an UNMARKED pre snapshot
 #   db-snapshot.sh restore <snap.db> <db>      verify sha256, atomic replace, drop -wal/-shm
 #   db-snapshot.sh prune <dir> <keep>          keep the newest <keep> settled *-pre.db
@@ -18,7 +19,7 @@
 # Exit: 0 ok, 1 refused or failed (reason on stderr), 64 usage.
 set -euo pipefail
 
-usage() { echo "usage: db-snapshot.sh snapshot|post|mark-rollback|mark-unverified|discard|restore|prune ..." >&2; exit 64; }
+usage() { echo "usage: db-snapshot.sh snapshot|post|mark-rollback|mark-unverified|unmark|discard|restore|prune ..." >&2; exit 64; }
 die() { echo "db-snapshot: $*" >&2; exit 1; }
 
 # P1: VACUUM INTO, never the backup API. The backup API restarts on every
@@ -81,6 +82,24 @@ cmd_mark() {
   echo "$marked"
 }
 
+# The image deployer's resolved incident (plan 2026-10-21 b2-core, Task 3): the human closed it, so
+# the evidence goes back to ordinary retention and prune counts it again. Exactly one rename pair or
+# none: everything is checked before the first mv, and nothing existing is ever overwritten.
+cmd_unmark() {
+  local marked="$1" pre
+  case "$marked" in
+    *-rollback-pre.db) pre="${marked%-rollback-pre.db}-pre.db" ;;
+    *-unverified-pre.db) pre="${marked%-unverified-pre.db}-pre.db" ;;
+    *) die "not a marked pre snapshot: $marked" ;;
+  esac
+  [ -f "$marked" ] || die "no snapshot at $marked"
+  [ -f "$marked.sha256" ] || die "no checksum for $marked"
+  [ ! -e "$pre" ] && [ ! -e "$pre.sha256" ] || die "refusing to overwrite $pre"
+  mv "$marked" "$pre"
+  mv "$marked.sha256" "$pre.sha256"
+  echo "$pre"
+}
+
 # R9: a snapshot taken for a deploy that never happened (trial refusal) is
 # not a settled deploy; prune must not count it among the newest N.
 cmd_discard() {
@@ -136,6 +155,7 @@ case "$sub" in
   post)          [ $# -eq 2 ] || usage; cmd_post "$@" ;;
   mark-rollback)   [ $# -eq 1 ] || usage; cmd_mark "$1" rollback ;;
   mark-unverified) [ $# -eq 1 ] || usage; cmd_mark "$1" unverified ;;
+  unmark)          [ $# -eq 1 ] || usage; cmd_unmark "$1" ;;
   discard)         [ $# -eq 1 ] || usage; cmd_discard "$1" ;;
   restore)       [ $# -eq 2 ] || usage; cmd_restore "$@" ;;
   prune)         [ $# -eq 2 ] || usage; cmd_prune "$@" ;;

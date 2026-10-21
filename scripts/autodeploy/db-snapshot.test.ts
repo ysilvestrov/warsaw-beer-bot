@@ -292,3 +292,79 @@ describe('db-snapshot.sh discard (R9)', () => {
     expect(readdirSync(dir)).toEqual(['20260930T120000Z-abc1234-rollback-pre.db']);
   });
 });
+
+describe('db-snapshot.sh unmark (plan b2 Task 3: a resolved incident returns its evidence to retention)', () => {
+  /** A pre snapshot and its checksum under `name` in a fresh directory. */
+  function pair(name: string): string {
+    const dir = makeTempDirectory('wbb-snap-');
+    writeFileSync(join(dir, name), 'db');
+    writeFileSync(join(dir, `${name}.sha256`), 'h\n');
+    return dir;
+  }
+
+  it.each([
+    ['a rollback snapshot', '20260930T120000Z-abc1234-rollback-pre.db'],
+    ['an unverified snapshot', '20260930T120000Z-abc1234-unverified-pre.db'],
+  ])('renames %s and its checksum back to -pre.db and prints the new path', (_kind, name) => {
+    const dir = pair(name);
+    const r = snap('unmark', join(dir, name));
+    expect([r.code, r.out, r.err]).toEqual([0, `${join(dir, '20260930T120000Z-abc1234-pre.db')}\n`, '']);
+    expect(readdirSync(dir).sort()).toEqual(['20260930T120000Z-abc1234-pre.db', '20260930T120000Z-abc1234-pre.db.sha256']);
+    expect(readFileSync(join(dir, '20260930T120000Z-abc1234-pre.db'), 'utf8')).toBe('db');
+  });
+
+  it('refuses an unmarked snapshot, and renames nothing', () => {
+    const dir = pair('20260930T120000Z-abc1234-pre.db');
+    const p = join(dir, '20260930T120000Z-abc1234-pre.db');
+    const r = snap('unmark', p);
+    expect([r.code, r.out, r.err]).toEqual([1, '', `db-snapshot: not a marked pre snapshot: ${p}\n`]);
+    expect(readdirSync(dir).sort()).toEqual(['20260930T120000Z-abc1234-pre.db', '20260930T120000Z-abc1234-pre.db.sha256']);
+  });
+
+  it('refuses a snapshot that is not there', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const p = join(dir, '20260930T120000Z-abc1234-rollback-pre.db');
+    const r = snap('unmark', p);
+    expect([r.code, r.err, readdirSync(dir)]).toEqual([1, `db-snapshot: no snapshot at ${p}\n`, []]);
+  });
+
+  it('refuses a snapshot without its checksum, and renames nothing', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const p = join(dir, '20260930T120000Z-abc1234-rollback-pre.db');
+    writeFileSync(p, 'db');
+    const r = snap('unmark', p);
+    expect([r.code, r.err, readdirSync(dir)]).toEqual([1, `db-snapshot: no checksum for ${p}\n`, ['20260930T120000Z-abc1234-rollback-pre.db']]);
+  });
+
+  it.each([
+    ['the snapshot', '20260930T120000Z-abc1234-pre.db'],
+    ['the checksum', '20260930T120000Z-abc1234-pre.db.sha256'],
+  ])('refuses when %s it would become already exists, and renames nothing', (_what, existing) => {
+    const dir = pair('20260930T120000Z-abc1234-rollback-pre.db');
+    writeFileSync(join(dir, existing), 'other');
+    const r = snap('unmark', join(dir, '20260930T120000Z-abc1234-rollback-pre.db'));
+    expect([r.code, r.err]).toEqual([1, `db-snapshot: refusing to overwrite ${join(dir, '20260930T120000Z-abc1234-pre.db')}\n`]);
+    expect(readdirSync(dir).sort()).toEqual([existing, '20260930T120000Z-abc1234-rollback-pre.db', '20260930T120000Z-abc1234-rollback-pre.db.sha256'].sort());
+    expect(readFileSync(join(dir, existing), 'utf8')).toBe('other');
+  });
+
+  it('an unmarked snapshot counts for prune again: the oldest of four is pruned with keep=3', () => {
+    const dir = pair('20260901T000000Z-aaaaaaa-rollback-pre.db');
+    for (const n of ['20260902T000000Z-bbbbbbb-pre.db', '20260903T000000Z-ccccccc-pre.db', '20260904T000000Z-ddddddd-pre.db']) {
+      writeFileSync(join(dir, n), n);
+      writeFileSync(join(dir, `${n}.sha256`), 'h\n');
+    }
+    expect(snap('unmark', join(dir, '20260901T000000Z-aaaaaaa-rollback-pre.db')).code).toBe(0);
+    const r = snap('prune', dir, '3');
+    expect([r.code, r.out]).toEqual([0, `pruned ${join(dir, '20260901T000000Z-aaaaaaa-pre.db')}\n`]);
+    expect(readdirSync(dir).sort()).toEqual([
+      '20260902T000000Z-bbbbbbb-pre.db', '20260902T000000Z-bbbbbbb-pre.db.sha256',
+      '20260903T000000Z-ccccccc-pre.db', '20260903T000000Z-ccccccc-pre.db.sha256',
+      '20260904T000000Z-ddddddd-pre.db', '20260904T000000Z-ddddddd-pre.db.sha256',
+    ]);
+  });
+
+  it('takes exactly one path (usage 64 otherwise)', () => {
+    expect([snap('unmark').code, snap('unmark', 'a', 'b').code]).toEqual([64, 64]);
+  });
+});

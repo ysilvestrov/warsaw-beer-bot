@@ -664,6 +664,11 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
   ].join('\n');
   const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
+  /** The window of `text` as a resolve window: manual, and (unless `withPre`) without WINDOW_PRE. */
+  const resolveWindow = (_w: ImageWorld, text: string, withPre = false) => {
+    const t = text.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=resolve').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
+    return withPre ? t : t.replace(/^WINDOW_PRE=.*\n/m, '');
+  };
   const CORRUPT: Array<[string, (w: ImageWorld) => string, string]> = [
     ['an unknown key', (w) => `${good(w)}DEPLOYED_TAG=v1\n`, 'line 9: unknown key DEPLOYED_TAG'],
     // Spec amendment 3 (V14): the key is gone; a state that still carries it was not written by this controller.
@@ -696,6 +701,22 @@ describe('(і) the state: parsed, validated, written atomically', () => {
       'WINDOW_PHASE is set but WINDOW_KIND is not'],
     ['an unknown WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=manual'),
       'WINDOW_KIND has a value that is not of its format'],
+    // Plan b2 п.15: a resolve window (closing an incident) is manual, only watches, has no pre, and
+    // rolls back to the settled image exactly when there is one.
+    ['a resolve window in auto mode', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`).replace('WINDOW_MODE=manual', 'WINDOW_MODE=auto'),
+      'WINDOW_KIND is resolve but WINDOW_MODE is auto (a resolve window is always manual)'],
+    ['a resolve window that is activating', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'activating')}`),
+      'WINDOW_KIND is resolve but WINDOW_PHASE is activating (a resolve window only watches)'],
+    ['a resolve window with a pre snapshot', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`, true),
+      'WINDOW_KIND is resolve but WINDOW_PRE is set (closing an incident takes no snapshot)'],
+    ['a resolve window without WINDOW_PREV_DIGEST while an image is settled',
+      (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`).replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
+      'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
+    ['a resolve window with WINDOW_PREV_DIGEST while nothing is settled',
+      (w) => resolveWindow(w, `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'watching')}`),
+      'WINDOW_KIND is resolve and nothing is settled, but WINDOW_PREV_DIGEST is set'],
+    ['a deploy window without WINDOW_PREV_DIGEST', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
+      'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
     ['WINDOW_KIND without a window', (w) => `${good(w)}WINDOW_KIND=deploy\n`, 'WINDOW_KIND is set but WINDOW_PHASE is not'],
     ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
     // Round 2, item 3: snapshot paths — no glob character, no space, one space between list elements.

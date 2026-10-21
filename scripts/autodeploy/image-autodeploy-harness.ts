@@ -371,6 +371,7 @@ function writeFakes(w: ImageWorld): Record<string, string> {
     ].join('\n')),
     WBB_PRUNE_CMD: stub(b, 'prune', `echo prune >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" prune "${w.snapshots}" 3`),
     WBB_MARK_CMD: stub(b, 'mark', `echo "mark $(basename "$1")" >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" mark-rollback "$1"`),
+    WBB_UNMARK_CMD: stub(b, 'unmark', `echo "unmark $(basename "$1")" >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" unmark "$1"`),
     WBB_DISCARD_CMD: stub(b, 'discard', `echo "discard $(basename "$1")" >> "${w.eventsLog}"; exec bash "${DB_SNAPSHOT}" discard "$1"`),
     WBB_SNAPSHOT_DIR: w.snapshots,
     WBB_FAKE_CLOCK: w.clock,
