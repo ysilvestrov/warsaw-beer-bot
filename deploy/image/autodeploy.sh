@@ -367,11 +367,32 @@ notify() {
 # again; nothing is recorded, not even the daily marker, so the timer's own notice is not muted.
 halt() { # <daily marker> <message> [the tick's exit]
   if [ "$MANUAL" = 1 ]; then
-    printf '%s\n' "$2" >&2
+    printf '%s\n' "$(manual_text "$2")" >&2
     exit 1
   fi
   once_a_day "$1" "$2"
   exit "${3:-0}"
+}
+# Plan b2 п.21: a stop that leaves an open window (an activation not confirmed) may have changed
+# production — the chat is told, as from the tick (§7.4 "the same messages"), without the daily
+# marker; the window is the timer's to finish.
+halt_window() { # <daily marker> <message>
+  if [ "$MANUAL" = 1 ]; then
+    notify "$(manual_text "$2")"
+    exit 1
+  fi
+  once_a_day "$1" "$2"
+  exit 0
+}
+# The tick's text says the next tick retries; the human's says that he does (plan b2 п.21).
+manual_text() {
+  local m="$1"
+  m="${m//; retrying next tick./}"
+  m="${m// — retrying next tick./}"
+  m="${m// — waiting;/ —}"
+  m="${m% Waiting.}"
+  m="${m%.}"
+  printf '%s — run again' "$m"
 }
 # A manual run's own refusal: told to the human in front of it; this writes nothing, sends nothing.
 manual_refuse() {
@@ -761,10 +782,20 @@ once_a_day() {
   write_state
 }
 
+# Plan b2 п.19: a failure is recorded against a commit only when it is the head of main (as this
+# run fetched it): the tick deploys nothing else, so a record of an older commit — a manual deploy
+# behind a head that already failed — would only overwrite the head's and let the tick redeploy
+# it. A head that cannot be read records as before.
+is_main_head() {
+  local head
+  head=$(git -C "$REPO" rev-parse -q --verify "origin/main^{commit}" 2>/dev/null) || return 0
+  [ "$head" = "$1" ]
+}
+
 # A gate the COMMIT failed. Recorded, so the same head is never retried; the next merge is.
 refuse() {
   notify "⛔ merge-deploy refused ${1:0:7}: $2"
-  LAST_FAILED_SHA="$1"
+  if is_main_head "$1"; then LAST_FAILED_SHA="$1"; fi
   write_state
   exit 1
 }
@@ -834,7 +865,7 @@ add_unique() {
 # (the PRs whose code-only rollback is not proven safe) and SCAN_UNREAD=1 with the reasons in
 # UNREAD (what could not be read could carry such a label). HOLDS keeps every reason as before.
 scan_range() {
-  local x="$1" paths commits c out pr labels f l start up last
+  local x="$1" paths commits back="" f start last
   HOLDS=()
   RANGE_PRS=()
   CONTRACT_PRS=()
@@ -850,23 +881,39 @@ scan_range() {
     _unread "could not list the commits"
     return 0
   fi
+  # Plan b2 п.20: a downgrade (forced by hand; the tick never scans one) removes the commits of
+  # X..DEPLOYED_SHA, and running the old code on the database the new one migrated is exactly the
+  # rollback their contract labels are about. Their labels are read too; nothing else of them counts.
+  if ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$x" 2>/dev/null; then
+    if ! back=$(git -C "$REPO" rev-list "${x}..${DEPLOYED_SHA}"); then
+      _unread "could not list the commits the downgrade removes"
+      return 0
+    fi
+  fi
   if ! start=$(uptime_now); then
     _unread "could not read the monotonic clock for the PR-label scan"
     return 0
   fi
   last=$start
+  _scan_labels forward "$commits" || return 0
+  _scan_labels removed "$back" || return 0
+}
+# The labels of one list of commits; `forward` ones are deployed (RANGE_PRS, holds), `removed` ones
+# only count for CONTRACT_PRS. Shares scan_range's deadline (start, last). 1 when it ran out of time.
+_scan_labels() {
+  local dir="$1" commits="$2" c out pr labels l up
   while IFS= read -r c; do
     if [ -z "$c" ]; then continue; fi
     # A range too long to read in time is a hold, never a pass (a monotonic deadline).
     # Unreadable, or behind its previous reading: a clock that cannot bound the scan is a hold.
     if ! up=$(uptime_now) || [ "$up" -lt "$last" ]; then
       _unread "could not read the monotonic clock for the PR-label scan"
-      break
+      return 1
     fi
     last=$up
     if [ $(( up - start )) -ge "$STEP_TIMEOUT_SCAN_S" ]; then
       _unread "could not read the PR labels of the whole range within ${STEP_TIMEOUT_SCAN_S}s"
-      break
+      return 1
     fi
     if ! out=$("$PR_LABELS_CMD" "$c" 2>/dev/null); then
       _unread "could not read PR labels for ${c:0:7}"
@@ -874,17 +921,23 @@ scan_range() {
     fi
     while IFS=$'\t' read -r pr labels; do
       if [ -z "$pr" ]; then continue; fi
-      add_unique RANGE_PRS "#$pr"
-      case ",$labels," in
-        *,deploy:hold,*) add_unique HOLDS "PR #$pr carries deploy:hold — https://github.com/${GH_REPO}/pull/$pr" ;;
-      esac
+      if [ "$dir" = forward ]; then
+        add_unique RANGE_PRS "#$pr"
+        case ",$labels," in
+          *,deploy:hold,*) add_unique HOLDS "PR #$pr carries deploy:hold — https://github.com/${GH_REPO}/pull/$pr" ;;
+        esac
+      fi
       # Spec §6.4: compatibility for a code-only rollback is not proven — a human deploys it,
       # and its window is manual (no automatic rollback).
       for l in rollback:unsafe migration:contract; do
         case ",$labels," in
           *",$l,"*)
-            add_unique HOLDS "PR #$pr carries $l — a code-only rollback is not proven safe; deploy it by hand with bash deploy/deploy.sh --ack-incompatible — https://github.com/${GH_REPO}/pull/$pr"
-            add_unique CONTRACT_PRS "PR #$pr carries $l — https://github.com/${GH_REPO}/pull/$pr" ;;
+            if [ "$dir" = forward ]; then
+              add_unique HOLDS "PR #$pr carries $l — a code-only rollback is not proven safe; deploy it by hand with bash deploy/deploy.sh --ack-incompatible — https://github.com/${GH_REPO}/pull/$pr"
+              add_unique CONTRACT_PRS "PR #$pr carries $l — https://github.com/${GH_REPO}/pull/$pr"
+            else
+              add_unique CONTRACT_PRS "PR #$pr carries $l and the downgrade removes it — https://github.com/${GH_REPO}/pull/$pr"
+            fi ;;
         esac
       done
     done <<< "$out"
@@ -1099,11 +1152,18 @@ noop_or_continue() {
 }
 
 # --- the path to production (plan п.9–14) -----------------------------------------------------------
-# Plan b2 п.11 (#768): only the timer observes a transition of production. A manual run records what
-# it deployed (DEPLOYED_SHA) but not that it was observed, so a downgrade forced by hand is seen by
-# the next tick as one — "went BACKWARDS" — and fenced, as with the old deploy.sh.
+# Plan b2 п.11, п.18 (#768): LAST_SEEN_DEPLOYED_SHA records only PROVEN forward motion — a settled or
+# noop X that descends from the last observation (or equals it, or there is none). Anything else —
+# an activation, a rollback, a manual run, a downgrade a tick only finished, a git that cannot
+# answer — leaves it, and the next tick's observe_deployment judges the transition: forward
+# quietly, backwards with the fence. So a downgrade forced by hand is fenced even when its window
+# was interrupted and the timer settled it.
 observed() {
-  if [ "$MANUAL" = 0 ]; then LAST_SEEN_DEPLOYED_SHA="$1"; fi
+  [ "$MANUAL" = 0 ] || return 0
+  if [ -z "$LAST_SEEN_DEPLOYED_SHA" ] || [ "$LAST_SEEN_DEPLOYED_SHA" = "$1" ] \
+     || git -C "$REPO" merge-base --is-ancestor "$LAST_SEEN_DEPLOYED_SHA" "$1" 2>/dev/null; then
+    LAST_SEEN_DEPLOYED_SHA="$1"
+  fi
 }
 # Every key of an open window (spec §7.1). Cleared together when the window ends in any way.
 clear_window() {
@@ -1223,7 +1283,7 @@ retry_pending_marks() {
 # complete). Never returns.
 open_incident() {
   local blame="$1" reason="${2//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE"
-  if [ "$blame" = 1 ]; then LAST_FAILED_SHA="$x"; fi
+  if [ "$blame" = 1 ] && is_main_head "$x"; then LAST_FAILED_SHA="$x"; fi
   INCIDENT="$x $d $reason"
   write_state
   retain_pre
@@ -1281,7 +1341,6 @@ wait_for_settled() {
 rolled_back() {
   local x="$WINDOW_SHA" old="$WINDOW_OLD" reason="$WINDOW_REASON" pre="${PRE_NOTE:-$WINDOW_PRE}"
   DEPLOYED_SHA="$old"
-  observed "$old"
   DEPLOYED_DIGEST="$SETTLED_DIGEST"
   DEPLOYED_ID="$SETTLED_ID"
   DEPLOYED_CONTENT="$SETTLED_CONTENT"
@@ -1326,7 +1385,7 @@ window_failed() {
   local reason="${1//$'\n'/ }"
   if [ "$WINDOW_MODE" = manual ]; then open_incident 1 "the manual window failed: ${reason}"; fi
   # The FIRST write: whatever happens below, X is not retried.
-  LAST_FAILED_SHA="$WINDOW_SHA"
+  if is_main_head "$WINDOW_SHA"; then LAST_FAILED_SHA="$WINDOW_SHA"; fi
   WINDOW_PHASE=rolling-back
   WINDOW_REASON="$reason"
   ROLLBACK_ATTEMPTS=0
@@ -1492,7 +1551,6 @@ activate_candidate() {
   case "$IMG_VERDICT" in
     "ACTIVATED $D")
       DEPLOYED_SHA="$X"
-      observed "$X"
       DEPLOYED_DIGEST="$D"
       DEPLOYED_ID="$CAND_ID"
       DEPLOYED_CONTENT="$CAND_CONTENT"
@@ -1508,7 +1566,7 @@ activate_candidate() {
       image_call current
       read -r kind q i d u <<< "$IMG_VERDICT"
       if [ "$kind" != CURRENT ]; then
-        halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}) and what production runs could not be read: ${IMG_VERDICT}. The window stays open; the next tick looks again."
+        halt_window LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}) and what production runs could not be read: ${IMG_VERDICT}. The window stays open; the next tick looks again."
       fi
       if [ "$u" = foreign ]; then
         open_incident 0 "the unit is not our Quadlet (unit=foreign); the activation was refused"
@@ -1517,14 +1575,14 @@ activate_candidate() {
         cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
       fi
       if [ "$q" = "$WINDOW_DIGEST" ]; then
-        halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}), but the Quadlet file already names it; the window stays activating and the next tick activates again."
+        halt_window LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} was refused (${why}), but the Quadlet file already names it; the window stays activating and the next tick activates again."
       fi
       open_incident 0 "the activation of ${X:0:7} was refused and the Quadlet file names ${q}, neither ${X:0:7} nor the settled image"
       ;;
     *)
       # 75 or anything else: whether production changed is not known. The window stays
       # `activating`; the next tick looks at what runs (spec §7.2 rows 1–3).
-      halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
+      halt_window LAST_ASSESS_NOTICE "⚠️ merge-deploy: the activation of ${X:0:7} (${D}) could not be confirmed: ${IMG_VERDICT}. The next tick looks at what runs and finishes or cancels it."
       ;;
   esac
 }
@@ -1547,7 +1605,7 @@ settled_is_local() {
 # The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
 # activate, the window watched. Never returns.
 deploy_pipeline() {
-  local pre name boot kind err acked
+  local pre name boot kind err acked why
   if ! production_is_record; then
     halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
   fi
@@ -1608,12 +1666,16 @@ $(tail -n 20 <<< "$IMG_ERR")" ;;
       else
         # Spec §6.3: proven incompatibility — a hold, not a failed SHA. It concerns exactly this
         # pair of images: a new head or a new settled image clears it. A manual run records the
-        # same proven fact (plan b2 п.10), and is refused: 1, where the tick holds with 0.
-        CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
-        CANDIDATE_HELD_WHY="${IMG_VERDICT#COMPAT_FAILED }"
-        LAST_HOLD_NOTICE=$(today)
-        write_state
-        notify "⏸ merge-deploy: ${X:0:7} is HELD — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated, so a code-only rollback is not possible: ${CANDIDATE_HELD_WHY}
+        # same proven fact (plan b2 п.10), and is refused: 1, where the tick holds with 0 — but
+        # only for main's head (п.19): a hold of an older commit would replace the head's.
+        why="${IMG_VERDICT#COMPAT_FAILED }"
+        if is_main_head "$X"; then
+          CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
+          CANDIDATE_HELD_WHY="$why"
+          LAST_HOLD_NOTICE=$(today)
+          write_state
+        fi
+        notify "⏸ merge-deploy: ${X:0:7} is HELD — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated, so a code-only rollback is not possible: ${why}
 $(tail -n 20 <<< "$IMG_ERR")
 Deploy it by hand, without an automatic rollback: bash deploy/deploy.sh --ack-incompatible"
         exit "$MANUAL"
@@ -1720,7 +1782,6 @@ resume_window() {
       # Row 3: D already runs — no second restart; the window starts now.
       if [ "$d" = "$WINDOW_DIGEST" ] && [ "$i" = "$WINDOW_ID" ]; then
         DEPLOYED_SHA="$X"
-        LAST_SEEN_DEPLOYED_SHA="$X"
         DEPLOYED_DIGEST="$D"
         DEPLOYED_ID="$CAND_ID"
         DEPLOYED_CONTENT="$CAND_CONTENT"

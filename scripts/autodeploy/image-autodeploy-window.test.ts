@@ -336,6 +336,7 @@ describe('(є) the code-only rollback', () => {
     tick(d.w);
     expect(stateAtActivate(d.w, 2)).toEqual({
       ...settledAt(d.img, d.x), SETTLED_SHA: d.s.sha, SETTLED_DIGEST: d.s.digest, SETTLED_ID: d.s.id, SETTLED_CONTENT: d.s.content,
+      LAST_SEEN_DEPLOYED_SHA: d.s.sha,
       LAST_FAILED_SHA: d.x, RETAINED_PRE: marked(d),
       WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content, WINDOW_OLD: d.w.base,
       WINDOW_PREV_DIGEST: d.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'auto', WINDOW_PHASE: 'rolling-back', WINDOW_PRE: marked(d), WINDOW_START: '100600',
@@ -388,6 +389,7 @@ describe('(є) the code-only rollback', () => {
     expect(r.code).toBe(3);
     expect(readState(d.w)).toEqual({
       ...settledAt(d.img, d.x), SETTLED_SHA: d.s.sha, SETTLED_DIGEST: d.s.digest, SETTLED_ID: d.s.id, SETTLED_CONTENT: d.s.content,
+      LAST_SEEN_DEPLOYED_SHA: d.s.sha,
       LAST_FAILED_SHA: d.x, RETAINED_PRE: marked(d), INCIDENT: `${d.x} ${d.img.digest} ${reason}`,
     });
     expect(notes(d.w)).toEqual([

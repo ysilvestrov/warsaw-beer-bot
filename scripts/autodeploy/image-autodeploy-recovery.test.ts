@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
-  events, fault, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply, runImage,
+  events, fault, git, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply, runImage,
   markThenKill, seedState, settledState, short, stub, tick, writes, type Image, type ImageWorld, type Reply,
 } from './image-autodeploy-harness';
 
@@ -31,6 +31,8 @@ function recoveryWorld(): Rec {
   const x = push(w, { 'src/a.ts': 'export const a = 2;\n' }, 'feat');
   const img = publish(w, imageOf(x));
   hostSet(w, `local/${img.digest}`, '');
+  // The tick that wrote the window had fetched X as main's head (plan b2 п.19 reads it).
+  git(w.repo, 'fetch', '-q', 'origin');
   const preName = `19700102T035640Z-${short(x)}-pre.db`;
   const pre = join(w.snapshots, preName);
   mkdirSync(w.snapshots, { recursive: true });
@@ -48,7 +50,8 @@ const activating = (r: Rec): Record<string, string> => ({
   WINDOW_PREV_DIGEST: r.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating', WINDOW_PRE: r.pre, WINDOW_BOOT: BOOT_ID,
 });
 const watching = (r: Rec, extra: Record<string, string> = {}): Record<string, string> => ({
-  ...activating(r), DEPLOYED_SHA: r.x, LAST_SEEN_DEPLOYED_SHA: r.x,
+  // Plan b2 п.18: an activation records DEPLOYED_* but not LAST_SEEN (proven forward motion only).
+  ...activating(r), DEPLOYED_SHA: r.x,
   DEPLOYED_DIGEST: r.img.digest, DEPLOYED_ID: r.img.id, DEPLOYED_CONTENT: r.img.content,
   WINDOW_PHASE: 'watching', WINDOW_START: '100600', WINDOW_LAST_READ: '100890', WINDOW_FAILS: '0', WINDOW_NRESTARTS: '0',
   ...extra,
@@ -73,7 +76,8 @@ const rolledBackTo = (r: Rec) => ({
 });
 /** An incident opened in a window that had activated D. */
 const incidentState = (r: Rec, reason: string) => ({
-  ...settledState(r.s), DEPLOYED_SHA: r.x, LAST_SEEN_DEPLOYED_SHA: r.x,
+  // Plan b2 п.18: neither the activation nor the incident observes a transition — LAST_SEEN stays at S.
+  ...settledState(r.s), DEPLOYED_SHA: r.x, LAST_SEEN_DEPLOYED_SHA: r.s.sha,
   DEPLOYED_DIGEST: r.img.digest, DEPLOYED_ID: r.img.id, DEPLOYED_CONTENT: r.img.content,
   MAIN_SEEN_SHA: r.x, MAIN_SEEN_S: '100000', LAST_FAILED_SHA: r.x, RETAINED_PRE: marked(r), INCIDENT: `${r.x} ${r.img.digest} ${reason}`,
 });

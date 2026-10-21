@@ -4,7 +4,7 @@ import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
-  advance, checksStub, commitTo, events, fault, git, golden, hostRead, imageOf, imageWorld, manual, notes, patchState, publish, push,
+  advance, checksStub, commitTo, events, fault, git, golden, hostRead, hostSet, imageOf, imageWorld, manual, notes, patchState, publish, push,
   readState, reply, runImage, seedState, settledState, short, stateAtActivate, stateText, stub, tick, writeStateText,
   type Image, type ImageWorld,
 } from './image-autodeploy-harness';
@@ -87,6 +87,8 @@ describe('(а) usage: anything outside the grammar is 64 and does nothing', () =
     ['--settled in deploy', ['--manual', 'deploy', '--target', X, '--settled', X]],
     ['an unknown flag', ['--manual', 'deploy', '--target', X, '--yes']],
     ['--manual given twice', ['--manual', 'deploy', '--manual', '--target', X]],
+    ['--target=<sha> (one word)', ['--manual', 'deploy', `--target=${X}`]],
+    ['a bare --', ['--manual', 'deploy', '--target', X, '--']],
     ['bootstrap without --target', ['--manual', 'bootstrap']],
     ['--force in bootstrap', ['--manual', 'bootstrap', '--target', X, '--force']],
     ['--target in resolve-incident', ['--manual', 'resolve-incident', '--target', X]],
@@ -207,6 +209,8 @@ describe('(г) the happy path: a fresh merge with a held path and a deploy:hold 
     expect(events(m.w)).toEqual([...toActivate(m), ...polls(61), ...settledEnd(m)]);
     expect(readState(m.w)).toEqual(settledX(m));
     expect(notes(m.w)).toEqual([`[manual] ✅ merge-deploy ${short(m.x)} is live and settled — #7.`]);
+    // The human in front of the run reads what the chat reads.
+    expect(r.out).toBe(`[manual] ✅ merge-deploy ${short(m.x)} is live and settled — #7.\n`);
     expect([hostRead(m.w, 'quadlet'), hostRead(m.w, 'container')]).toEqual([m.img.digest, m.img.digest]);
   });
 
@@ -397,8 +401,16 @@ describe('(и) production is not an ancestor of X', () => {
     const r = manual(w, ['deploy', '--target', a, '--force']);
     expect(r.code).toBe(0);
     expect(readState(w)).toEqual({ ...settledState(imgA), PREVIOUS_SHA: b, LAST_SEEN_DEPLOYED_SHA: b });
-    expect(events(w).slice(5, 7)).toEqual([`image audit --digest ${imgA.digest}`, `image local --digest ${imgB.digest}`]);
+    const pre = `19700102T034640Z-${short(a)}-pre.db`;
+    const all = [
+      `checks ${a}`, `resolve ${a}`, `attest ${imgA.digest} ${a}`, `image pull --sha ${a} --digest ${imgA.digest}`, 'image current',
+      `image audit --digest ${imgA.digest}`, `image local --digest ${imgB.digest}`, `snapshot ${pre}`,
+      `image trial --digest ${imgA.digest} --previous ${imgB.digest} --snapshot ${pre}`, `image activate --digest ${imgA.digest}`,
+      ...polls(61), `image prune --keep ${imgA.digest}`, 'prune',
+    ];
+    expect(events(w)).toEqual(all);
     expect(tick(w).code).toBe(0);
+    expect(events(w)).toEqual(all);
     expect(readState(w)).toEqual({
       ...settledState(imgA), PREVIOUS_SHA: b, LAST_SEEN_DEPLOYED_SHA: a, REGRESSION_FROM_SHA: b, REGRESSION_TO_SHA: a, LAST_HOLD_NOTICE: DAY1,
     });
@@ -480,6 +492,16 @@ describe('(к) an interrupted manual run is finished by the tick', () => {
     expect(readState(m.w)).toEqual({ ...settledX(m), LAST_SEEN_DEPLOYED_SHA: m.x });
     expect(notes(m.w)).toEqual([`✅ merge-deploy ${short(m.x)} is live and settled.`]);
   });
+
+  it('a manual run of LAST_FAILED_SHA killed mid-window: the tick settles it and clears the record', () => {
+    const m = manualWorld();
+    patchState(m.w, { LAST_FAILED_SHA: m.x });
+    fault(m.w, 'kill', 300, 301, m.img.digest);
+    expect(deploy(m).code).toBe(null);
+    expect(readState(m.w).LAST_FAILED_SHA).toBe(m.x);
+    expect(tick(m.w).code).toBe(0);
+    expect(readState(m.w)).toEqual({ ...settledX(m), LAST_SEEN_DEPLOYED_SHA: m.x });
+  });
 });
 
 describe('(л) the tick is unchanged', () => {
@@ -490,5 +512,191 @@ describe('(л) the tick is unchanged', () => {
     const r = tick(m.w, { MANUAL: '1' });
     expect(r.code).toBe(0);
     expect(notes(m.w)).toEqual([`✅ merge-deploy ${short(m.x)} is live and settled — #7.`]);
+  });
+});
+
+/** main is base → c1 → … → cn (each a change that runs, its image published); production is settled at cn and the timer saw it. */
+function onTip(n: number): { w: ImageWorld; c: string[]; img: Image[] } {
+  const w = imageWorld();
+  const c: string[] = [];
+  const img: Image[] = [];
+  for (let i = 1; i <= n; i += 1) {
+    c.push(push(w, { 'src/a.ts': `export const a = ${i + 1};\n` }, `c${i}`));
+    img.push(publish(w, imageOf(c[i - 1])));
+  }
+  runImage(w, img[n - 1]);
+  seedState(w, { ...settledState(img[n - 1]), LAST_SEEN_DEPLOYED_SHA: c[n - 1] });
+  return { w, c, img };
+}
+const backwards = (from: string, to: string, commits: number) =>
+  `⚠️ merge-deploy: production went BACKWARDS: ${short(from)} → ${short(to)} (${commits} commits, 1 PRs no longer reachable) — was this a deliberate rollback? `
+  + 'Unattended deploys are HELD. Deploy main by hand to recover.';
+
+describe('(м1) plan b2 п.18: a forced downgrade the tick finished is still fenced', () => {
+  it('killed mid-window: the tick settles A without observing it; the next tick sees B → A went BACKWARDS', () => {
+    const { w, c: [a, b], img: [imgA] } = onTip(2);
+    fault(w, 'kill', 300, 301, imgA.digest);
+    expect(manual(w, ['deploy', '--target', a, '--force']).code).toBe(null);
+    expect(tick(w).code).toBe(0);
+    expect(readState(w)).toEqual({ ...settledState(imgA), PREVIOUS_SHA: b, LAST_SEEN_DEPLOYED_SHA: b });
+    expect(tick(w).code).toBe(0);
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).REGRESSION_TO_SHA, readState(w).LAST_SEEN_DEPLOYED_SHA]).toEqual([b, a, a]);
+    expect(notes(w).slice(0, 2)).toEqual([`✅ merge-deploy ${short(a)} is live and settled.`, backwards(b, a, 1)]);
+  });
+
+  it('killed right after `activate A` (row 3 of §7.2): the same — the activation observes nothing', () => {
+    const { w, c: [a, b], img: [imgA] } = onTip(2);
+    reply(w, 'activate', imgA.digest, 'kill-after');
+    expect(manual(w, ['deploy', '--target', a, '--force']).code).toBe(null);
+    expect([readState(w).WINDOW_PHASE, hostRead(w, 'container')]).toEqual(['activating', imgA.digest]);
+    expect(tick(w).code).toBe(0);
+    expect(readState(w)).toEqual({ ...settledState(imgA), PREVIOUS_SHA: b, LAST_SEEN_DEPLOYED_SHA: b });
+    expect(tick(w).code).toBe(0);
+    expect(notes(w).slice(0, 2)).toEqual([`✅ merge-deploy ${short(a)} is live and settled.`, backwards(b, a, 1)]);
+  });
+});
+
+describe('(м2) plan b2 п.18: a manual deploy between a forced downgrade and the observed head', () => {
+  it('P observed, a forced A settled, B (A < B < P) killed and settled by the tick: the next tick fences P → B', () => {
+    const { w, c: [a, b, p], img: [, imgB] } = onTip(3);
+    expect(manual(w, ['deploy', '--target', a, '--force']).code).toBe(0);
+    fault(w, 'kill', 300, 301, imgB.digest);
+    expect(manual(w, ['deploy', '--target', b]).code).toBe(null);
+    expect(tick(w).code).toBe(0);
+    expect([readState(w).SETTLED_SHA, readState(w).LAST_SEEN_DEPLOYED_SHA]).toEqual([b, p]);
+    expect(tick(w).code).toBe(0);
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).REGRESSION_TO_SHA]).toEqual([p, b]);
+    expect(notes(w).slice(1, 3)).toEqual([`✅ merge-deploy ${short(b)} is live and settled.`, backwards(p, b, 1)]);
+  });
+
+  it('B fails in the window the tick finishes: rolled back to A, and the next tick fences P → A', () => {
+    const { w, c: [a, b, p], img: [imgA, imgB] } = onTip(3);
+    expect(manual(w, ['deploy', '--target', a, '--force']).code).toBe(0);
+    fault(w, 'kill', 300, 301, imgB.digest);
+    fault(w, 'health', 301, 99999, imgB.digest);
+    expect(manual(w, ['deploy', '--target', b]).code).toBe(null);
+    expect(tick(w).code).toBe(2);
+    expect([readState(w).DEPLOYED_SHA, readState(w).DEPLOYED_DIGEST, readState(w).LAST_SEEN_DEPLOYED_SHA]).toEqual([a, imgA.digest, p]);
+    expect(tick(w).code).toBe(0);
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).REGRESSION_TO_SHA]).toEqual([p, a]);
+    expect(notes(w)[3]).toBe(backwards(p, a, 2));
+  });
+});
+
+describe('(м3) plan b2 п.19: a manual deploy of an older commit never overwrites the head\'s records', () => {
+  /** main is base → x → y; production is base; y, the head, already failed (or is held). */
+  function behindHead(): { m: M; y: string; imgY: Image } {
+    const m = manualWorld();
+    const y = push(m.w, { 'src/a.ts': 'export const a = 3;\n' }, 'y');
+    const imgY = publish(m.w, imageOf(y));
+    return { m, y, imgY };
+  }
+
+  it('a failed trial of X: refused and told, LAST_FAILED_SHA stays Y, and the next tick does not deploy Y', () => {
+    const { m, y } = behindHead();
+    patchState(m.w, { LAST_FAILED_SHA: y });
+    reply(m.w, 'trial', m.img.digest, golden('trial-trial-failed'));
+    expect(deploy(m).code).toBe(1);
+    expect(readState(m.w)).toEqual({ ...initial(m), LAST_FAILED_SHA: y });
+    expect(notes(m.w)).toEqual([
+      `[manual] ⛔ merge-deploy refused ${short(m.x)}: the trial on a copy of production failed: TRIAL FAILED: no such column: venue_id\n`
+      + '[trial exited 1]\nTRIAL FAILED: no such column: venue_id',
+    ]);
+    const before = events(m.w);
+    expect(tick(m.w).code).toBe(0);
+    expect(events(m.w)).toEqual(before);
+  });
+
+  it('a failed auto window of X: rolled back (2), LAST_FAILED_SHA stays Y', () => {
+    const { m, y } = behindHead();
+    patchState(m.w, { LAST_FAILED_SHA: y });
+    fault(m.w, 'health', 300, 99999, m.img.digest);
+    expect(deploy(m).code).toBe(2);
+    expect(readState(m.w)).toEqual({ ...initial(m), LAST_FAILED_SHA: y, RETAINED_PRE: marked(m) });
+    const before = events(m.w);
+    expect(tick(m.w).code).toBe(0);
+    expect(events(m.w)).toEqual(before);
+  });
+
+  it('a failed manual window of X: an incident (3) without blaming X — LAST_FAILED_SHA stays Y', () => {
+    const { m, y } = behindHead();
+    patchState(m.w, { LAST_FAILED_SHA: y });
+    fault(m.w, 'health', 300, 99999, m.img.digest);
+    expect(deploy(m, ['--ack-incompatible']).code).toBe(3);
+    expect([readState(m.w).LAST_FAILED_SHA, readState(m.w).INCIDENT])
+      .toEqual([y, `${m.x} ${m.img.digest} the manual window failed: health check failed 3 times in a row (last at +320s)`]);
+  });
+
+  it('COMPAT FAILED of X: refused, Y\'s hold untouched', () => {
+    const { m, y, imgY } = behindHead();
+    patchState(m.w, { CANDIDATE_HELD: `${y} ${imgY.digest} ${m.s.digest}`, CANDIDATE_HELD_WHY: 'COMPAT FAILED: START TIMEOUT: no "api listening" within 90s' });
+    const before = readState(m.w);
+    reply(m.w, 'trial', m.img.digest, golden('trial-compat-failed'));
+    expect(deploy(m).code).toBe(1);
+    expect(readState(m.w)).toEqual(before);
+    expect(notes(m.w).length).toBe(1);
+  });
+});
+
+describe('(м4) plan b2 п.20: a forced downgrade across a contract PR', () => {
+  const removedContract = (w: ImageWorld, b: string) => ({
+    WBB_PR_LABELS_CMD: stub(w.bin, 'labels-removed', `if [ "$1" = "${b}" ]; then printf '13\\tmigration:contract\\n'; else printf '7\\t\\n'; fi`),
+  });
+
+  it('without --ack-incompatible: refused (1), listing the PR the downgrade removes, no helper call', () => {
+    const { w, c: [a, b] } = onTip(2);
+    const before = stateText(w);
+    const r = manual(w, ['deploy', '--target', a, '--force'], removedContract(w, b));
+    expect([r.code, r.out, stateText(w), events(w), notes(w)]).toEqual([
+      1,
+      `a code-only rollback of ${short(b)}..${short(a)} is not proven safe:\n`
+      + `• PR #13 carries migration:contract and the downgrade removes it — ${GH}/13\n`
+      + 'Run again with --ack-incompatible: the window is then manual — no automatic rollback; a failure is an incident.\n',
+      before, [], [],
+    ]);
+  });
+
+  it('with --ack-incompatible: deployed in a manual window, which settles', () => {
+    const { w, c: [a, b], img: [imgA] } = onTip(2);
+    const r = manual(w, ['deploy', '--target', a, '--force', '--ack-incompatible'], removedContract(w, b));
+    expect(r.code).toBe(0);
+    expect([stateAtActivate(w, 1).WINDOW_MODE, stateAtActivate(w, 1).WINDOW_KIND]).toEqual(['manual', 'deploy']);
+    expect(readState(w)).toEqual({ ...settledState(imgA), PREVIOUS_SHA: b, LAST_SEEN_DEPLOYED_SHA: b });
+  });
+});
+
+describe('(н) plan b2 п.21: a manual run that cannot verify is refused, and says "run again"', () => {
+  it('no image published (resolve 404): 1, told on stderr only, the state byte for byte the same', () => {
+    const m = manualWorld();
+    hostSet(m.w, `tags/${m.x}`, null);
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1,
+      `⚠️ merge-deploy: no image is published for ${short(m.x)} (no tag ${m.x} in ghcr.io/ysilvestrov/warsaw-beer-bot) — NOT a finding against the commit — run again\n`,
+      before, [`checks ${m.x}`, `resolve ${m.x}`], [],
+    ]);
+  });
+
+  it('an audit that could not run: 1, "run again" instead of "retrying next tick"', () => {
+    const m = manualWorld();
+    reply(m.w, 'audit', m.img.digest, { code: 75, stderr: 'TEMPFAIL: podman run timed out after 300s\n' });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1,
+      `⚠️ merge-deploy: the audit of ${short(m.x)} (${m.img.digest}) could not run: TEMPFAIL podman run timed out after 300s — NOT a finding — run again\n`,
+      before, toActivate(m).slice(0, 6), [],
+    ]);
+  });
+
+  it('an activation not confirmed (75) leaves the window to the timer and tells the chat, marked, without the daily marker', () => {
+    const m = manualWorld();
+    reply(m.w, 'activate', m.img.digest, { code: 75, stderr: 'TEMPFAIL: systemctl restart timed out after 180s\n' });
+    const r = deploy(m);
+    const note = `[manual] ⚠️ merge-deploy: the activation of ${short(m.x)} (${m.img.digest}) could not be confirmed: `
+      + 'TEMPFAIL systemctl restart timed out after 180s. The next tick looks at what runs and finishes or cancels it — run again';
+    expect([r.code, r.out, events(m.w), notes(m.w)]).toEqual([1, `${note}\n`, toActivate(m), [note]]);
+    expect(readState(m.w)).toEqual(windowAt(m, 'auto'));
   });
 });
