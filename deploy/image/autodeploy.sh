@@ -31,7 +31,6 @@
 # Exit (plan п.16): 0 idle / wait / hold / noop / settled, 1 refused, 2 rolled back (code only),
 #       3 incident opened or state corrupt, 4 state write failed, 64 usage. A manual run uses the
 #       same codes; every refusal, a busy lock and an open window included, is 1 (plan b2 п.6).
-#       Until Task 4 of plan b2, `--manual bootstrap` parses and exits 70.
 set -euo pipefail
 # notify() cuts messages by CHARACTERS. Under systemd's default C locale bash counts bytes and
 # can cut a UTF-8 character in half, which Telegram rejects.
@@ -95,11 +94,6 @@ if [ "$#" -gt 0 ]; then
   # Plan b2 п.9: --ack-incompatible gives up the automatic rollback, needed or not — the human
   # said a code-only rollback is not to be trusted.
   if [ "$ACK_INCOMPATIBLE" = 1 ]; then DEPLOY_MODE=manual; fi
-  # Plan b2 Task 4: bootstrap parses, and does nothing yet.
-  if [ "$MANUAL_CMD" = bootstrap ]; then
-    echo "autodeploy.sh --manual ${MANUAL_CMD}: not implemented yet" >&2
-    exit 70
-  fi
 fi
 
 REPO_URL=https://github.com/ysilvestrov/warsaw-beer-bot.git
@@ -711,6 +705,23 @@ check_state() {
       STATE_PROBLEM="WINDOW_KIND is resolve and nothing is settled, but WINDOW_PREV_DIGEST is set"
       return 1
     fi
+  elif [ "$WINDOW_KIND" = bootstrap ]; then
+    # Plan b2 п.15: the first image release has nothing to roll back to, so a human watches it
+    # (manual) and it has no rollback target; its window exists only while nothing is settled —
+    # the settle writes SETTLED_* and clears the window in one write.
+    if [ "$WINDOW_MODE" != manual ]; then
+      STATE_PROBLEM="WINDOW_KIND is bootstrap but WINDOW_MODE is $WINDOW_MODE (the first image release is always manual)"
+      return 1
+    fi
+    if [ -n "$WINDOW_PREV_DIGEST" ]; then
+      STATE_PROBLEM="WINDOW_KIND is bootstrap but WINDOW_PREV_DIGEST is set (the first image release has no rollback target)"
+      return 1
+    fi
+    if [ -n "$SETTLED_DIGEST" ]; then
+      STATE_PROBLEM="WINDOW_KIND is bootstrap but SETTLED_DIGEST is set (a bootstrap window exists only while nothing is settled)"
+      return 1
+    fi
+    _requires WINDOW_PHASE WINDOW_PRE || return 1
   else
     _requires WINDOW_PHASE WINDOW_PREV_DIGEST WINDOW_PRE || return 1
   fi
@@ -1500,6 +1511,8 @@ settle() {
   fi
   if [ "$kind" = resolve ]; then
     notify "✅ merge-deploy: the incident is resolved — ${x:0:7} is live and settled.${skipped}${RELEASE_NOTE}"
+  elif [ "$kind" = bootstrap ]; then
+    notify "✅ merge-deploy: the first image release ${x:0:7} is live and settled — from now on the timer deploys main against it.${skipped}"
   else
     notify "✅ merge-deploy ${x:0:7} is live and settled${prs:+ — $prs}.${skipped}"
   fi
@@ -1657,7 +1670,8 @@ activate_candidate() {
       if [ "$u" = foreign ]; then
         open_incident 0 "the unit is not our Quadlet (unit=foreign); the activation was refused"
       fi
-      if [ "$q" = "$WINDOW_PREV_DIGEST" ] && [ "$d" = "$WINDOW_PREV_DIGEST" ]; then
+      # Before a bootstrap window nothing ran from a Quadlet file: "unchanged" is none (plan b2 п.16).
+      if [ "$q" = "${WINDOW_PREV_DIGEST:-none}" ] && [ "$d" = "${WINDOW_PREV_DIGEST:-none}" ]; then
         cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
       fi
       if [ "$q" = "$WINDOW_DIGEST" ]; then
@@ -1688,14 +1702,8 @@ settled_is_local() {
   [ "$kind" = LOCAL ] && [ "$d" = "$SETTLED_DIGEST" ] && [ "$i" = "$SETTLED_ID" ] && [ "$x" = "$SETTLED_SHA" ]
 }
 
-# The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
-# activate, the window watched. Never returns.
-deploy_pipeline() {
-  local pre name boot kind err acked why
-  if ! production_is_record; then
-    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
-  fi
-  # Spec §4.2: the advisory is a verdict on X; anything else is "could not verify".
+# Spec §4.2: the advisory is a verdict on X; anything else is "could not verify".
+audit_candidate() {
   image_call audit --digest "$D"
   case "$IMG_VERDICT" in
     "CLEAN $D") ;;
@@ -1705,6 +1713,38 @@ $(tail -n +2 <<< "$IMG_VERDICT")" ;;
     *)
       halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the audit of ${X:0:7} (${D}) could not run: ${IMG_VERDICT%%$'\n'*} — NOT a finding; retrying next tick." ;;
   esac
+}
+
+# The trial runs on a pre snapshot of production, by NAME (the helper takes no paths). Sets
+# PRE_PATH and PRE_NAME. Named in the state BEFORE it exists: a tick that dies before the window is
+# written leaves a pre no settled window owns, and the next tick discards it.
+take_pre() {
+  local err
+  PRE_NAME="$(date -u -d "@$(now)" +%Y%m%dT%H%M%SZ)-${X:0:7}-pre.db"
+  PRE_PATH="${SNAPSHOT_DIR}/${PRE_NAME}"
+  PENDING_PRE="$PRE_PATH"
+  write_state
+  if ! err=$("$SNAPSHOT_CMD" "$PRE_PATH" 2>&1); then
+    discard_pending "$PRE_PATH"
+    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${X:0:7}.
+${err}"
+  fi
+}
+# No deploy happened: this pre must not count among the settled ones.
+discard_pending() {
+  "$DISCARD_CMD" "$1" >/dev/null 2>&1 || echo "WARNING: could not discard $1"
+  PENDING_PRE=""
+  write_state
+}
+
+# The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
+# activate, the window watched. Never returns.
+deploy_pipeline() {
+  local pre name boot kind acked why
+  if ! production_is_record; then
+    halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
+  fi
+  audit_candidate
   if ! settled_is_local; then
     halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the settled image ${SETTLED_DIGEST} is not usable as the rollback target: ${IMG_VERDICT%%$'\n'*} (expected id ${SETTLED_ID}, revision ${SETTLED_SHA}). Not deploying ${X:0:7}; retrying next tick."
   fi
@@ -1715,32 +1755,16 @@ $(tail -n +2 <<< "$IMG_VERDICT")" ;;
     halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — not deploying ${X:0:7}; retrying next tick."
   fi
 
-  # The trial runs on a pre snapshot of production, by NAME (the helper takes no paths).
-  name="$(date -u -d "@$(now)" +%Y%m%dT%H%M%SZ)-${X:0:7}-pre.db"
-  pre="${SNAPSHOT_DIR}/${name}"
-  # Named in the state BEFORE it exists: a tick that dies before the window is written leaves a
-  # pre no settled window owns, and the next tick discards it.
-  PENDING_PRE="$pre"
-  write_state
-  if ! err=$("$SNAPSHOT_CMD" "$pre" 2>&1); then
-    "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
-    PENDING_PRE=""
-    write_state
-    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${X:0:7}.
-${err}"
-  fi
+  take_pre
+  pre="$PRE_PATH"
+  name="$PRE_NAME"
   image_call trial --digest "$D" --previous "$SETTLED_DIGEST" --snapshot "$name"
   kind="${IMG_VERDICT%% *}"
   # Plan b2 п.10, spec §6.4: a human who acknowledged the incompatibility deploys it anyway, in a
   # manual window — no automatic rollback, which is exactly what COMPAT FAILED rules out.
   acked=0
   if [ "$kind" = COMPAT_FAILED ] && [ "$MANUAL" = 1 ] && [ "$ACK_INCOMPATIBLE" = 1 ]; then acked=1; fi
-  if [ "$IMG_VERDICT" != "OK $SETTLED_DIGEST" ] && [ "$acked" = 0 ]; then
-    # No deploy happened: this pre must not count among the settled ones.
-    "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
-    PENDING_PRE=""
-    write_state
-  fi
+  if [ "$IMG_VERDICT" != "OK $SETTLED_DIGEST" ] && [ "$acked" = 0 ]; then discard_pending "$pre"; fi
   case "$kind:$IMG_VERDICT" in
     "OK:OK $SETTLED_DIGEST") ;;
     FAILED:*)
@@ -1861,8 +1885,13 @@ resume_window() {
   fi
   case "$WINDOW_PHASE" in
     activating)
+      # Plan b2 п.16: a bootstrap interrupted before its activation — no Quadlet file, no unit — is
+      # cancelled like row 1; the human runs it again (there is no settled image the tick could use).
+      if [ "$WINDOW_KIND" = bootstrap ] && [ "$q" = none ] && [ "$u" = absent ]; then
+        cancel_window "⚠️ merge-deploy: the first image release ${X:0:7} was interrupted before its activation; nothing runs from the Quadlet file, so the window is cancelled — run bash deploy/deploy.sh --bootstrap again."
+      fi
       # Row 1: the Quadlet file still names S — activate never ran, production is unchanged.
-      if [ "$q" = "$WINDOW_PREV_DIGEST" ]; then
+      if [ -n "$WINDOW_PREV_DIGEST" ] && [ "$q" = "$WINDOW_PREV_DIGEST" ]; then
         cancel_window "⚠️ merge-deploy: the deploy of ${X:0:7} was interrupted before its activation; production still runs the settled ${SETTLED_SHA:0:7}, so the window is cancelled and ${X:0:7} is tried again next tick."
       fi
       if [ "$q" != "$WINDOW_DIGEST" ]; then
@@ -2007,7 +2036,6 @@ Re-running the failed job releases it; nothing else to do here."
 # not proven safe — or whose labels could not be read — needs --ack-incompatible. Nothing here writes
 # the state: every stop is a refusal (1) or "up to date" (0).
 manual_gates() {
-  local verdict
   if [ -z "$DEPLOYED_SHA" ] || [ -z "$SETTLED_DIGEST" ]; then
     manual_refuse "there is no settled image yet — the first image release is bash deploy/deploy.sh --bootstrap"
   fi
@@ -2019,19 +2047,26 @@ manual_gates() {
        || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; }; then
     manual_refuse "production (${DEPLOYED_SHA:0:7}) is not an ancestor of ${X:0:7} — a downgrade or a jump across histories; if it is deliberate, run again with --force"
   fi
-  if installed_is_stale; then
-    manual_refuse "the installed deployer is out of date — a merged fix is not live until it is installed.
-${STALE_REPORT}
-${STALE_ADVICE}"
-  fi
+  manual_stale_gate
   scan_range "$X"
   if [ "$ACK_INCOMPATIBLE" = 0 ] && { [ "${#CONTRACT_PRS[@]}" -gt 0 ] || [ "$SCAN_UNREAD" = 1 ]; }; then
     manual_refuse "a code-only rollback of ${DEPLOYED_SHA:0:7}..${X:0:7} is not proven safe:
 $(printf '• %s\n' "${CONTRACT_PRS[@]}" "${UNREAD[@]}")
 Run again with --ack-incompatible: the window is then manual — no automatic rollback; a failure is an incident."
   fi
-  # Spec §7.4: without a published, tested image there is nothing to deploy — a WAIT of the timer is
-  # a refusal with its reason for the human.
+  manual_ci_gate
+}
+manual_stale_gate() {
+  if installed_is_stale; then
+    manual_refuse "the installed deployer is out of date — a merged fix is not live until it is installed.
+${STALE_REPORT}
+${STALE_ADVICE}"
+  fi
+}
+# Spec §7.4: without a published, tested image there is nothing to deploy — a WAIT of the timer is
+# a refusal with its reason for the human.
+manual_ci_gate() {
+  local verdict
   if ! verdict=$(ci_verdict "$X"); then
     manual_refuse "cannot read CI status for ${X:0:7} (gh api failed)"
   fi
@@ -2040,6 +2075,87 @@ Run again with --ack-incompatible: the window is then manual — no automatic ro
     WAIT) manual_refuse "CI has not concluded on ${X:0:7} — the required 'ci' and 'image' checks of one run are pending or absent; there is no image to deploy yet" ;;
     FAIL*) manual_refuse "CI failed on ${X:0:7} — not deploying: ${verdict#FAIL }" ;;
   esac
+}
+
+# --- bootstrap (plan b2 п.14, spec §7.4 "Bootstrap", §8 п.2) --------------------------------------------
+# The first image release: production still runs the flat tree, there is no settled image, so no
+# compat check can prove anything (trial against itself: START is the positive control) and there is
+# nothing to roll back to — the window is manual, and its failure is an incident. The first run finds
+# the old unit and prints the root steps without writing anything; the run after them deploys.
+BOOTSTRAP_STEPS="The bot still runs from the old unit (unit=foreign). The first image release needs these root steps first:
+  sudo systemctl stop warsaw-beer-bot
+  sudo mv /etc/systemd/system/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service.flat
+  sudo systemctl daemon-reload
+Then run again: bash deploy/deploy.sh --bootstrap
+Nothing was changed."
+bootstrap_run() {
+  local boot
+  if [ -n "$SETTLED_DIGEST" ]; then
+    manual_refuse "an image is already settled (${SETTLED_SHA:0:7}) — the first image release is done; deploy with bash deploy/deploy.sh"
+  fi
+  if [ -z "$DEPLOYED_SHA" ]; then
+    manual_refuse "the state records no deployed commit — the first image release starts from the flat tree's DEPLOYED_SHA, which stage «в» carries over from state.env"
+  fi
+  if [ "$X" != "$DEPLOYED_SHA" ] && { ! git -C "$REPO" rev-parse -q --verify "${DEPLOYED_SHA}^{commit}" >/dev/null \
+       || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; }; then
+    manual_refuse "production (${DEPLOYED_SHA:0:7}) is not an ancestor of ${X:0:7} — the first image release does not go backwards"
+  fi
+  manual_stale_gate
+  manual_ci_gate
+  resolve_digest
+  attest_image
+  pull_candidate
+  audit_candidate
+  read_current
+  case "$CUR_UNIT" in
+    foreign)
+      # Plan b2 п.14: the old unit in /etc would override the Quadlet-generated one. Nothing written.
+      printf '%s\n' "$BOOTSTRAP_STEPS"
+      exit 1 ;;
+    quadlet)
+      manual_refuse "a Quadlet unit exists but nothing is settled — check by hand (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST})" ;;
+  esac
+  if [ "$CUR_QUADLET" != none ] || [ "$CUR_DIGEST" != none ]; then
+    manual_refuse "no unit, but a Quadlet file or a container is there (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST}) and nothing is settled — check by hand"
+  fi
+  if ! PORT=$("$API_PORT_CMD"); then
+    manual_refuse "could not resolve API_PORT — run again"
+  fi
+  if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
+    manual_refuse "could not read the boot id — run again"
+  fi
+  # The bot is stopped: the pre is a snapshot of a database at rest.
+  take_pre
+  image_call trial --digest "$D" --previous "$D" --snapshot "$PRE_NAME"
+  if [ "$IMG_VERDICT" != "OK $D" ]; then
+    discard_pending "$PRE_PATH"
+    case "$IMG_VERDICT" in
+      FAILED\ *)
+        refuse "$X" "the trial on a copy of production failed: ${IMG_VERDICT#FAILED }
+$(tail -n 20 <<< "$IMG_ERR")" ;;
+      COMPAT_FAILED\ *|REFUSED\ *)
+        manual_refuse "the trial of ${X:0:7} against itself did not pass: ${IMG_VERDICT}
+$(tail -n 20 <<< "$IMG_ERR")
+Nothing is recorded against the commit." ;;
+      *)
+        halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick." ;;
+    esac
+  fi
+  # Spec §7.1: the window is in the state BEFORE anything changes production.
+  WINDOW_SHA="$X"
+  WINDOW_DIGEST="$D"
+  WINDOW_ID="$CAND_ID"
+  WINDOW_CONTENT="$CAND_CONTENT"
+  WINDOW_OLD="$DEPLOYED_SHA"
+  WINDOW_PREV_DIGEST=""
+  WINDOW_KIND=bootstrap
+  WINDOW_MODE=manual
+  WINDOW_PHASE=activating
+  WINDOW_PRE="$PRE_PATH"
+  WINDOW_BOOT="$boot"
+  PENDING_PRE=""
+  write_state
+  activate_candidate
 }
 
 # --- resolve-incident (plan b2 п.13, spec §7.3) -------------------------------------------------------
@@ -2153,6 +2269,7 @@ else
 fi
 NOW=$(now)
 
+if [ "$MANUAL_CMD" = bootstrap ]; then bootstrap_run; fi
 if [ "$MANUAL" = 1 ]; then manual_gates; else tick_gates; fi
 
 # Plan b2 п.7: a retried or held candidate waits for the timer; a human's run is the retry, and

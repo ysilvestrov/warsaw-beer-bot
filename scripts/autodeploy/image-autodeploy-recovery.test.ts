@@ -522,3 +522,50 @@ describe('resume never guesses', () => {
     expect([events(r.w), readState(r.w)]).toEqual([['image current'], { ...watching(r), LAST_ASSESS_NOTICE: DAY1 }]);
   });
 });
+
+describe('plan b2 п.16: an interrupted first image release (bootstrap) — Task 4 (ґ) of plan b2', () => {
+  /** The window bootstrap writes before `activate D`: nothing settled, no rollback target, manual. */
+  const bootActivating = (r: Rec): Record<string, string> => ({
+    DEPLOYED_SHA: r.s.sha, LAST_SEEN_DEPLOYED_SHA: r.s.sha,
+    WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
+    WINDOW_KIND: 'bootstrap', WINDOW_MODE: 'manual', WINDOW_PHASE: 'activating', WINDOW_PRE: r.pre, WINDOW_BOOT: BOOT_ID,
+    ACTIVATE_ATTEMPTS: '1',
+  });
+  /** The flat tree was stopped and its unit moved aside: no Quadlet file, no container, no unit. */
+  function noUnit(r: Rec): void {
+    for (const f of ['quadlet', 'container', 'running_sha']) hostSet(r.w, f, null);
+    hostSet(r.w, 'unit', 'absent');
+  }
+
+  it('before `activate D` (quadlet=none, unit=absent): the window is cancelled, the pre discarded, "run again"', () => {
+    const r = recoveryWorld();
+    noUnit(r);
+    seedState(r.w, bootActivating(r));
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w)).toEqual(['image current', `discard ${r.preName}`]);
+    expect(readState(r.w)).toEqual({ DEPLOYED_SHA: r.s.sha, LAST_SEEN_DEPLOYED_SHA: r.s.sha, LAST_ASSESS_NOTICE: DAY1 });
+    expect(notes(r.w)).toEqual([
+      `⚠️ merge-deploy: the first image release ${short(r.x)} was interrupted before its activation; nothing runs from the Quadlet file, `
+      + 'so the window is cancelled — run bash deploy/deploy.sh --bootstrap again.',
+    ]);
+  });
+
+  it('after `activate D` (the Quadlet file names D, D runs): row 3 — a full window from now, settled as the first SETTLED_*', () => {
+    const r = recoveryWorld();
+    runImage(r.w, r.img);
+    seedState(r.w, bootActivating(r));
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w)).toEqual(['image current', ...polls(61), ...settledEnd(r)]);
+    expect(readState(r.w)).toEqual({ ...settledState(r.img), PREVIOUS_SHA: r.s.sha, LAST_SEEN_DEPLOYED_SHA: r.x });
+  });
+
+  it('the Quadlet file names D but nothing runs (row 2): `activate D` again, then the window', () => {
+    const r = recoveryWorld();
+    noUnit(r);
+    hostSet(r.w, 'quadlet', r.img.digest);
+    seedState(r.w, bootActivating(r));
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w)).toEqual(['image current', `image activate --digest ${r.img.digest}`, ...polls(61), ...settledEnd(r)]);
+    expect(readState(r.w).SETTLED_DIGEST).toBe(r.img.digest);
+  });
+});

@@ -8,7 +8,7 @@
  *
  *   quadlet       the digest the Quadlet file names (absent: none)
  *   container     the digest of the running container (absent: none)
- *   unit          quadlet | foreign | absent (default quadlet)
+ *   unit          quadlet | foreign | absent (default quadlet); `activate` turns absent into quadlet
  *   running_sha   what /health answers as releaseSha
  *   nrestarts     systemd's NRestarts (default 0); a successful `activate` resets it to 0 (V14)
  *   boot_id       the kernel's boot id
@@ -222,7 +222,10 @@ case "$action" in
     n=$(( $(ls "$H" | grep -c '^state-at-activate\.') + 1 ))
     cp "$XDG_STATE_HOME/wbb-autodeploy/image-state.env" "$H/state-at-activate.$n"
     cat "$WBB_FAKE_CLOCK" > "$H/activated_at"
-    echo "$digest" > "$H/quadlet"; wrote
+    echo "$digest" > "$H/quadlet"
+    # The Quadlet file and daemon-reload generate the unit where there was none (a first image release).
+    if [ "$(cat "$H/unit" 2>/dev/null || echo quadlet)" = absent ]; then echo quadlet > "$H/unit"; fi
+    wrote
     if [ -f "$H/sick/$digest" ]; then
       rm -f "$H/container" "$H/running_sha"
       echo "ACTIVATE FAILED: restart exited 1: Job for warsaw-beer-bot.service failed because the control process exited with error code."

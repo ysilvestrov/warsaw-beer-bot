@@ -925,3 +925,206 @@ describe('(р-з) at most five unmarks per settle', () => {
     expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, all.slice(0, 5).map(unmarkedOf), [all[5]])}`]);
   });
 });
+
+// --- Task 4 of plan b2: `--manual bootstrap --target <sha>` -----------------------------------------------
+
+interface Boot { w: ImageWorld; x: string; img: Image; pre: string }
+const BOOTSTRAP_STEPS = 'The bot still runs from the old unit (unit=foreign). The first image release needs these root steps first:\n'
+  + '  sudo systemctl stop warsaw-beer-bot\n'
+  + '  sudo mv /etc/systemd/system/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service.flat\n'
+  + '  sudo systemctl daemon-reload\n'
+  + 'Then run again: bash deploy/deploy.sh --bootstrap\n'
+  + 'Nothing was changed.\n';
+
+/**
+ * The flat tree runs base (DEPLOYED_SHA carried over, observed); nothing is settled; no Quadlet file, no
+ * container of ours. main has X with its image published. The run starts at 100000: the pre's stamp.
+ */
+function bootWorld(unit: string): Boot {
+  const w = imageWorld();
+  for (const f of ['quadlet', 'container', 'running_sha']) hostSet(w, f, null);
+  hostSet(w, 'unit', unit);
+  seedState(w, { DEPLOYED_SHA: w.base, LAST_SEEN_DEPLOYED_SHA: w.base });
+  const x = push(w, { 'src/a.ts': 'export const a = 2;\n' }, 'feat');
+  const img = publish(w, imageOf(x));
+  return { w, x, img, pre: `19700102T034640Z-${short(x)}-pre.db` };
+}
+const bootstrapRun = (b: Boot, over: Record<string, string> = {}) => manual(b.w, ['bootstrap', '--target', b.x], over);
+const bootProbe = ({ x, img }: Boot) => [
+  `checks ${x}`, `resolve ${x}`, `attest ${img.digest} ${x}`, `image pull --sha ${x} --digest ${img.digest}`,
+  `image audit --digest ${img.digest}`, 'image current',
+];
+const bootToActivate = (b: Boot) => [
+  ...bootProbe(b), `snapshot ${b.pre}`, `image trial --digest ${b.img.digest} --previous ${b.img.digest} --snapshot ${b.pre}`,
+  `image activate --digest ${b.img.digest}`,
+];
+const bootWindow = (b: Boot) => ({
+  DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base,
+  WINDOW_SHA: b.x, WINDOW_DIGEST: b.img.digest, WINDOW_ID: b.img.id, WINDOW_CONTENT: b.img.content, WINDOW_OLD: b.w.base,
+  WINDOW_KIND: 'bootstrap', WINDOW_MODE: 'manual', WINDOW_PHASE: 'activating', WINDOW_PRE: join(b.w.snapshots, b.pre),
+  WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1',
+});
+const bootSettledNote = (x: string) => `✅ merge-deploy: the first image release ${short(x)} is live and settled — from now on the timer deploys main against it.`;
+
+describe('(б-а) bootstrap, first run: the old unit is still there', () => {
+  it('prints the root steps (1), writes nothing, takes no snapshot, trials and activates nothing', () => {
+    const b = bootWorld('foreign');
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([1, BOOTSTRAP_STEPS, before, bootProbe(b), []]);
+    expect(existsSync(b.w.snapshots)).toBe(false);
+  });
+});
+
+describe('(б-б) bootstrap, the run after the root steps', () => {
+  it('snapshots, trials D against itself, opens a bootstrap/manual window without a rollback target, settles D (0)', () => {
+    const b = bootWorld('foreign');
+    bootstrapRun(b);
+    hostSet(b.w, 'unit', 'absent');
+    const r = bootstrapRun(b);
+    expect(r.code).toBe(0);
+    expect(events(b.w)).toEqual([...bootProbe(b), ...bootToActivate(b), ...polls(61), `image prune --keep ${b.img.digest}`, 'prune']);
+    expect(stateAtActivate(b.w, 1)).toEqual(bootWindow(b));
+    expect(readState(b.w)).toEqual({ ...settledState(b.img), PREVIOUS_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base });
+    expect(notes(b.w)).toEqual([`[manual] ${bootSettledNote(b.x)}`]);
+    expect([hostRead(b.w, 'quadlet'), hostRead(b.w, 'container'), hostRead(b.w, 'unit')]).toEqual([b.img.digest, b.img.digest, 'quadlet']);
+  });
+});
+
+describe('(б-в) bootstrap preconditions refuse (1), changing nothing', () => {
+  it('an image is already settled', () => {
+    const b = bootWorld('absent');
+    seedState(b.w, { ...settledState(b.w.settled), LAST_SEEN_DEPLOYED_SHA: b.w.base });
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
+      1, `an image is already settled (${short(b.w.base)}) — the first image release is done; deploy with bash deploy/deploy.sh\n`, before, [], [],
+    ]);
+  });
+
+  it('no DEPLOYED_SHA to start from', () => {
+    const b = bootWorld('absent');
+    rmSync(b.w.statePath);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, existsSync(b.w.statePath), events(b.w), notes(b.w)]).toEqual([
+      1, 'the state records no deployed commit — the first image release starts from the flat tree\'s DEPLOYED_SHA, which stage «в» carries over from state.env\n',
+      false, [], [],
+    ]);
+  });
+
+  it('X does not descend from DEPLOYED_SHA', () => {
+    const w = imageWorld();
+    for (const f of ['quadlet', 'container', 'running_sha']) hostSet(w, f, null);
+    hostSet(w, 'unit', 'absent');
+    git(w.seed, 'checkout', '-q', '-b', 'side');
+    const side = commitTo(w, { 'src/side.ts': 's\n' }, 'side', 'side');
+    git(w.seed, 'checkout', '-q', 'main');
+    seedState(w, { DEPLOYED_SHA: side });
+    const x = push(w, { 'src/a.ts': 'export const a = 2;\n' }, 'feat');
+    publish(w, imageOf(x));
+    const before = stateText(w);
+    const r = manual(w, ['bootstrap', '--target', x]);
+    expect([r.code, r.out, stateText(w), events(w), notes(w)]).toEqual([
+      1, `production (${short(side)}) is not an ancestor of ${short(x)} — the first image release does not go backwards\n`, before, [], [],
+    ]);
+  });
+
+  it('a Quadlet unit exists although nothing is settled', () => {
+    const b = bootWorld('quadlet');
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
+      1, 'a Quadlet unit exists but nothing is settled — check by hand (quadlet=none container-digest=none)\n', before, bootProbe(b), [],
+    ]);
+  });
+
+  it('no unit, but a Quadlet file names an image', () => {
+    const b = bootWorld('absent');
+    hostSet(b.w, 'quadlet', b.img.digest);
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
+      1, `no unit, but a Quadlet file or a container is there (quadlet=${b.img.digest} container-digest=none) and nothing is settled — check by hand\n`,
+      before, bootProbe(b), [],
+    ]);
+  });
+});
+
+describe('(б-г) a failed bootstrap window', () => {
+  const reason = 'the manual window failed: health check failed 3 times in a row (last at +320s)';
+  it('is an incident (3) blaming X (main\'s head), with no rollback to anything and the pre retained', () => {
+    const b = bootWorld('absent');
+    fault(b.w, 'health', 300, 99999, b.img.digest);
+    const r = bootstrapRun(b);
+    const marked = join(b.w.snapshots, b.pre.replace(/-pre\.db$/, '-rollback-pre.db'));
+    expect(r.code).toBe(3);
+    expect(events(b.w)).toEqual([...bootToActivate(b), ...polls(33), `mark ${b.pre}`]);
+    expect(readState(b.w)).toEqual({
+      DEPLOYED_SHA: b.x, DEPLOYED_DIGEST: b.img.digest, DEPLOYED_ID: b.img.id, DEPLOYED_CONTENT: b.img.content,
+      LAST_SEEN_DEPLOYED_SHA: b.w.base, LAST_FAILED_SHA: b.x, RETAINED_PRE: marked, INCIDENT: `${b.x} ${b.img.digest} ${reason}`,
+    });
+    expect(notes(b.w)).toEqual([
+      `[manual] 🔥 merge-deploy INCIDENT: ${short(b.x)} (${b.img.digest}) — ${reason}. Nothing was rolled back automatically (a manual window); the database is untouched.\n`
+      + `Pre-deploy snapshot: ${marked} (kept until a human removes it: rm ${marked} ${marked}.sha256)\n`
+      + 'Nothing deploys until a human restores production and runs: bash deploy/deploy.sh --resolve-incident --settled <sha>',
+    ]);
+  });
+
+  it('of a commit behind main\'s head: the same incident, but X is not recorded as failed (plan b2 п.19)', () => {
+    const b = bootWorld('absent');
+    push(b.w, { 'src/a.ts': 'export const a = 3;\n' }, 'next');
+    fault(b.w, 'health', 300, 99999, b.img.digest);
+    expect(bootstrapRun(b).code).toBe(3);
+    expect([readState(b.w).LAST_FAILED_SHA, readState(b.w).INCIDENT]).toEqual([undefined, `${b.x} ${b.img.digest} ${reason}`]);
+  });
+});
+
+describe('(б-е) after the first image release the timer deploys as usual', () => {
+  it('a new merge takes the ordinary auto path against S = D', () => {
+    const b = bootWorld('absent');
+    expect(bootstrapRun(b).code).toBe(0);
+    const y = push(b.w, { 'src/a.ts': 'export const a = 3;\n' }, 'next');
+    const imgY = publish(b.w, imageOf(y));
+    tick(b.w);
+    advance(b.w, 600);
+    const before = events(b.w).length;
+    expect(tick(b.w).code).toBe(0);
+    const preY = `19700102T040640Z-${short(y)}-pre.db`;
+    expect(events(b.w).slice(before)).toEqual([
+      `checks ${y}`, `resolve ${y}`, `attest ${imgY.digest} ${y}`, `image pull --sha ${y} --digest ${imgY.digest}`, 'image current',
+      `image audit --digest ${imgY.digest}`, `image local --digest ${b.img.digest}`, `snapshot ${preY}`,
+      `image trial --digest ${imgY.digest} --previous ${b.img.digest} --snapshot ${preY}`, `image activate --digest ${imgY.digest}`,
+      ...polls(61), `image prune --keep ${imgY.digest}`, 'prune',
+    ]);
+    expect(stateAtActivate(b.w, 2).WINDOW_MODE).toBe('auto');
+    expect(readState(b.w)).toEqual({
+      ...settledState(imgY), PREVIOUS_SHA: b.x, LAST_SEEN_DEPLOYED_SHA: y, MAIN_SEEN_SHA: y, MAIN_SEEN_S: '100600',
+    });
+  });
+});
+
+describe('(б-ж) a bootstrap interrupted after its activation', () => {
+  it('the tick finds D running from the Quadlet file (row 3), watches the full window and settles it', () => {
+    const b = bootWorld('absent');
+    reply(b.w, 'activate', b.img.digest, 'kill-after');
+    expect(bootstrapRun(b).code).toBe(null);
+    expect(readState(b.w)).toEqual(bootWindow(b));
+    expect(tick(b.w).code).toBe(0);
+    expect(events(b.w).slice(bootToActivate(b).length)).toEqual(['image current', ...polls(61), `image prune --keep ${b.img.digest}`, 'prune']);
+    expect(readState(b.w)).toEqual({ ...settledState(b.img), PREVIOUS_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.x });
+    expect(notes(b.w)).toEqual([bootSettledNote(b.x)]);
+  });
+});
+
+describe('(б-з) a bootstrap activation refused before it changed anything', () => {
+  it('nothing runs from a Quadlet file — production unchanged: the window is cancelled, the pre discarded, refused (1)', () => {
+    const b = bootWorld('absent');
+    reply(b.w, 'activate', b.img.digest, { code: 2, stderr: 'REFUSED: the unit is not generated from our Quadlet file\n' });
+    const r = bootstrapRun(b);
+    expect([r.code, r.out]).toEqual([
+      1, `⚠️ merge-deploy: the activation of ${short(b.x)} was refused and changed nothing: the unit is not generated from our Quadlet file — run again\n`,
+    ]);
+    expect(events(b.w)).toEqual([...bootToActivate(b), 'image current', `discard ${b.pre}`]);
+    expect([readState(b.w), notes(b.w), readdirSync(b.w.snapshots)]).toEqual([{ DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base }, [], []]);
+  });
+});

@@ -664,6 +664,9 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
   ].join('\n');
   const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
+  /** A valid bootstrap window: nothing settled, manual, no rollback target. */
+  const bootWindow = (w: ImageWorld) => `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'activating')}`
+    .replace(/^WINDOW_PREV_DIGEST=.*\n/m, '').replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
   /** The window of `text` as a resolve window: manual, and (unless `withPre`) without WINDOW_PRE. */
   const resolveWindow = (_w: ImageWorld, text: string, withPre = false) => {
     const t = text.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=resolve').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
@@ -715,6 +718,17 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     ['a resolve window with WINDOW_PREV_DIGEST while nothing is settled',
       (w) => resolveWindow(w, `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'watching')}`),
       'WINDOW_KIND is resolve and nothing is settled, but WINDOW_PREV_DIGEST is set'],
+    // Plan b2 п.15: the first image release is manual, has no rollback target, and exists only while nothing is settled.
+    ['a bootstrap window in auto mode', (w) => bootWindow(w).replace('WINDOW_MODE=manual', 'WINDOW_MODE=auto'),
+      'WINDOW_KIND is bootstrap but WINDOW_MODE is auto (the first image release is always manual)'],
+    ['a bootstrap window with WINDOW_PREV_DIGEST', (w) => `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'activating')}`
+      .replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
+      'WINDOW_KIND is bootstrap but WINDOW_PREV_DIGEST is set (the first image release has no rollback target)'],
+    ['a bootstrap window while an image is settled', (w) => `${good(w)}${fullWindow(w, 'activating')}`
+      .replace(/^WINDOW_PREV_DIGEST=.*\n/m, '').replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
+      'WINDOW_KIND is bootstrap but SETTLED_DIGEST is set (a bootstrap window exists only while nothing is settled)'],
+    ['a bootstrap window without WINDOW_PRE', (w) => bootWindow(w).replace(/^WINDOW_PRE=.*\n/m, ''),
+      'WINDOW_PHASE is set but WINDOW_PRE is not'],
     ['a deploy window without WINDOW_PREV_DIGEST', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
       'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
     ['WINDOW_KIND without a window', (w) => `${good(w)}WINDOW_KIND=deploy\n`, 'WINDOW_KIND is set but WINDOW_PHASE is not'],
