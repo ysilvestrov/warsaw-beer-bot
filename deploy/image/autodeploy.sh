@@ -46,6 +46,8 @@ MANUAL=0
 MANUAL_CMD=""
 TARGET=""
 SETTLED_ARG=""
+# Plan b2 п.28: resolve-incident --flat — the old unit and the flat tree are back, nothing is settled.
+FLAT=0
 FORCE=0
 ACK_INCOMPATIBLE=0
 # The mode of the window a deploy opens (spec §7.1): the tick's is always auto.
@@ -56,6 +58,7 @@ usage: autodeploy.sh                     (no arguments: the timer's tick)
        autodeploy.sh --manual deploy --target <sha> [--force] [--ack-incompatible]
        autodeploy.sh --manual bootstrap --target <sha>
        autodeploy.sh --manual resolve-incident --settled <sha>
+       autodeploy.sh --manual resolve-incident --flat
 USAGE
   exit 64
 }
@@ -81,6 +84,7 @@ if [ "$#" -gt 0 ]; then
         [ "$#" -ge 2 ] && _is_sha "$2" || usage
         SETTLED_ARG="$2"
         shift 2 ;;
+      resolve-incident:--flat) FLAT=1; shift ;;
       deploy:--force) FORCE=1; shift ;;
       deploy:--ack-incompatible) ACK_INCOMPATIBLE=1; shift ;;
       *) usage ;;
@@ -89,7 +93,8 @@ if [ "$#" -gt 0 ]; then
   unset _seen
   case "$MANUAL_CMD" in
     deploy|bootstrap) [ -n "$TARGET" ] || usage ;;
-    resolve-incident) [ -n "$SETTLED_ARG" ] || usage ;;
+    # Exactly one of the two ways out of an incident.
+    resolve-incident) { [ -n "$SETTLED_ARG" ] && [ "$FLAT" = 0 ]; } || { [ -z "$SETTLED_ARG" ] && [ "$FLAT" = 1 ]; } || usage ;;
   esac
   # Plan b2 п.9: --ack-incompatible gives up the automatic rollback, needed or not — the human
   # said a code-only rollback is not to be trusted.
@@ -367,7 +372,7 @@ notify() {
 # again; nothing is recorded, not even the daily marker, so the timer's own notice is not muted.
 halt() { # <daily marker> <message> [the tick's exit]
   if [ "$MANUAL" = 1 ]; then
-    printf '%s\n' "$(manual_text "$2")" >&2
+    printf '%s\n' "$(manual_text "$2")$(way_back)" >&2
     exit 1
   fi
   once_a_day "$1" "$2"
@@ -397,8 +402,16 @@ manual_text() {
 }
 # A manual run's own refusal: told to the human in front of it; this writes nothing, sends nothing.
 manual_refuse() {
-  printf '%s\n' "$1" >&2
+  printf '%s\n' "$1$(way_back)" >&2
   exit 1
+}
+# Plan b2 п.29: a refusal of the second bootstrap run leaves the old bot stopped and its unit moved
+# aside — it says how to bring it back. Set only there (bootstrap_run, unit=absent and not running),
+# so no other run, the tick's included, says anything more.
+WAY_BACK=""
+way_back() {
+  [ -n "$WAY_BACK" ] || return 0
+  printf '\n%s' "$WAY_BACK"
 }
 
 # --- verdict parsers (pure: no state, no seams) -------------------------------------- BEGIN
@@ -562,6 +575,7 @@ unset _k
 HOLDS=()
 RANGE_PRS=()
 CONTRACT_PRS=()
+STEP_HOLDS=()
 UNREAD=()
 SCAN_UNREAD=0
 
@@ -837,7 +851,7 @@ is_main_head() {
 
 # A gate the COMMIT failed. Recorded, so the same head is never retried; the next merge is.
 refuse() {
-  notify "⛔ merge-deploy refused ${1:0:7}: $2"
+  notify "⛔ merge-deploy refused ${1:0:7}: $2$(way_back)"
   if is_main_head "$1"; then LAST_FAILED_SHA="$1"; fi
   write_state
   exit 1
@@ -906,19 +920,25 @@ add_unique() {
 # A failure to look is a hold, never a pass (fail closed).
 # Plan b2 п.8, for a manual run, which skips the holds a human releases by running it: CONTRACT_PRS
 # (the PRs whose code-only rollback is not proven safe) and SCAN_UNREAD=1 with the reasons in
-# UNREAD (what could not be read could carry such a label). HOLDS keeps every reason as before.
+# UNREAD (what could not be read could carry such a label). HOLDS keeps every reason as before;
+# STEP_HOLDS is its part a human releases by running (a held path, deploy:hold), which bootstrap
+# shows (plan b2 п.31).
 scan_range() {
   local x="$1" paths commits back="" f start last
   HOLDS=()
   RANGE_PRS=()
   CONTRACT_PRS=()
+  STEP_HOLDS=()
   UNREAD=()
   SCAN_UNREAD=0
   if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$x"); then
     _unread "could not list the changed paths"
   fi
   while IFS= read -r f; do
-    if [ -n "$f" ] && path_is_held "$f"; then HOLDS+=("path $f needs a human step"); fi
+    if [ -n "$f" ] && path_is_held "$f"; then
+      HOLDS+=("path $f needs a human step")
+      STEP_HOLDS+=("path $f needs a human step")
+    fi
   done <<< "$paths"
   if ! commits=$(git -C "$REPO" rev-list "${DEPLOYED_SHA}..${x}"); then
     _unread "could not list the commits"
@@ -967,7 +987,9 @@ _scan_labels() {
       if [ "$dir" = forward ]; then
         add_unique RANGE_PRS "#$pr"
         case ",$labels," in
-          *,deploy:hold,*) add_unique HOLDS "PR #$pr carries deploy:hold — https://github.com/${GH_REPO}/pull/$pr" ;;
+          *,deploy:hold,*)
+            add_unique HOLDS "PR #$pr carries deploy:hold — https://github.com/${GH_REPO}/pull/$pr"
+            add_unique STEP_HOLDS "PR #$pr carries deploy:hold — https://github.com/${GH_REPO}/pull/$pr" ;;
         esac
       fi
       # Spec §6.4: compatibility for a code-only rollback is not proven — a human deploys it,
@@ -1325,7 +1347,13 @@ retry_pending_marks() {
 # rollback); 0 when it is the host's (a foreign unit, an unknown Quadlet, activations that never
 # complete). Never returns.
 open_incident() {
-  local blame="$1" reason="${2//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE"
+  local blame="$1" reason="${2//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE" out
+  # Plan b2 п.28: after a failed first image release there may be nothing of ours to settle — the
+  # human may have brought the old unit and the flat tree back instead.
+  out="bash deploy/deploy.sh --resolve-incident --settled <sha>"
+  if [ "$WINDOW_KIND" = bootstrap ]; then
+    out="bash deploy/deploy.sh --resolve-incident --settled <sha> (an image of ours runs from the Quadlet file), or bash deploy/deploy.sh --resolve-incident --flat (the old unit and the flat tree run again)"
+  fi
   if [ "$blame" = 1 ] && is_main_head "$x"; then LAST_FAILED_SHA="$x"; fi
   INCIDENT="$x $d $reason"
   write_state
@@ -1334,7 +1362,7 @@ open_incident() {
   write_state
   notify "🔥 merge-deploy INCIDENT: ${x:0:7} (${d}) — ${reason}. Nothing was rolled back automatically$([ "$mode" = manual ] && printf ' (a manual window)'); the database is untouched.
 Pre-deploy snapshot: ${PRE_NOTE}
-Nothing deploys until a human restores production and runs: bash deploy/deploy.sh --resolve-incident --settled <sha>"
+Nothing deploys until a human restores production and runs: ${out}"
   exit 3
 }
 
@@ -1636,11 +1664,17 @@ watch_window() {
 }
 
 # The window was written but nothing changed production: it is cancelled, the pre discarded.
+# $2 = loud (plan b2 п.27): the tick cancelled a first image release — the old bot is stopped and
+# nothing of ours runs, so production may be down: told every time, never muted by the daily marker.
 cancel_window() {
   local pre="$WINDOW_PRE"
   "$DISCARD_CMD" "$pre" >/dev/null 2>&1 || echo "WARNING: could not discard $pre"
   clear_window
   write_state
+  if [ "${2:-}" = loud ] && [ "$MANUAL" = 0 ]; then
+    notify "$1"
+    exit 0
+  fi
   halt LAST_ASSESS_NOTICE "$1"
 }
 
@@ -1685,6 +1719,11 @@ activate_candidate() {
       fi
       # Before a bootstrap window nothing ran from a Quadlet file: "unchanged" is none (plan b2 п.16).
       if [ "$q" = "${WINDOW_PREV_DIGEST:-none}" ] && [ "$d" = "${WINDOW_PREV_DIGEST:-none}" ]; then
+        # Plan b2 п.27: the tick that re-activates a first image release (row 2) cannot retry it — only
+        # the human can, and the old bot is stopped. A manual run says "run again" (and the way back).
+        if [ "$WINDOW_KIND" = bootstrap ] && [ "$MANUAL" = 0 ]; then
+          cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — production may be down — run bash deploy/deploy.sh --bootstrap again." loud
+        fi
         cancel_window "⚠️ merge-deploy: the activation of ${X:0:7} was refused and changed nothing: ${why} — retrying next tick."
       fi
       if [ "$q" = "$WINDOW_DIGEST" ]; then
@@ -1901,7 +1940,7 @@ resume_window() {
       # Plan b2 п.16: a bootstrap interrupted before its activation — no Quadlet file, no unit — is
       # cancelled like row 1; the human runs it again (there is no settled image the tick could use).
       if [ "$WINDOW_KIND" = bootstrap ] && [ "$q" = none ] && [ "$u" = absent ]; then
-        cancel_window "⚠️ merge-deploy: the first image release ${X:0:7} was interrupted before its activation; nothing runs from the Quadlet file, so the window is cancelled — run bash deploy/deploy.sh --bootstrap again."
+        cancel_window "⚠️ merge-deploy: the first image release ${X:0:7} was interrupted before its activation; nothing runs from the Quadlet file, so the window is cancelled — production may be down — run bash deploy/deploy.sh --bootstrap again." loud
       fi
       # Row 1: the Quadlet file still names S — activate never ran, production is unchanged.
       if [ -n "$WINDOW_PREV_DIGEST" ] && [ "$q" = "$WINDOW_PREV_DIGEST" ]; then
@@ -2090,28 +2129,89 @@ manual_ci_gate() {
   esac
 }
 
-# --- bootstrap (plan b2 п.14, spec §7.4 "Bootstrap", §8 п.2) --------------------------------------------
+# --- bootstrap (plan b2 п.14, 26, 29–32; spec §7.4 "Bootstrap", §8 п.2) ------------------------------------
 # The first image release: production still runs the flat tree, there is no settled image, so no
 # compat check can prove anything (trial against itself: START is the positive control) and there is
-# nothing to roll back to — the window is manual, and its failure is an incident. The first run finds
-# the old unit and prints the root steps without writing anything; the run after them deploys.
+# nothing to roll back to — the window is manual, and its failure is an incident. What production runs
+# is read first: it says which of the two runs this is, and the second one's refusals must say how to
+# bring the old bot back (п.29). The first run (the old unit, the bot running) gates X, trials it dry
+# on a snapshot of the live database that is then discarded (п.30: a bad X never stops the bot), and
+# prints the root steps; nothing is recorded. The run after them (no unit, the bot stopped) deploys.
 BOOTSTRAP_STEPS="The bot still runs from the old unit (unit=foreign). The first image release needs these root steps first:
   sudo systemctl stop warsaw-beer-bot
+  sudo systemctl disable warsaw-beer-bot
   sudo mv /etc/systemd/system/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service.flat
   sudo systemctl daemon-reload
 Then run again: bash deploy/deploy.sh --bootstrap
 Nothing was changed."
+# Plan b2 п.29, the steps above undone (enable: the steps disabled it).
+BOOTSTRAP_WAY_BACK="The old bot is stopped and its unit moved aside. To bring it back:
+  sudo mv /etc/systemd/system/warsaw-beer-bot.service.flat /etc/systemd/system/warsaw-beer-bot.service
+  sudo systemctl daemon-reload
+  sudo systemctl enable warsaw-beer-bot
+  sudo systemctl start warsaw-beer-bot"
+# Plan b2 п.31: the holds and contract PRs of DEPLOYED_SHA..X, shown, never a gate — running bootstrap
+# is the confirmation, but the human must see what he confirms.
+bootstrap_range() {
+  scan_range "$X"
+  [ "${#STEP_HOLDS[@]}" -gt 0 ] || [ "${#CONTRACT_PRS[@]}" -gt 0 ] || [ "$SCAN_UNREAD" = 1 ] || return 0
+  printf 'The range %s..%s — shown, not a gate (this run is the confirmation):\n' "${DEPLOYED_SHA:0:7}" "${X:0:7}"
+  printf '• %s\n' "${STEP_HOLDS[@]}" "${CONTRACT_PRS[@]}" "${UNREAD[@]}"
+  if [ "${#CONTRACT_PRS[@]}" -gt 0 ]; then echo "A fallback to the flat tree needs the pre snapshot restored."; fi
+}
+# The trial of D against itself, both runs (plan b2 п.30): returns only on OK D.
+bootstrap_verdict() {
+  case "$IMG_VERDICT" in
+    "OK $D") return 0 ;;
+    FAILED\ *)
+      refuse "$X" "the trial on a copy of production failed: ${IMG_VERDICT#FAILED }
+$(tail -n 20 <<< "$IMG_ERR")" ;;
+    COMPAT_FAILED\ *)
+      # Plan b2 п.32: against itself, COMPAT is X's own START on the database X migrated.
+      manual_refuse "the trial of ${X:0:7} against itself failed: ${IMG_VERDICT#COMPAT_FAILED } — a defect of ${X:0:7}: it would not start again on the database it migrated
+$(tail -n 20 <<< "$IMG_ERR")
+Nothing is recorded against the commit." ;;
+    REFUSED\ *)
+      manual_refuse "the trial of ${X:0:7} was refused: ${IMG_VERDICT#REFUSED }
+$(tail -n 20 <<< "$IMG_ERR")
+Nothing is recorded against the commit; fix the host and run again." ;;
+    *)
+      halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick." ;;
+  esac
+}
 bootstrap_run() {
-  local boot
+  local boot first=0 urc=0
   if [ -n "$SETTLED_DIGEST" ]; then
     manual_refuse "an image is already settled (${SETTLED_SHA:0:7}) — the first image release is done; deploy with bash deploy/deploy.sh"
   fi
   if [ -z "$DEPLOYED_SHA" ]; then
     manual_refuse "the state records no deployed commit — the first image release starts from the flat tree's DEPLOYED_SHA, which stage «в» carries over from state.env"
   fi
+  # X == DEPLOYED_SHA is allowed: the first image of the code that already runs.
   if [ "$X" != "$DEPLOYED_SHA" ] && { ! git -C "$REPO" rev-parse -q --verify "${DEPLOYED_SHA}^{commit}" >/dev/null \
        || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; }; then
     manual_refuse "production (${DEPLOYED_SHA:0:7}) is not an ancestor of ${X:0:7} — the first image release does not go backwards"
+  fi
+  bootstrap_range
+  read_current
+  case "$CUR_UNIT" in
+    # Plan b2 п.14: the old unit in /etc would override the Quadlet-generated one.
+    foreign) first=1 ;;
+    quadlet)
+      manual_refuse "a Quadlet unit exists but nothing is settled — check by hand (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST})" ;;
+  esac
+  if [ "$first" = 0 ]; then
+    if [ "$CUR_QUADLET" != none ] || [ "$CUR_DIGEST" != none ]; then
+      manual_refuse "no unit, but a Quadlet file or a container is there (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST}) and nothing is settled — check by hand"
+    fi
+    # Plan b2 п.26: unit=absent does not prove the bot stopped — systemd keeps a running unit whose
+    # file was moved as not-found/active. The snapshot is of a database at rest only if it is.
+    unit_running || urc=$?
+    case "$urc" in
+      0) manual_refuse "the old bot still runs (unit=absent but active) — sudo systemctl stop warsaw-beer-bot, then run again" ;;
+      2) manual_refuse "could not read whether the old bot runs (systemctl show warsaw-beer-bot) — run again" ;;
+    esac
+    WAY_BACK="$BOOTSTRAP_WAY_BACK"
   fi
   manual_stale_gate
   manual_ci_gate
@@ -2119,17 +2219,15 @@ bootstrap_run() {
   attest_image
   pull_candidate
   audit_candidate
-  read_current
-  case "$CUR_UNIT" in
-    foreign)
-      # Plan b2 п.14: the old unit in /etc would override the Quadlet-generated one. Nothing written.
-      printf '%s\n' "$BOOTSTRAP_STEPS"
-      exit 1 ;;
-    quadlet)
-      manual_refuse "a Quadlet unit exists but nothing is settled — check by hand (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST})" ;;
-  esac
-  if [ "$CUR_QUADLET" != none ] || [ "$CUR_DIGEST" != none ]; then
-    manual_refuse "no unit, but a Quadlet file or a container is there (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST}) and nothing is settled — check by hand"
+  if [ "$first" = 1 ]; then
+    # Plan b2 п.30: the dry trial — the snapshot is discarded whatever the verdict; nothing is
+    # recorded unless the trial failed (refuse, п.19), and the bot keeps running either way.
+    take_pre
+    image_call trial --digest "$D" --previous "$D" --snapshot "$PRE_NAME"
+    discard_pending "$PRE_PATH"
+    bootstrap_verdict
+    printf 'A dry trial of %s on a snapshot of the live database passed; the snapshot is discarded.\n%s\n' "${X:0:7}" "$BOOTSTRAP_STEPS"
+    exit 1
   fi
   if ! PORT=$("$API_PORT_CMD"); then
     manual_refuse "could not resolve API_PORT — run again"
@@ -2142,17 +2240,7 @@ bootstrap_run() {
   image_call trial --digest "$D" --previous "$D" --snapshot "$PRE_NAME"
   if [ "$IMG_VERDICT" != "OK $D" ]; then
     discard_pending "$PRE_PATH"
-    case "$IMG_VERDICT" in
-      FAILED\ *)
-        refuse "$X" "the trial on a copy of production failed: ${IMG_VERDICT#FAILED }
-$(tail -n 20 <<< "$IMG_ERR")" ;;
-      COMPAT_FAILED\ *|REFUSED\ *)
-        manual_refuse "the trial of ${X:0:7} against itself did not pass: ${IMG_VERDICT}
-$(tail -n 20 <<< "$IMG_ERR")
-Nothing is recorded against the commit." ;;
-      *)
-        halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick." ;;
-    esac
+    bootstrap_verdict
   fi
   # Spec §7.1: the window is in the state BEFORE anything changes production.
   WINDOW_SHA="$X"
@@ -2169,6 +2257,65 @@ Nothing is recorded against the commit." ;;
   PENDING_PRE=""
   write_state
   activate_candidate
+}
+
+# --- resolve-incident --flat (plan b2 п.28, spec §7.4 "Уточнення bootstrap") -----------------------------
+# A failed first image release that the human undid: the old unit and the flat tree run again, and
+# there is no image of ours to settle. Proven before anything is written: nothing settled, the old
+# unit (unit=foreign) running, /health answering R, R on origin/main. Then ONE write closes the
+# incident and records R as deployed (and observed — the human named it), with no digest: nothing of
+# ours runs. No window: the controller does not watch the flat tree. The next step is --bootstrap.
+resolve_flat() {
+  local kind q i d u urc=0 r
+  if [ -n "$SETTLED_DIGEST" ]; then
+    manual_refuse "an image is settled (${SETTLED_SHA:0:7}) — --flat closes only an incident of the first image release; restore an image and run: bash deploy/deploy.sh --resolve-incident --settled <sha>"
+  fi
+  image_call current
+  read -r kind q i d u <<< "$IMG_VERDICT"
+  if [ "$kind" != CURRENT ]; then
+    manual_refuse "could not read what production runs: ${IMG_VERDICT} — run again"
+  fi
+  if [ "$u" != foreign ]; then
+    manual_refuse "the old unit is not there (unit=${u}) — --flat closes the incident only when the old unit runs the flat tree again"
+  fi
+  unit_running || urc=$?
+  case "$urc" in
+    1) manual_refuse "the old unit does not run — start it (sudo systemctl start warsaw-beer-bot), then run again" ;;
+    2) manual_refuse "could not read whether the old unit runs (systemctl show warsaw-beer-bot) — run again" ;;
+  esac
+  if ! PORT=$("$API_PORT_CMD"); then
+    manual_refuse "could not resolve API_PORT — run again"
+  fi
+  if ! r=$(read_health); then
+    manual_refuse "/health does not answer — the flat tree is not up; run again when it answers"
+  fi
+  if [ ! -d "$REPO/.git" ] && ! timeout "$STEP_TIMEOUT_GIT_S" git clone -q "$REPO_URL" "$REPO"; then
+    manual_refuse "git clone of $REPO_URL failed — run again"
+  fi
+  if ! timeout "$STEP_TIMEOUT_GIT_S" git -C "$REPO" fetch -q --prune origin; then
+    manual_refuse "git fetch failed — run again"
+  fi
+  if ! git -C "$REPO" merge-base --is-ancestor "$r" origin/main 2>/dev/null; then
+    manual_refuse "/health answers releaseSha ${r:0:7}, which is not on origin/main — it cannot be recorded as deployed"
+  fi
+  # An incident whose second write never happened still carries its window (open_incident).
+  if [ -n "$WINDOW_PHASE" ]; then
+    retain_pre
+    clear_window
+    echo "the incident's window was still in the state; its pre: ${PRE_NOTE}"
+  fi
+  INCIDENT=""
+  DEPLOYED_SHA="$r"
+  LAST_SEEN_DEPLOYED_SHA="$r"
+  DEPLOYED_DIGEST=""
+  DEPLOYED_ID=""
+  DEPLOYED_CONTENT=""
+  # Plan b2 п.24: the incident these pres were evidence for is closed.
+  PENDING_MARK=""
+  write_state
+  release_retained
+  notify "✅ merge-deploy: the incident is closed — the old unit runs the flat tree at ${r:0:7}, recorded as deployed; nothing is settled. Next: bash deploy/deploy.sh --bootstrap${RELEASE_NOTE}"
+  exit 0
 }
 
 # --- resolve-incident (plan b2 п.13, spec §7.3) -------------------------------------------------------
@@ -2243,6 +2390,7 @@ retry_pending_marks
 # Spec §7.3: an open incident blocks everything but PAUSED and the lock — before the window,
 # before git, before CI.
 if [ -n "$INCIDENT" ]; then
+  if [ "$MANUAL_CMD" = resolve-incident ] && [ "$FLAT" = 1 ]; then resolve_flat; fi
   if [ "$MANUAL_CMD" = resolve-incident ]; then resolve_incident; fi
   read -r _inc_sha _inc_digest _inc_reason <<< "$INCIDENT"
   if [ "$MANUAL" = 1 ]; then

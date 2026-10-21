@@ -22,7 +22,8 @@ vi.setConfig({ testTimeout: 60_000 });
 const USAGE = 'usage: autodeploy.sh                     (no arguments: the timer\'s tick)\n'
   + '       autodeploy.sh --manual deploy --target <sha> [--force] [--ack-incompatible]\n'
   + '       autodeploy.sh --manual bootstrap --target <sha>\n'
-  + '       autodeploy.sh --manual resolve-incident --settled <sha>\n';
+  + '       autodeploy.sh --manual resolve-incident --settled <sha>\n'
+  + '       autodeploy.sh --manual resolve-incident --flat\n';
 const GH = 'https://github.com/ysilvestrov/warsaw-beer-bot/pull';
 
 interface M { w: ImageWorld; x: string; img: Image; s: Image; pre: string }
@@ -93,6 +94,13 @@ describe('(а) usage: anything outside the grammar is 64 and does nothing', () =
     ['--force in bootstrap', ['--manual', 'bootstrap', '--target', X, '--force']],
     ['--target in resolve-incident', ['--manual', 'resolve-incident', '--target', X]],
     ['resolve-incident without --settled', ['--manual', 'resolve-incident']],
+    // Plan b2 п.28: --flat is the other way out of an incident, never with --settled.
+    ['--flat with --settled', ['--manual', 'resolve-incident', '--settled', X, '--flat']],
+    ['--settled after --flat', ['--manual', 'resolve-incident', '--flat', '--settled', X]],
+    ['--flat twice', ['--manual', 'resolve-incident', '--flat', '--flat']],
+    ['--flat with a value', ['--manual', 'resolve-incident', '--flat', X]],
+    ['--flat in deploy', ['--manual', 'deploy', '--target', X, '--flat']],
+    ['--flat in bootstrap', ['--manual', 'bootstrap', '--target', X, '--flat']],
   ])('%s', (_name, args) => {
     const w = imageWorld();
     const before = stateText(w);
@@ -956,35 +964,45 @@ describe('(р-з) at most five unmarks per settle', () => {
 // --- Task 4 of plan b2: `--manual bootstrap --target <sha>` -----------------------------------------------
 
 interface Boot { w: ImageWorld; x: string; img: Image; pre: string }
-const BOOTSTRAP_STEPS = 'The bot still runs from the old unit (unit=foreign). The first image release needs these root steps first:\n'
+/** Plan b2 п.30, п.32: the first run's dry trial passed; the root steps, `disable` before the `mv`. */
+const bootSteps = (x: string) => `A dry trial of ${short(x)} on a snapshot of the live database passed; the snapshot is discarded.\n`
+  + 'The bot still runs from the old unit (unit=foreign). The first image release needs these root steps first:\n'
   + '  sudo systemctl stop warsaw-beer-bot\n'
+  + '  sudo systemctl disable warsaw-beer-bot\n'
   + '  sudo mv /etc/systemd/system/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service.flat\n'
   + '  sudo systemctl daemon-reload\n'
   + 'Then run again: bash deploy/deploy.sh --bootstrap\n'
   + 'Nothing was changed.\n';
+/** Plan b2 п.29: what every refusal of the second run (the old bot stopped) ends with. */
+const WAY_BACK = 'The old bot is stopped and its unit moved aside. To bring it back:\n'
+  + '  sudo mv /etc/systemd/system/warsaw-beer-bot.service.flat /etc/systemd/system/warsaw-beer-bot.service\n'
+  + '  sudo systemctl daemon-reload\n'
+  + '  sudo systemctl enable warsaw-beer-bot\n'
+  + '  sudo systemctl start warsaw-beer-bot';
 
 /**
  * The flat tree runs base (DEPLOYED_SHA carried over, observed); nothing is settled; no Quadlet file, no
  * container of ours. main has X with its image published. The run starts at 100000: the pre's stamp.
  */
-function bootWorld(unit: string): Boot {
+function bootWorld(unit: string, files: Record<string, string> = { 'src/a.ts': 'export const a = 2;\n' }): Boot {
   const w = imageWorld();
   for (const f of ['quadlet', 'container', 'running_sha']) hostSet(w, f, null);
   hostSet(w, 'unit', unit);
   seedState(w, { DEPLOYED_SHA: w.base, LAST_SEEN_DEPLOYED_SHA: w.base });
-  const x = push(w, { 'src/a.ts': 'export const a = 2;\n' }, 'feat');
+  const x = push(w, files, 'feat');
   const img = publish(w, imageOf(x));
   return { w, x, img, pre: `19700102T034640Z-${short(x)}-pre.db` };
 }
 const bootstrapRun = (b: Boot, over: Record<string, string> = {}) => manual(b.w, ['bootstrap', '--target', b.x], over);
+/** What production runs is read first: it says which run this is (plan b2 п.29). Then the gates. */
 const bootProbe = ({ x, img }: Boot) => [
-  `checks ${x}`, `resolve ${x}`, `attest ${img.digest} ${x}`, `image pull --sha ${x} --digest ${img.digest}`,
-  `image audit --digest ${img.digest}`, 'image current',
+  'image current', `checks ${x}`, `resolve ${x}`, `attest ${img.digest} ${x}`, `image pull --sha ${x} --digest ${img.digest}`,
+  `image audit --digest ${img.digest}`,
 ];
-const bootToActivate = (b: Boot) => [
-  ...bootProbe(b), `snapshot ${b.pre}`, `image trial --digest ${b.img.digest} --previous ${b.img.digest} --snapshot ${b.pre}`,
-  `image activate --digest ${b.img.digest}`,
-];
+const bootTrial = (b: Boot) => [`snapshot ${b.pre}`, `image trial --digest ${b.img.digest} --previous ${b.img.digest} --snapshot ${b.pre}`];
+/** The first run (unit=foreign): the gates, then the dry trial on a snapshot that is discarded (plan b2 п.30). */
+const bootDry = (b: Boot) => [...bootProbe(b), ...bootTrial(b), `discard ${b.pre}`];
+const bootToActivate = (b: Boot) => [...bootProbe(b), ...bootTrial(b), `image activate --digest ${b.img.digest}`];
 const bootWindow = (b: Boot) => ({
   DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base,
   WINDOW_SHA: b.x, WINDOW_DIGEST: b.img.digest, WINDOW_ID: b.img.id, WINDOW_CONTENT: b.img.content, WINDOW_OLD: b.w.base,
@@ -994,12 +1012,59 @@ const bootWindow = (b: Boot) => ({
 const bootSettledNote = (x: string) => `✅ merge-deploy: the first image release ${short(x)} is live and settled — from now on the timer deploys main against it.`;
 
 describe('(б-а) bootstrap, first run: the old unit is still there', () => {
-  it('prints the root steps (1), writes nothing, takes no snapshot, trials and activates nothing', () => {
+  it('first run: a dry trial on a discarded snapshot, the steps printed, nothing recorded', () => {
     const b = bootWorld('foreign');
     const before = stateText(b.w);
     const r = bootstrapRun(b);
-    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([1, BOOTSTRAP_STEPS, before, bootProbe(b), []]);
-    expect(existsSync(b.w.snapshots)).toBe(false);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([1, bootSteps(b.x), before, bootDry(b), []]);
+    expect(readdirSync(b.w.snapshots)).toEqual([]);
+  });
+
+  it('a repeated first run (the steps not done yet): the same output, the state still unchanged', () => {
+    const b = bootWorld('foreign');
+    const before = stateText(b.w);
+    const first = bootstrapRun(b);
+    const second = bootstrapRun(b);
+    expect([second.code, second.out, first.out, stateText(b.w), events(b.w), notes(b.w)])
+      .toEqual([1, bootSteps(b.x), bootSteps(b.x), before, [...bootDry(b), ...bootDry(b)], []]);
+  });
+});
+
+describe('(б-а2) plan b2 п.30: the dry trial of the first run fails', () => {
+  const failedNote = (b: Boot) => `[manual] ⛔ merge-deploy refused ${short(b.x)}: the trial on a copy of production failed: TRIAL FAILED: no such column: venue_id\n`
+    + '[trial exited 1]\nTRIAL FAILED: no such column: venue_id';
+
+  it('FAILED: refused (1), no root steps, the snapshot discarded, X (main\'s head) recorded as failed', () => {
+    const b = bootWorld('foreign');
+    reply(b.w, 'trial', b.img.digest, golden('trial-trial-failed'));
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, events(b.w), notes(b.w), readdirSync(b.w.snapshots)])
+      .toEqual([1, `${failedNote(b)}\n`, bootDry(b), [failedNote(b)], []]);
+    expect(readState(b.w)).toEqual({ DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base, LAST_FAILED_SHA: b.x });
+  });
+
+  it('FAILED of a commit behind main\'s head: refused the same, nothing recorded (plan b2 п.19)', () => {
+    const b = bootWorld('foreign');
+    push(b.w, { 'src/a.ts': 'export const a = 3;\n' }, 'next');
+    reply(b.w, 'trial', b.img.digest, golden('trial-trial-failed'));
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), notes(b.w)]).toEqual([1, `${failedNote(b)}\n`, before, [failedNote(b)]]);
+  });
+
+  it('COMPAT FAILED against itself: refused (1) naming the defect, nothing recorded, no steps', () => {
+    const b = bootWorld('foreign');
+    reply(b.w, 'trial', b.img.digest, golden('trial-compat-failed'));
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
+      1,
+      `the trial of ${short(b.x)} against itself failed: COMPAT FAILED: START FAILED: bot exited (code 1) before "api listening" `
+      + `— a defect of ${short(b.x)}: it would not start again on the database it migrated\n`
+      + '[compat exited 1]\nSTART FAILED: bot exited (code 1) before "api listening"\noutput tail:\nSqliteError: no such column: venue\n'
+      + 'Nothing is recorded against the commit.\n',
+      before, bootDry(b), [],
+    ]);
   });
 });
 
@@ -1010,11 +1075,148 @@ describe('(б-б) bootstrap, the run after the root steps', () => {
     hostSet(b.w, 'unit', 'absent');
     const r = bootstrapRun(b);
     expect(r.code).toBe(0);
-    expect(events(b.w)).toEqual([...bootProbe(b), ...bootToActivate(b), ...polls(61), `image prune --keep ${b.img.digest}`, 'prune']);
+    expect(events(b.w)).toEqual([...bootDry(b), ...bootToActivate(b), ...polls(61), `image prune --keep ${b.img.digest}`, 'prune']);
     expect(stateAtActivate(b.w, 1)).toEqual(bootWindow(b));
     expect(readState(b.w)).toEqual({ ...settledState(b.img), PREVIOUS_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base });
     expect(notes(b.w)).toEqual([`[manual] ${bootSettledNote(b.x)}`]);
     expect([hostRead(b.w, 'quadlet'), hostRead(b.w, 'container'), hostRead(b.w, 'unit')]).toEqual([b.img.digest, b.img.digest, 'quadlet']);
+  });
+
+  it('X == DEPLOYED_SHA is allowed: the first image of the code that already runs', () => {
+    const b = bootWorld('absent');
+    const s = b.w.settled;
+    const pre = `19700102T034640Z-${short(s.sha)}-pre.db`;
+    const r = manual(b.w, ['bootstrap', '--target', s.sha]);
+    expect(r.code).toBe(0);
+    expect(events(b.w)).toEqual([
+      'image current', `checks ${s.sha}`, `resolve ${s.sha}`, `attest ${s.digest} ${s.sha}`, `image pull --sha ${s.sha} --digest ${s.digest}`,
+      `image audit --digest ${s.digest}`, `snapshot ${pre}`, `image trial --digest ${s.digest} --previous ${s.digest} --snapshot ${pre}`,
+      `image activate --digest ${s.digest}`, ...polls(61), `image prune --keep ${s.digest}`, 'prune',
+    ]);
+    expect(readState(b.w)).toEqual({ ...settledState(s), PREVIOUS_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base });
+  });
+});
+
+describe('(б-и) plan b2 п.26: the second run requires the old bot to be stopped', () => {
+  it.each([
+    ['the unit absent but active (systemd keeps a running unit whose file was moved)', 'ActiveState=active\nSubState=running\nMainPID=4242',
+      'the old bot still runs (unit=absent but active) — sudo systemctl stop warsaw-beer-bot, then run again\n'],
+    ['the unit state unreadable', 'ActiveState=active',
+      'could not read whether the old bot runs (systemctl show warsaw-beer-bot) — run again\n'],
+  ])('%s: refused (1), the state byte for byte the same, no snapshot', (_name, unitState, out) => {
+    const b = bootWorld('absent');
+    hostSet(b.w, 'unit_state', unitState);
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w), existsSync(b.w.snapshots)]).toEqual([1, out, before, ['image current'], [], false]);
+  });
+});
+
+describe('(б-к) plan b2 п.29: every refusal of the second run says how to bring the old bot back', () => {
+  const S5 = `sha256:${'5'.repeat(64)}`;
+  it.each<[string, (b: Boot) => Record<string, string>, (b: Boot) => string, (b: Boot) => string[]]>([
+    ['stale installed copies', (b) => ({ WBB_INSTALLED_CHECK: stub(b.w.bin, 'installed-stale', 'echo "STALE: 1 installed file(s) differ from origin/main:"; exit 1') }),
+      () => 'the installed deployer is out of date — a merged fix is not live until it is installed.\n'
+        + 'STALE: 1 installed file(s) differ from origin/main:\n'
+        + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+      () => ['image current']],
+    ['CI failed', (b) => ({ WBB_CHECKS_CMD: checksStub(b.w, 'checks-fail', ['ci\tcompleted\tfailure\t101', 'image\tcompleted\tsuccess\t101']) }),
+      (b) => `CI failed on ${short(b.x)} — not deploying: ci=failure`, (b) => bootProbe(b).slice(0, 2)],
+    ['the attestation fails', (b) => { reply(b.w, 'attest', b.img.digest, { code: 1, stdout: 'Error: no attestations found\n' }); return {}; },
+      (b) => `⛔ merge-deploy: the image of ${short(b.x)} (${b.img.digest}) did not pass attestation (exit 1) — not deploying it; NOT recorded as a failed commit.\n`
+        + 'Error: no attestations found — run again',
+      (b) => bootProbe(b).slice(0, 4)],
+    ['the pre snapshot fails', (b) => ({ WBB_SNAPSHOT_CMD: stub(b.w.bin, 'snapshot-fail', 'echo "VACUUM INTO: disk I/O error" >&2; exit 1') }),
+      (b) => `⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${short(b.x)}.\nVACUUM INTO: disk I/O error — run again`,
+      (b) => [...bootProbe(b), `discard ${b.pre}`]],
+    ['trial COMPAT FAILED against itself', (b) => { reply(b.w, 'trial', b.img.digest, golden('trial-compat-failed')); return {}; },
+      (b) => `the trial of ${short(b.x)} against itself failed: COMPAT FAILED: START FAILED: bot exited (code 1) before "api listening" `
+        + `— a defect of ${short(b.x)}: it would not start again on the database it migrated\n`
+        + '[compat exited 1]\nSTART FAILED: bot exited (code 1) before "api listening"\noutput tail:\nSqliteError: no such column: venue\n'
+        + 'Nothing is recorded against the commit.',
+      (b) => [...bootProbe(b), ...bootTrial(b), `discard ${b.pre}`]],
+    ['trial REFUSED', (b) => { reply(b.w, 'trial', b.img.digest, golden('trial-refused')); return {}; },
+      (b) => `the trial of ${short(b.x)} was refused: previous image ${S5} predates start-check --leave-running\n`
+        + `REFUSED: previous image ${S5} predates start-check --leave-running\n[compat exited 64]\n`
+        + 'usage: start-check.cjs [--timeout <seconds>] [--entry <file>]\n'
+        + 'Nothing is recorded against the commit; fix the host and run again.',
+      (b) => [...bootProbe(b), ...bootTrial(b), `discard ${b.pre}`]],
+    ['a trial that could not judge (TEMPFAIL)', (b) => { reply(b.w, 'trial', b.img.digest, golden('trial-tempfail')); return {}; },
+      (b) => `⚠️ merge-deploy: the trial of ${short(b.x)} could not judge it: TEMPFAIL start-check in sha256:${'d'.repeat(64)} exited 75: `
+        + 'START KILLED: bot killed by SIGKILL (out of memory?) — NOT a finding — run again',
+      (b) => [...bootProbe(b), ...bootTrial(b), `discard ${b.pre}`]],
+  ])('%s: refused (1), the way back, the state as it was, no pre left', (_name, setup, text, evs) => {
+    const b = bootWorld('absent');
+    mkdirSync(b.w.snapshots, { recursive: true });
+    const over = setup(b);
+    const before = stateText(b.w);
+    const r = bootstrapRun(b, over);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([1, `${text(b)}\n${WAY_BACK}\n`, before, evs(b), []]);
+    expect(readdirSync(b.w.snapshots)).toEqual([]);
+  });
+
+  it('trial FAILED: refused and told with the way back; X (main\'s head) recorded as failed; the pre discarded', () => {
+    const b = bootWorld('absent');
+    reply(b.w, 'trial', b.img.digest, golden('trial-trial-failed'));
+    const r = bootstrapRun(b);
+    const note = `[manual] ⛔ merge-deploy refused ${short(b.x)}: the trial on a copy of production failed: TRIAL FAILED: no such column: venue_id\n`
+      + `[trial exited 1]\nTRIAL FAILED: no such column: venue_id\n${WAY_BACK}`;
+    expect([r.code, r.out, events(b.w), notes(b.w), readdirSync(b.w.snapshots)])
+      .toEqual([1, `${note}\n`, [...bootProbe(b), ...bootTrial(b), `discard ${b.pre}`], [note], []]);
+    expect(readState(b.w)).toEqual({ DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base, LAST_FAILED_SHA: b.x });
+  });
+
+  it('an audit ADVISORY: refused and told with the way back; X recorded as failed; no snapshot taken', () => {
+    const b = bootWorld('absent');
+    reply(b.w, 'audit', b.img.digest, { code: 1, stdout: `AUDIT ADVISORY ${b.img.digest}\nproxy-addr critical — IP spoofing\n` });
+    const r = bootstrapRun(b);
+    const note = `[manual] ⛔ merge-deploy refused ${short(b.x)}: npm audit --omit=dev in its image reports a high or critical advisory.\n`
+      + `proxy-addr critical — IP spoofing\n${WAY_BACK}`;
+    expect([r.code, r.out, events(b.w), notes(b.w), existsSync(b.w.snapshots)]).toEqual([1, `${note}\n`, bootProbe(b), [note], false]);
+    expect(readState(b.w)).toEqual({ DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base, LAST_FAILED_SHA: b.x });
+  });
+
+  it('an audit ADVISORY in the first run (the bot runs): refused without the way back', () => {
+    const b = bootWorld('foreign');
+    reply(b.w, 'audit', b.img.digest, { code: 1, stdout: `AUDIT ADVISORY ${b.img.digest}\nproxy-addr critical — IP spoofing\n` });
+    const r = bootstrapRun(b);
+    const note = `[manual] ⛔ merge-deploy refused ${short(b.x)}: npm audit --omit=dev in its image reports a high or critical advisory.\n`
+      + 'proxy-addr critical — IP spoofing';
+    expect([r.code, r.out, events(b.w), notes(b.w)]).toEqual([1, `${note}\n`, bootProbe(b), [note]]);
+  });
+});
+
+describe('(б-л) plan b2 п.31: the holds and contract PRs of the range are shown, never a gate', () => {
+  const labels = (b: Boot) => ({ WBB_PR_LABELS_CMD: stub(b.w.bin, 'labels-boot', `printf '8\\tdeploy:hold\\n9\\tmigration:contract\\n'`) });
+  const held = () => bootWorld('absent', { 'src/a.ts': 'export const a = 2;\n', 'deploy/sudoers.d/wbb-image': 'ysi ALL=(root) NOPASSWD: x\n' });
+  const shown = (b: Boot) => `The range ${short(b.w.base)}..${short(b.x)} — shown, not a gate (this run is the confirmation):\n`
+    + '• path deploy/sudoers.d/wbb-image needs a human step\n'
+    + `• PR #8 carries deploy:hold — ${GH}/8\n`
+    + `• PR #9 carries migration:contract — ${GH}/9\n`
+    + 'A fallback to the flat tree needs the pre snapshot restored.\n';
+
+  it('the second run prints them and deploys all the same (0)', () => {
+    const b = held();
+    const r = bootstrapRun(b, labels(b));
+    expect([r.code, r.out]).toEqual([0, `${shown(b)}[manual] ${bootSettledNote(b.x)}\n`]);
+    expect(events(b.w)).toEqual([...bootToActivate(b), ...polls(61), `image prune --keep ${b.img.digest}`, 'prune']);
+  });
+
+  it('the first run prints them before the steps', () => {
+    const b = held();
+    hostSet(b.w, 'unit', 'foreign');
+    const r = bootstrapRun(b, labels(b));
+    expect([r.code, r.out]).toEqual([1, `${shown(b)}${bootSteps(b.x)}`]);
+  });
+
+  it('labels that could not be read are shown too, without the fallback line', () => {
+    const b = held();
+    hostSet(b.w, 'unit', 'foreign');
+    const r = bootstrapRun(b, { WBB_PR_LABELS_CMD: stub(b.w.bin, 'labels-fail', 'exit 1') });
+    expect([r.code, r.out]).toEqual([1,
+      `The range ${short(b.w.base)}..${short(b.x)} — shown, not a gate (this run is the confirmation):\n`
+      + '• path deploy/sudoers.d/wbb-image needs a human step\n'
+      + `• could not read PR labels for ${short(b.x)}\n${bootSteps(b.x)}`]);
   });
 });
 
@@ -1029,7 +1231,18 @@ describe('(б-в) bootstrap preconditions refuse (1), changing nothing', () => {
     ]);
   });
 
-  it('no DEPLOYED_SHA to start from', () => {
+  it('no DEPLOYED_SHA to start from: a state without the key', () => {
+    const b = bootWorld('absent');
+    seedState(b.w, { LAST_SEEN_DEPLOYED_SHA: b.w.base });
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
+      1, 'the state records no deployed commit — the first image release starts from the flat tree\'s DEPLOYED_SHA, which stage «в» carries over from state.env\n',
+      before, [], [],
+    ]);
+  });
+
+  it('no DEPLOYED_SHA to start from: no state file at all', () => {
     const b = bootWorld('absent');
     rmSync(b.w.statePath);
     const r = bootstrapRun(b);
@@ -1061,7 +1274,7 @@ describe('(б-в) bootstrap preconditions refuse (1), changing nothing', () => {
     const before = stateText(b.w);
     const r = bootstrapRun(b);
     expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
-      1, 'a Quadlet unit exists but nothing is settled — check by hand (quadlet=none container-digest=none)\n', before, bootProbe(b), [],
+      1, 'a Quadlet unit exists but nothing is settled — check by hand (quadlet=none container-digest=none)\n', before, ['image current'], [],
     ]);
   });
 
@@ -1072,7 +1285,18 @@ describe('(б-в) bootstrap preconditions refuse (1), changing nothing', () => {
     const r = bootstrapRun(b);
     expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
       1, `no unit, but a Quadlet file or a container is there (quadlet=${b.img.digest} container-digest=none) and nothing is settled — check by hand\n`,
-      before, bootProbe(b), [],
+      before, ['image current'], [],
+    ]);
+  });
+
+  it('no unit and no Quadlet file, but a container is left', () => {
+    const b = bootWorld('absent');
+    hostSet(b.w, 'container', b.img.digest);
+    const before = stateText(b.w);
+    const r = bootstrapRun(b);
+    expect([r.code, r.out, stateText(b.w), events(b.w), notes(b.w)]).toEqual([
+      1, `no unit, but a Quadlet file or a container is there (quadlet=none container-digest=${b.img.digest}) and nothing is settled — check by hand\n`,
+      before, ['image current'], [],
     ]);
   });
 });
@@ -1093,7 +1317,9 @@ describe('(б-г) a failed bootstrap window', () => {
     expect(notes(b.w)).toEqual([
       `[manual] 🔥 merge-deploy INCIDENT: ${short(b.x)} (${b.img.digest}) — ${reason}. Nothing was rolled back automatically (a manual window); the database is untouched.\n`
       + `Pre-deploy snapshot: ${marked} (kept until a human removes it: rm ${marked} ${marked}.sha256)\n`
-      + 'Nothing deploys until a human restores production and runs: bash deploy/deploy.sh --resolve-incident --settled <sha>',
+      // Plan b2 п.28: an incident of the first image release names both ways out.
+      + 'Nothing deploys until a human restores production and runs: bash deploy/deploy.sh --resolve-incident --settled <sha> '
+      + '(an image of ours runs from the Quadlet file), or bash deploy/deploy.sh --resolve-incident --flat (the old unit and the flat tree run again)',
     ]);
   });
 
@@ -1149,7 +1375,7 @@ describe('(б-з) a bootstrap activation refused before it changed anything', ()
     reply(b.w, 'activate', b.img.digest, { code: 2, stderr: 'REFUSED: the unit is not generated from our Quadlet file\n' });
     const r = bootstrapRun(b);
     expect([r.code, r.out]).toEqual([
-      1, `⚠️ merge-deploy: the activation of ${short(b.x)} was refused and changed nothing: the unit is not generated from our Quadlet file — run again\n`,
+      1, `⚠️ merge-deploy: the activation of ${short(b.x)} was refused and changed nothing: the unit is not generated from our Quadlet file — run again\n${WAY_BACK}\n`,
     ]);
     expect(events(b.w)).toEqual([...bootToActivate(b), 'image current', `discard ${b.pre}`]);
     expect([readState(b.w), notes(b.w), readdirSync(b.w.snapshots)]).toEqual([{ DEPLOYED_SHA: b.w.base, LAST_SEEN_DEPLOYED_SHA: b.w.base }, [], []]);
@@ -1228,5 +1454,99 @@ describe('(р-и) plan b2 п.23–24 and the review of Task 3: what a resolve se
     expect(readState(r.w)).toEqual({
       ...rest, INCIDENT: `${r.x} ${r.img.digest} the resolve window failed: health check failed 3 times in a row (last at +320s)`,
     });
+  });
+});
+
+// --- plan b2 п.28: `--manual resolve-incident --flat` ----------------------------------------------------------
+
+/**
+ * The first image release X failed (an incident, nothing settled, two retained pres); the human brought the old
+ * unit and the flat tree back: unit=foreign, running, /health answers base — a commit of main.
+ */
+function flatWorld(): Inc {
+  const r = incidentWorld(false);
+  hostSet(r.w, 'unit', 'foreign');
+  hostSet(r.w, 'unit_state', 'ActiveState=active\nSubState=running\nMainPID=777');
+  return r;
+}
+const flatRun = (r: Inc, over: Record<string, string> = {}) => manual(r.w, ['resolve-incident', '--flat'], over);
+/** The one write of --flat: the incident gone, the flat tree's R recorded as deployed and observed, no digest. */
+const flatState = (r: Inc, extra: Record<string, string> = {}) => ({
+  DEPLOYED_SHA: r.s.sha, LAST_SEEN_DEPLOYED_SHA: r.s.sha, LAST_FAILED_SHA: r.x, ...extra,
+});
+const flatNote = (r: Inc, tail: string) => `[manual] ✅ merge-deploy: the incident is closed — the old unit runs the flat tree at ${short(r.s.sha)}, `
+  + `recorded as deployed; nothing is settled. Next: bash deploy/deploy.sh --bootstrap${tail}`;
+
+describe('(р-к) resolve-incident --flat: the happy path', () => {
+  it('one write closes the incident and records R; the retained pres return; no window, nothing settled (0)', () => {
+    const r = flatWorld();
+    const res = flatRun(r);
+    expect(res.code).toBe(0);
+    expect(writes(r.w)[0]).toEqual(flatState(r, { RETAINED_PRE: r.pres.join(' ') }));
+    expect(events(r.w)).toEqual([
+      'image current', `unmark 19700101T000000Z-${short(r.x)}-rollback-pre.db`, 'unmark 19700101T010000Z-1111111-rollback-pre.db',
+    ]);
+    expect(readState(r.w)).toEqual(flatState(r));
+    expect(notes(r.w)).toEqual([flatNote(r, `\nBack in ordinary retention: ${r.pres.map(unmarkedOf).join(' ')}`)]);
+  });
+
+  it('PENDING_MARK whose mark keeps failing is cleared in the same write (plan b2 п.24)', () => {
+    const r = flatWorld();
+    const p = join(r.w.snapshots, `19700101T020000Z-${short(r.x)}-pre.db`);
+    writeFileSync(p, 'pre\n');
+    writeFileSync(`${p}.sha256`, `${'0'.repeat(64)}\n`);
+    patchState(r.w, { PENDING_MARK: p });
+    const failMark = stub(r.w.bin, 'mark-fail', `echo "mark $(basename "$1")" >> "${r.w.eventsLog}"; exit 1`);
+    expect(flatRun(r, { WBB_MARK_CMD: failMark }).code).toBe(0);
+    expect(writes(r.w)[0]).toEqual(flatState(r, { RETAINED_PRE: r.pres.join(' ') }));
+    expect([readState(r.w), existsSync(p)]).toEqual([flatState(r), true]);
+  });
+
+  it('killed after the write: the next tick runs as usual and says there is no settled image yet', () => {
+    const r = flatWorld();
+    const killUnmark = stub(r.w.bin, 'unmark-kill', '. "$WBB_FAKE_LIB"; kill_tick');
+    expect(flatRun(r, { WBB_UNMARK_CMD: killUnmark }).code).toBe(null);
+    expect(readState(r.w)).toEqual(flatState(r, { RETAINED_PRE: r.pres.join(' ') }));
+    const t = tick(r.w);
+    expect([t.code, events(r.w), notes(r.w)]).toEqual([0, ['image current'], [
+      '⛔ merge-deploy: there is no settled image yet — the first image release is deployed by hand (manual window, spec §8 п.2); until then nothing deploys automatically.',
+    ]]);
+    expect(readState(r.w)).toEqual(flatState(r, { RETAINED_PRE: r.pres.join(' '), LAST_ASSESS_NOTICE: DAY1 }));
+  });
+});
+
+describe('(р-л) resolve-incident --flat refuses (1) without changing anything', () => {
+  it.each<[string, (r: Inc) => Record<string, string>, (r: Inc) => string, string[]]>([
+    ['an image is settled', (r) => { patchState(r.w, settledState(r.s)); return {}; },
+      (r) => `an image is settled (${short(r.s.sha)}) — --flat closes only an incident of the first image release; `
+        + 'restore an image and run: bash deploy/deploy.sh --resolve-incident --settled <sha>', []],
+    ['`current` cannot be read', (r) => { reply(r.w, 'current', '-', { code: 75, stderr: 'TEMPFAIL: podman inspect timed out after 60s\n' }); return {}; },
+      () => 'could not read what production runs: TEMPFAIL podman inspect timed out after 60s — run again', ['image current']],
+    ['the unit is our Quadlet, not the old one', (r) => { hostSet(r.w, 'unit', 'quadlet'); return {}; },
+      () => 'the old unit is not there (unit=quadlet) — --flat closes the incident only when the old unit runs the flat tree again', ['image current']],
+    ['the old unit does not run', (r) => { hostSet(r.w, 'unit_state', 'ActiveState=inactive\nSubState=dead\nMainPID=0'); return {}; },
+      () => 'the old unit does not run — start it (sudo systemctl start warsaw-beer-bot), then run again', ['image current']],
+    ['the unit state unreadable', (r) => { hostSet(r.w, 'unit_state', 'SubState=running'); return {}; },
+      () => 'could not read whether the old unit runs (systemctl show warsaw-beer-bot) — run again', ['image current']],
+    ['API_PORT cannot be read', (r) => ({ WBB_API_PORT_CMD: stub(r.w.bin, 'port-fail', 'exit 1') }),
+      () => 'could not resolve API_PORT — run again', ['image current']],
+    ['/health does not answer', (r) => { hostSet(r.w, 'unhealthy', ''); return {}; },
+      () => '/health does not answer — the flat tree is not up; run again when it answers', ['image current']],
+    ['/health answers a commit that is not on main', (r) => { hostSet(r.w, 'running_sha', 'f'.repeat(40)); return {}; },
+      () => '/health answers releaseSha fffffff, which is not on origin/main — it cannot be recorded as deployed', ['image current']],
+  ])('%s', (_name, setup, out, evs) => {
+    const r = flatWorld();
+    const over = setup(r);
+    const before = stateText(r.w);
+    const res = flatRun(r, over);
+    expect([res.code, res.out, stateText(r.w), events(r.w), notes(r.w)]).toEqual([1, `${out(r)}\n`, before, evs, []]);
+  });
+
+  it('no incident is open', () => {
+    const w = imageWorld();
+    const before = stateText(w);
+    const res = manual(w, ['resolve-incident', '--flat']);
+    expect([res.code, res.out, stateText(w), events(w), notes(w)])
+      .toEqual([1, 'no INCIDENT is open — there is nothing to resolve\n', before, [], []]);
   });
 });

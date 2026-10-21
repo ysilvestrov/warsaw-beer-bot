@@ -537,16 +537,33 @@ describe('plan b2 п.16: an interrupted first image release (bootstrap) — Task
     hostSet(r.w, 'unit', 'absent');
   }
 
-  it('before `activate D` (quadlet=none, unit=absent): the window is cancelled, the pre discarded, "run again"', () => {
+  it('before `activate D` (quadlet=none, unit=absent): the window is cancelled, the pre discarded, told even after today\'s notice', () => {
     const r = recoveryWorld();
     noUnit(r);
-    seedState(r.w, bootActivating(r));
+    // Plan b2 п.27: "no settled image yet" spends the daily marker every day — this notice must not be muted by it.
+    seedState(r.w, { ...bootActivating(r), LAST_ASSESS_NOTICE: DAY1 });
     expect(tick(r.w).code).toBe(0);
     expect(events(r.w)).toEqual(['image current', `discard ${r.preName}`]);
     expect(readState(r.w)).toEqual({ DEPLOYED_SHA: r.s.sha, LAST_SEEN_DEPLOYED_SHA: r.s.sha, LAST_ASSESS_NOTICE: DAY1 });
     expect(notes(r.w)).toEqual([
       `⚠️ merge-deploy: the first image release ${short(r.x)} was interrupted before its activation; nothing runs from the Quadlet file, `
-      + 'so the window is cancelled — run bash deploy/deploy.sh --bootstrap again.',
+      + 'so the window is cancelled — production may be down — run bash deploy/deploy.sh --bootstrap again.',
+    ]);
+  });
+
+  it('row 2 re-activation REFUSED and nothing runs from a Quadlet file (q=none): cancelled, told even after today\'s notice', () => {
+    const r = recoveryWorld();
+    noUnit(r);
+    hostSet(r.w, 'quadlet', r.img.digest);
+    seedState(r.w, { ...bootActivating(r), LAST_ASSESS_NOTICE: DAY1 });
+    reply(r.w, 'activate', r.img.digest, { code: 2, stderr: 'REFUSED: daemon-reload left no unit; the Quadlet file is removed\n' });
+    reply(r.w, 'current', '-', 'pass', { code: 0, stdout: 'CURRENT quadlet=none container-image=none container-digest=none unit=absent\n' });
+    expect(tick(r.w).code).toBe(0);
+    expect(events(r.w)).toEqual(['image current', `image activate --digest ${r.img.digest}`, 'image current', `discard ${r.preName}`]);
+    expect(readState(r.w)).toEqual({ DEPLOYED_SHA: r.s.sha, LAST_SEEN_DEPLOYED_SHA: r.s.sha, LAST_ASSESS_NOTICE: DAY1 });
+    expect(notes(r.w)).toEqual([
+      `⚠️ merge-deploy: the activation of ${short(r.x)} was refused and changed nothing: daemon-reload left no unit; the Quadlet file is removed `
+      + '— production may be down — run bash deploy/deploy.sh --bootstrap again.',
     ]);
   });
 
