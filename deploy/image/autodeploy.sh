@@ -378,7 +378,8 @@ halt() { # <daily marker> <message> [the tick's exit]
 # marker; the window is the timer's to finish.
 halt_window() { # <daily marker> <message>
   if [ "$MANUAL" = 1 ]; then
-    notify "$(manual_text "$2")"
+    # The window stays open and the timer finishes it, which is what the text says: no "run again".
+    notify "$2"
     exit 1
   fi
   once_a_day "$1" "$2"
@@ -1669,12 +1670,15 @@ $(tail -n 20 <<< "$IMG_ERR")" ;;
         # same proven fact (plan b2 п.10), and is refused: 1, where the tick holds with 0 — but
         # only for main's head (п.19): a hold of an older commit would replace the head's.
         why="${IMG_VERDICT#COMPAT_FAILED }"
-        if is_main_head "$X"; then
-          CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
-          CANDIDATE_HELD_WHY="$why"
-          LAST_HOLD_NOTICE=$(today)
-          write_state
+        if ! is_main_head "$X"; then
+          manual_refuse "${X:0:7} is not deployable without an automatic rollback — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated: ${why}
+$(tail -n 20 <<< "$IMG_ERR")
+It is not main's head, so nothing is held. Deploy it anyway, without an automatic rollback: run again with --ack-incompatible"
         fi
+        CANDIDATE_HELD="$X $D $SETTLED_DIGEST"
+        CANDIDATE_HELD_WHY="$why"
+        LAST_HOLD_NOTICE=$(today)
+        write_state
         notify "⏸ merge-deploy: ${X:0:7} is HELD — the settled ${SETTLED_SHA:0:7} does not start on the database ${X:0:7} migrated, so a code-only rollback is not possible: ${why}
 $(tail -n 20 <<< "$IMG_ERR")
 Deploy it by hand, without an automatic rollback: bash deploy/deploy.sh --ack-incompatible"

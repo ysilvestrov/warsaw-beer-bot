@@ -632,9 +632,17 @@ describe('(м3) plan b2 п.19: a manual deploy of an older commit never overwrit
     patchState(m.w, { CANDIDATE_HELD: `${y} ${imgY.digest} ${m.s.digest}`, CANDIDATE_HELD_WHY: 'COMPAT FAILED: START TIMEOUT: no "api listening" within 90s' });
     const before = readState(m.w);
     reply(m.w, 'trial', m.img.digest, golden('trial-compat-failed'));
-    expect(deploy(m).code).toBe(1);
-    expect(readState(m.w)).toEqual(before);
-    expect(notes(m.w).length).toBe(1);
+    const r = deploy(m);
+    expect([r.code, readState(m.w), notes(m.w), r.out]).toEqual([1, before, [], [
+      `${short(m.x)} is not deployable without an automatic rollback — the settled ${short(m.s.sha)} does not start on the database ${short(m.x)} migrated: `
+        + 'COMPAT FAILED: START FAILED: bot exited (code 1) before "api listening"',
+      '[compat exited 1]',
+      'START FAILED: bot exited (code 1) before "api listening"',
+      'output tail:',
+      'SqliteError: no such column: venue',
+      "It is not main's head, so nothing is held. Deploy it anyway, without an automatic rollback: run again with --ack-incompatible",
+      '',
+    ].join('\n')]);
   });
 });
 
@@ -695,7 +703,7 @@ describe('(н) plan b2 п.21: a manual run that cannot verify is refused, and sa
     reply(m.w, 'activate', m.img.digest, { code: 75, stderr: 'TEMPFAIL: systemctl restart timed out after 180s\n' });
     const r = deploy(m);
     const note = `[manual] ⚠️ merge-deploy: the activation of ${short(m.x)} (${m.img.digest}) could not be confirmed: `
-      + 'TEMPFAIL systemctl restart timed out after 180s. The next tick looks at what runs and finishes or cancels it — run again';
+      + 'TEMPFAIL systemctl restart timed out after 180s. The next tick looks at what runs and finishes or cancels it.';
     expect([r.code, r.out, events(m.w), notes(m.w)]).toEqual([1, `${note}\n`, toActivate(m), [note]]);
     expect(readState(m.w)).toEqual(windowAt(m, 'auto'));
   });
