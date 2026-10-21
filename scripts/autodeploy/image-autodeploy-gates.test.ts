@@ -661,11 +661,13 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     `WINDOW_SHA=${w.base}`, `WINDOW_DIGEST=${w.settled.digest}`, `WINDOW_ID=${w.settled.id}`, `WINDOW_CONTENT=${w.settled.content}`,
     `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
     'WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_START=100000', `WINDOW_BOOT=${BOOT_ID}`,
-    'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', 'WINDOW_NRESTARTS_PRE=0', ...extra, '',
+    'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
   ].join('\n');
   const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
   const CORRUPT: Array<[string, (w: ImageWorld) => string, string]> = [
     ['an unknown key', (w) => `${good(w)}DEPLOYED_TAG=v1\n`, 'line 9: unknown key DEPLOYED_TAG'],
+    // Spec amendment 3 (V14): the key is gone; a state that still carries it was not written by this controller.
+    ['WINDOW_NRESTARTS_PRE, retired by V14', (w) => `${good(w)}WINDOW_NRESTARTS_PRE=0\n`, 'line 9: unknown key WINDOW_NRESTARTS_PRE'],
     ['a duplicated key', (w) => `${good(w)}DEPLOYED_SHA=${w.base}\n`, 'line 9: duplicate key DEPLOYED_SHA'],
     ['a truncated file', (w) => good(w).slice(0, -1), 'the last line has no newline (a truncated file)'],
     ['a line that is not KEY=value', (w) => `# written by hand\n${good(w)}`, 'line 1 is not KEY=value'],

@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, SCRIPT,
-  advance, events, fault, golden, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply,
+  advance, events, fault, golden, hostRead, hostSet, imageOf, imageWorld, notes, patchState, publish, push, readState, ready, reply,
   DB_SNAPSHOT, markThenKill, seedState, settledState, short, stateAtActivate, stub, tick, type Image, type ImageWorld, type Reply,
 } from './image-autodeploy-harness';
 
@@ -98,7 +98,7 @@ describe('(б) the window is in the state before production changes', () => {
   const windowState = (d: Deploy) => settledAt(d.s, d.x, {
     WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content,
     WINDOW_OLD: d.w.base, WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'activating',
-    WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1', WINDOW_NRESTARTS_PRE: '0',
+    WINDOW_PRE: join(d.w.snapshots, d.pre), WINDOW_BOOT: BOOT_ID, ACTIVATE_ATTEMPTS: '1',
   });
 
   it('a tick killed before `activate D` leaves exactly the window, PHASE=activating, and S in the Quadlet', () => {
@@ -340,7 +340,7 @@ describe('(є) the code-only rollback', () => {
       WINDOW_SHA: d.x, WINDOW_DIGEST: d.img.digest, WINDOW_ID: d.img.id, WINDOW_CONTENT: d.img.content, WINDOW_OLD: d.w.base,
       WINDOW_PREV_DIGEST: d.s.digest, WINDOW_MODE: 'auto', WINDOW_PHASE: 'rolling-back', WINDOW_PRE: marked(d), WINDOW_START: '100600',
       WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '100920',
-      WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1', WINDOW_NRESTARTS_PRE: '0',
+      WINDOW_REASON: 'health check failed 3 times in a row (last at +320s)', ROLLBACK_ATTEMPTS: '1', ACTIVATE_ATTEMPTS: '1',
     });
     // Nothing touches the database: no restore, no post snapshot, no service stop — the helper and the pre's mark only.
     expect(events(d.w)).toEqual([...toActivate(d), ...polls(33), ...rollbackEvents(d)]);
@@ -439,15 +439,20 @@ describe('(л) a window that cannot be observed fails', () => {
 });
 
 describe('(м) lost evidence starts a new window, never fails one', () => {
+  // After V14 a base above 0 exists only where a window re-based without comparing (lost evidence, a
+  // reboot); the tick that took it is stood in for by a window killed at +10 s whose base is set to 5.
   it('NRestarts below its base in the same boot: a full window from then, ⚠️', () => {
     const d = deployWorld();
+    fault(d.w, 'kill', 10, 11);
+    expect(tick(d.w).code).toBe(null);
+    patchState(d.w, { WINDOW_NRESTARTS: '5' });
     hostSet(d.w, 'nrestarts', '5');
     fault(d.w, 'restarts-minus', 300, 99999, d.img.digest);
     expect(tick(d.w).code).toBe(0);
     expect([readState(d.w).SETTLED_SHA, readState(d.w).LAST_FAILED_SHA, clock(d.w)]).toEqual([d.x, undefined, '101500']);
     expect(notes(d.w)).toEqual([
       `⚠️ merge-deploy ${short(d.x)}: the window lost its evidence (NRestarts went down in the same boot (5 -> 4)) — watching a full 600s window again from now.`,
-      `✅ merge-deploy ${short(d.x)} is live and settled — #7.`,
+      `✅ merge-deploy ${short(d.x)} is live and settled.`, // a resumed window does not re-read the range's PRs
     ]);
   });
 
@@ -664,30 +669,30 @@ describe('PR #866 review: a failed mark never loses the evidence (item 2)', () =
   });
 });
 
-describe('PR #866 review: NRestarts before `activate D` is the start\'s reference (item 5)', () => {
-  it('above it at the start: the candidate restarted during startup — failed, rolled back', () => {
+describe('spec V14: after an activation NRestarts counts only the candidate\'s own restarts', () => {
+  it('above 0 at the start: the candidate restarted during startup — failed, rolled back', () => {
     const d = deployWorld();
     fault(d.w, 'restarts-plus', 0, 99999, d.img.digest);
-    const reason = 'the candidate restarted during startup (NRestarts 0 -> 1)';
+    const reason = 'the candidate restarted during startup (NRestarts 1 since its activation)';
     expect(tick(d.w).code).toBe(2);
     expect(events(d.w)).toEqual([...toActivate(d), ...rollbackEvents(d)]);
     expect(notes(d.w)).toEqual([failedNote(d, reason), rolledBackNote(d, reason)]);
   });
 
-  it('below it (daemon-reload may reset the counter, P4): the new reading is the base; the window settles', () => {
+  it('the old release had restarted 5 times and the candidate once before the first read: still a failed start', () => {
     const d = deployWorld();
     hostSet(d.w, 'nrestarts', '5');
-    fault(d.w, 'restarts-minus', 0, 99999, d.img.digest);
-    fault(d.w, 'kill', 10, 11);
-    expect(tick(d.w).code).toBe(null);
-    expect([readState(d.w).WINDOW_NRESTARTS_PRE, readState(d.w).WINDOW_NRESTARTS, readState(d.w).WINDOW_PHASE]).toEqual(['5', '4', 'watching']);
+    fault(d.w, 'restarts-plus', 0, 99999, d.img.digest);
+    const reason = 'the candidate restarted during startup (NRestarts 1 since its activation)';
+    expect(tick(d.w).code).toBe(2);
+    expect([notes(d.w), readState(d.w).LAST_FAILED_SHA]).toEqual([[failedNote(d, reason), rolledBackNote(d, reason)], d.x]);
   });
 
-  it('equal to it: that is the base', () => {
+  it('the old release had restarted 5 times, the candidate never: the window stands on base 0', () => {
     const d = deployWorld();
-    hostSet(d.w, 'nrestarts', '2');
+    hostSet(d.w, 'nrestarts', '5');
     fault(d.w, 'kill', 10, 11);
     expect(tick(d.w).code).toBe(null);
-    expect([readState(d.w).WINDOW_NRESTARTS_PRE, readState(d.w).WINDOW_NRESTARTS, readState(d.w).WINDOW_PHASE]).toEqual(['2', '2', 'watching']);
+    expect([readState(d.w).WINDOW_NRESTARTS_PRE, readState(d.w).WINDOW_NRESTARTS, readState(d.w).WINDOW_PHASE]).toEqual([undefined, '0', 'watching']);
   });
 });

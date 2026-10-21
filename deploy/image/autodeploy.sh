@@ -429,14 +429,13 @@ STATE_KEYS=(
   DEPLOYED_DIGEST DEPLOYED_ID DEPLOYED_CONTENT SETTLED_SHA SETTLED_DIGEST SETTLED_ID SETTLED_CONTENT
   WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
   WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ
-  WINDOW_REASON ROLLBACK_ATTEMPTS ACTIVATE_ATTEMPTS PENDING_PRE PENDING_MARK WINDOW_NRESTARTS_PRE
+  WINDOW_REASON ROLLBACK_ATTEMPTS ACTIVATE_ATTEMPTS PENDING_PRE PENDING_MARK
   CANDIDATE_HELD CANDIDATE_HELD_WHY CANDIDATE_RETRY_X CANDIDATE_RETRY_AT
   RETAINED_PRE
   INCIDENT
 )
 WINDOW_KEYS=(WINDOW_SHA WINDOW_DIGEST WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_MODE
-  WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ WINDOW_REASON
-  WINDOW_NRESTARTS_PRE)
+  WINDOW_PHASE WINDOW_PRE WINDOW_START WINDOW_BOOT WINDOW_NRESTARTS WINDOW_FAILS WINDOW_LAST_READ WINDOW_REASON)
 for _k in "${STATE_KEYS[@]}"; do printf -v "$_k" '%s' ''; done
 unset _k
 HOLDS=()
@@ -488,7 +487,7 @@ value_ok() {
       [[ $v =~ ^sha256:[0-9a-f]{64}$ ]] ;;
     DEPLOYED_ID|SETTLED_ID|WINDOW_ID|DEPLOYED_CONTENT|SETTLED_CONTENT|WINDOW_CONTENT)
       [[ $v =~ ^[0-9a-f]{64}$ ]] ;;
-    MAIN_SEEN_S|WINDOW_START|WINDOW_NRESTARTS|WINDOW_NRESTARTS_PRE|WINDOW_FAILS|WINDOW_LAST_READ|ROLLBACK_ATTEMPTS|ACTIVATE_ATTEMPTS|CANDIDATE_RETRY_AT)
+    MAIN_SEEN_S|WINDOW_START|WINDOW_NRESTARTS|WINDOW_FAILS|WINDOW_LAST_READ|ROLLBACK_ATTEMPTS|ACTIVATE_ATTEMPTS|CANDIDATE_RETRY_AT)
       [[ $v =~ ^(0|[1-9][0-9]{0,17})$ ]] ;;
     LAST_HOLD_NOTICE|LAST_STALE_NOTICE|LAST_ASSESS_NOTICE|LAST_INCIDENT_NOTICE)
       [[ $v =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] ;;
@@ -556,7 +555,7 @@ check_state() {
   _requires ROLLBACK_ATTEMPTS WINDOW_PHASE || return 1
   _requires ACTIVATE_ATTEMPTS WINDOW_PHASE || return 1
   # What each phase stands on (a window is written whole, then grows phase by phase).
-  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_PRE WINDOW_BOOT WINDOW_NRESTARTS_PRE || return 1
+  _requires WINDOW_PHASE WINDOW_ID WINDOW_CONTENT WINDOW_OLD WINDOW_PREV_DIGEST WINDOW_PRE WINDOW_BOOT || return 1
   case "$WINDOW_PHASE" in
     watching)
       _requires WINDOW_PHASE WINDOW_START WINDOW_LAST_READ WINDOW_FAILS WINDOW_NRESTARTS || return 1 ;;
@@ -1222,9 +1221,9 @@ window_failed() {
 # The window's start or a fresh one: lost evidence is neither a pass nor a failure (plan п.11).
 # A watched window stands on an NRestarts base (F7): it is read before `watching` is written,
 # and a base that cannot be read for OBSERVE_MAX_S is a window that cannot be observed.
-# $1 = compare: the start after an activation — NRestarts above the one read before `activate D`
-# means the candidate already restarted. Below it, the regenerated unit's counter may have been
-# reset by daemon-reload (P4, unproven): the new reading is the base.
+# $1 = compare: the start after an activation. `activate` always ends in `systemctl restart`, and a
+# restart resets NRestarts to 0 while daemon-reload leaves it alone (spec V14), so from here on the
+# counter counts the candidate's own restarts: above 0 means it already restarted.
 start_watching() {
   local r start
   start=$(now)
@@ -1234,8 +1233,8 @@ start_watching() {
     fi
     "$SLEEP_CMD" "$POLL_S"
   done
-  if [ "${1:-}" = compare ] && [ "$r" -gt "$WINDOW_NRESTARTS_PRE" ]; then
-    window_failed "the candidate restarted during startup (NRestarts ${WINDOW_NRESTARTS_PRE} -> ${r})"
+  if [ "${1:-}" = compare ] && [ "$r" -gt 0 ]; then
+    window_failed "the candidate restarted during startup (NRestarts ${r} since its activation)"
   fi
   WINDOW_PHASE=watching
   WINDOW_START=$(now)
@@ -1430,7 +1429,7 @@ settled_is_local() {
 # The candidate is past every gate and is not a noop: audit, S local, pre, trial, the window,
 # activate, the window watched. Never returns.
 deploy_pipeline() {
-  local pre name boot kind err restarts_pre
+  local pre name boot kind err
   if ! production_is_record; then
     once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production does not match the record: $(record_mismatch). Not deploying ${X:0:7}; check the host."
     exit 0
@@ -1456,11 +1455,6 @@ $(tail -n +2 <<< "$IMG_VERDICT")" ;;
   fi
   if ! boot=$("$BOOT_ID_CMD" 2>/dev/null) || ! value_ok WINDOW_BOOT "$boot"; then
     once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read the boot id — not deploying ${X:0:7}; retrying next tick."
-    exit 0
-  fi
-  # NRestarts before production changes: the start compares against it.
-  if ! restarts_pre=$(read_restarts); then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: could not read NRestarts — not deploying ${X:0:7}; retrying next tick."
     exit 0
   fi
 
@@ -1529,7 +1523,6 @@ It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded agai
   WINDOW_PHASE=activating
   WINDOW_PRE="$pre"
   WINDOW_BOOT="$boot"
-  WINDOW_NRESTARTS_PRE="$restarts_pre"
   PENDING_PRE=""
   write_state
   activate_candidate

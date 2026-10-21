@@ -10,7 +10,7 @@
  *   container     the digest of the running container (absent: none)
  *   unit          quadlet | foreign | absent (default quadlet)
  *   running_sha   what /health answers as releaseSha
- *   nrestarts     systemd's NRestarts (default 0)
+ *   nrestarts     systemd's NRestarts (default 0); a successful `activate` resets it to 0 (V14)
  *   boot_id       the kernel's boot id
  *   unhealthy     present: /health fails
  *   unit_state    present: what `systemctl show -p ActiveState,SubState,MainPID` prints
@@ -231,6 +231,8 @@ case "$action" in
     read -r id rev content < "$H/registry/$digest"
     echo "$digest" > "$H/container"
     echo "$rev" > "$H/running_sha"
+    # The restart resets systemd's counter (spec V14); daemon-reload alone would not.
+    echo 0 > "$H/nrestarts"
     echo "ACTIVATED $digest" ;;
   current)
     q=$(cat "$H/quadlet" 2>/dev/null || echo none)
