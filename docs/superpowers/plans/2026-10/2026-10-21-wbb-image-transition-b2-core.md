@@ -135,6 +135,16 @@
 24. **Settled `resolve` очищає `PENDING_MARK`**: ці pre незначені, тобто вже у звичайному утриманні, а їхній інцидент закрито. Під час інциденту деплоїв нема, і вікно `resolve` знімка не має, тож інших записів там бути не може. Prune після цього не пропускається.
 25. **`resolve` не перевіряє застарілість встановлених копій** (виняток із §7.4): без fetch-у порівнювати нема з чим, сам контролер прив'язує `deploy.sh` побайтовою звіркою, а застарілий `db-snapshot.sh` лише лишає знімки утриманими (вони названі в повідомленні). Перевірка «нема `DEPLOYED_SHA`» стоїть перед дописуванням другого запису залишеного інциденту.
 
+### Рішення після рев'ю задачі 4 (21.10; 28 і 30 — рішення власника того ж дня)
+
+26. **Другий запуск bootstrap вимагає, щоб бот стояв.** `unit=absent` цього не доводить: systemd тримає запущений юніт без файлу як `not-found`/`active`. Після перевірки юніта — `unit_running` має сказати «не працює», інакше `manual_refuse` «the old bot still runs (unit=absent but active) — sudo systemctl stop warsaw-beer-bot, then run again».
+27. **Скасування перерваного bootstrap таймером не глушиться денним маркером** (`LAST_ASSESS_NOTICE` щодня витрачає «no settled image yet»): для `WINDOW_KIND=bootstrap` — `notify` без маркера, вихід 0, текст «production may be down — run deploy.sh --bootstrap again». Той самий текст замість «retrying next tick» для `REFUSED` з `q=none` на рядку 2.
+28. **`--manual resolve-incident --flat`** (рішення власника): вихід з інциденту після повернення flat-дерева, лише коли нічого не settled. Передумови: інцидент відкритий, `SETTLED_DIGEST` порожній, `current` → `unit=foreign`, юніт працює, `/health.releaseSha` = R, R на `origin/main` (після fetch). Одним записом: `INCIDENT=""`, `DEPLOYED_SHA=R`, `LAST_SEEN_DEPLOYED_SHA=R`, `DEPLOYED_DIGEST/ID/CONTENT=""`; потім `RETAINED_PRE` звільняються, як у `resolve`. Вікна нема (flat-дерево контролер не дивиться); наступний крок — знову `--bootstrap`. Повідомлення інциденту на bootstrap називає обидва виходи.
+29. **Відмови й зупинки другого запуску bootstrap (бот стоїть) кажуть, як повернути старий бот**: `sudo mv /etc/systemd/system/warsaw-beer-bot.service.flat /etc/systemd/system/warsaw-beer-bot.service; sudo systemctl daemon-reload; sudo systemctl start warsaw-beer-bot`.
+30. **Сухий trial у першому запуску** (рішення власника): при `unit=foreign` (бот працює) — знімок живої БД через `PENDING_PRE`, `trial --previous D`, знімок відкинуто за будь-якого вердикту. Не `OK D` → ті самі відмови, що в другому запуску (FAILED → `refuse` за п.19); `OK D` → друк кроків root, вихід 1. Поганий X не зупиняє бота.
+31. **Bootstrap показує holds і contract-PR діапазону `DEPLOYED_SHA..X`** в обох запусках як інформацію, не гейт (запуск і є підтвердженням, але людина мусить бачити, що підтверджує). Contract-PR додають рядок «a fallback to the flat tree needs the pre snapshot restored».
+32. **Кроки root:** `sudo systemctl disable warsaw-beer-bot` перед `mv` (інакше висить `multi-user.target.wants`); текст `COMPAT FAILED` проти себе називає дефект X («it would not start again on the database it migrated»). Мутація «рядок 1 порівнює `q` з порожнім `WINDOW_PREV_DIGEST`» еквівалентна (`q` ніколи не порожній), у списку пійманих її нема.
+
 ## Таблиця «заявка → доказ» (що записує це ядро)
 
 | Заявка | Що стверджує | Доказ | Сила |
