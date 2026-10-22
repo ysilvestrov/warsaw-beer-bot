@@ -196,115 +196,98 @@ journalctl -u warsaw-beer-bot -f       # no sudo: operator is in systemd-journal
 sudo systemctl restart warsaw-beer-bot # NOPASSWD via /etc/sudoers.d/warsaw-beer-bot
 ```
 
-Database maintenance commands run from the deployed checkout as the service user.
-They automatically load `/etc/warsaw-beer-bot/.env` and remain available after
-`npm prune --omit=dev`:
+Database maintenance commands run inside the bot's container after the switchover (stage «в»):
+the same image, `.env` and data (spec §3.4). Until then, from the flat tree as the service user.
 
 ```bash
+# after the switchover
+sudo podman exec warsaw-beer-bot npm run rearm-matcher-bug-orphans
+sudo podman exec warsaw-beer-bot npm run rearm-matcher-bug-orphans -- --apply
+# until the switchover (flat tree)
 sudo -n -u warsaw-beer-bot bash -lc \
   'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans'
-sudo -n -u warsaw-beer-bot bash -lc \
-  'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans -- --apply'
 ```
 
-## Merge-deploy (unattended deploy of `main`)
+## Merge-deploy (unattended deploy of `main`, as an image)
 
-Design: `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md`.
-A timer (`wbb-autodeploy.timer`, every 5 min, runs as the operator) deploys
-the head of `origin/main` by itself. **A merge is the permission**: write
-access to `main` means production. The host re-derives everything else, from
-its own clone in `~/.local/share/wbb-autodeploy/repo` (never your checkout).
+Designs: `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md` (the gates) and
+`docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md` (the image, §4, §7).
+A timer (`wbb-autodeploy.timer`, every 5 min, runs as the operator) deploys the head of
+`origin/main` by itself. **A merge is the permission**: write access to `main` means production. The
+host re-derives everything else, from its own clone in `~/.local/share/wbb-autodeploy/repo` (never
+your checkout).
+
+**Until the switchover session of stage «в»** the host still runs the installed copy of the previous
+flat deployer (build on the host, rsync to `/opt`, code+DB rollback); its runbook is in git history
+(`git show d8c7ff6^:deploy/README.md`). After the session, everything below holds.
 
 ### When a merge is deployed
 
-All of these, checked in this order each tick:
+Each tick, in this order (the controller is `deploy/autodeploy.sh`, installed as
+`/usr/local/bin/wbb-autodeploy`; its state is parsed and validated, never sourced):
 
-0. the observed production record has not regressed (below);
-1. production (`DEPLOYED_SHA`) is an ancestor of `main` (no downgrade), and
-   something in the diff actually ships (`deploy/rsync-filter`, both sides);
-2. `main` has not moved for **10 minutes** (serial merges → one restart);
-3. the installed deployer is current (`wbb-installed-current`);
-4. **no hold** in `DEPLOYED_SHA..main` (below);
-5. CI concluded on **that exact commit**, the required `ci` check is present
-   and green, nothing failed or was cancelled.
+0. no open INCIDENT, the state is valid, PAUSED and the lock (below);
+1. an open window is finished first (spec §7.2);
+2. the observed production record has not regressed (below); production is an ancestor of `main`;
+3. `main` has not moved for **10 minutes**;
+4. the installed copies are current (`wbb-installed-current`: the controller, `read-env`,
+   `db-snapshot`, `installed-current`, the helper and its template);
+5. **no hold** in `DEPLOYED_SHA..main` (below);
+6. CI concluded on **that exact commit**: `ci` and `image`, green, in one check suite.
 
-Then, still before production is touched: `npm ci && npm run build` and
-`npm audit --omit=dev --audit-level=high` in the clone; a DB snapshot
-(`VACUUM INTO`, one point in time); the new build's `migrate()` run twice on a
-copy of it. Only then `deploy/deploy.sh`.
+Then: the tag `<sha>` resolves to a digest, `gh attestation verify` proves CI built it from `main`,
+`wbb-image pull`. Equal `wbb.content` with what runs → **noop** (recorded, no restart). Otherwise:
+`npm audit` in the image (high/critical → the SHA fails), the settled image is local, a DB snapshot
+(`VACUUM INTO`), and the trial on a copy: migrate twice, start the candidate, then **compat** — the
+settled image must start on the database the candidate migrated (`COMPAT FAILED` holds that pair for
+a human: `bash deploy/deploy.sh --ack-incompatible`).
 
 ### Holds
 
 A deploy that needs a human on the host is **held**, never attempted:
 
 - the range changes a path that needs root or an install step: `deploy/sudoers.d/**`,
-  `deploy/*.service` / `*.timer` (except `warsaw-beer-bot.service`),
-  `deploy/litestream.*`, `deploy/install-*.sh`, `deploy/rsync-filter`, or an
-  installed copy of the deployer;
-- or a PR in the range carries the `deploy:hold` label. Its title then starts
-  with `[deploy:hold]` (the `deploy-hold` CI check flags a mismatch) and
-  its body lists the steps.
+  `deploy/*.service` / `*.timer` (except `warsaw-beer-bot.service`), `deploy/litestream.*`,
+  `deploy/install-*.sh`, `deploy/rsync-filter`, an installed copy (`deploy/autodeploy.sh`,
+  `read-env.sh`, `db-snapshot.sh`, `installed-current.sh`), the helper `deploy/image/helper/**` or the
+  Quadlet template;
+- or a PR in the range carries `deploy:hold` (title starts with `[deploy:hold]`; the `deploy-hold` CI
+  check flags a mismatch; the body lists the steps);
+- or a PR carries `rollback:unsafe` / `migration:contract`: a code-only rollback is not proven safe,
+  so only a human deploys it, without an automatic rollback (`--ack-incompatible`).
 
-**Release:** do the steps, then run `bash deploy/deploy.sh` from the main
-checkout. It records `DEPLOYED_SHA`, the held commit is behind production, and
-the next tick carries on by itself.
+**Release:** do the steps, then run `bash deploy/deploy.sh` from a clean checkout of `main`. The run
+is the acknowledgement; it deploys HEAD through the same gates and window (or records a noop).
 
 ### The rollback window
 
-For **10 minutes** after the restart the tick watches production:
-`/health` every 10 s and the unit's `NRestarts`. The bot must be healthy within
-120 s; **3 consecutive** failed polls or a changed `NRestarts` roll back **code
-AND database**: the bot and litestream are stopped, the live DB is copied to a
-`post` directory, the pre-deploy snapshot is restored, the old commit is
-deployed. Nothing merges the two: **a human reconciles** the writes that exist
-only in `post` (the 🔥 message names the interval). R2 history also keeps the
-post state (`litestream restore -txid …`).
+After `activate` the tick watches production for **10 minutes**: `/health` (with `releaseSha`),
+`NRestarts` (0 right after the activation — a restart resets it, spec V14), the unit state and what
+runs from the Quadlet file. A failure rolls back **code only**, to the last settled image; the
+database is never restored automatically (two-step migrations, CLAUDE.md). The pre snapshot of a
+failed window is kept (`mark-rollback`) until an incident is resolved. A rollback that cannot bring
+the settled image back opens an **INCIDENT**: nothing deploys until `bash deploy/deploy.sh
+--resolve-incident --settled <sha>` (or `--flat`, while nothing is settled).
 
-The automatic rollback explicitly passes `--force` and records its own
-observation, so the next tick does not mistake it for a new manual rollback.
-
-After the window a deploy is settled; a later failure is an ordinary incident.
-
-Snapshots live in `/var/lib/warsaw-beer-bot/deploy-snapshots/`, owned by the
-bot user: `<UTC>-<sha7>-pre.db` + `.sha256`. The newest 3 of settled deploys
-are kept. `*-rollback-pre.db` + `*-rollback-post/` (a rollback) and
-`*-unverified-pre.db` (a window nobody watched to its end) are **never**
-deleted by the machine.
+Snapshots live in `/var/lib/warsaw-beer-bot/deploy-snapshots/`, owned by the bot user:
+`<UTC>-<sha7>-pre.db` + `.sha256`. The newest 3 settled are kept; `*-rollback-pre.db` are kept until
+a resolve returns them to ordinary retention (`db-snapshot.sh unmark`).
 
 ### Production moved backwards or diverged
 
-Design: `docs/superpowers/specs/2026-10/2026-10-01-767-768-deploy-regression-design.md`.
-Each tick remembers the last resolved `DEPLOYED_SHA` it observed. If the next
-record is an ancestor of that commit, it sends a separate **production went
-BACKWARDS** warning; unrelated histories say **production DIVERGED**. The
-warning names both SHAs and counts commits no longer reachable from the new
-record, plus distinct PRs returned for them (unknown if an API lookup fails).
-These counts describe Git history; they do not prove which features were lost.
-
-The tick **does not auto-redeploy** over that change: a deliberate rollback
-must be respected. It persists a recovery hold before sending the warning.
-The daily HELD message mentions the regression and any ordinary holds in the
-deployable range. Further merges and partial forward recovery cannot release
-it: production must contain the original pre-regression commit again. Deploy
-current main manually to recover when it contains that commit; use `--force`
-if the current production history diverges from main. If main does not contain
-the recovery point, use the operator acknowledgement below.
+Design: `docs/superpowers/specs/2026-10/2026-10-01-767-768-deploy-regression-design.md`. The tick
+remembers the last deployed commit it observed (`LAST_SEEN_DEPLOYED_SHA`, written only for proven
+forward motion). A record that went backwards (a `--force` downgrade) or diverged sends a separate
+**production went BACKWARDS / DIVERGED** warning and holds unattended deploys. Deploy main by hand
+(`bash deploy/deploy.sh`, `--force` if histories diverge) when it contains the original commit;
+otherwise acknowledge a replacement baseline below.
 
 ### Operator acknowledgement of a replacement baseline
 
-Sometimes ancestry cannot recover: a feature commit deployed before a squash
-merge never becomes an ancestor of main, or an earlier observation is removed
-from the private clone after its branch is deleted and Git garbage collection
-runs. The tick keeps that evidence and refuses to guess that newer code replaced
-it correctly. Repeatedly deploying main cannot clear such an observation.
-
-First diagnose the change, deploy the intended clean current main (with
-`--force` if necessary), and verify the bot is healthy. Finish any interrupted
-rollback/window handling before acknowledgement. Then, as the operator,
-explicitly accept the current recorded production as the new observation.
-This forgets the recovery fence; it does not deploy, restore data, clear
-LAST_FAILED_SHA or assert that production is healthy. The saved state file
-keeps the previous observation for diagnosis.
+When ancestry cannot recover (a squash merge, a pruned observation), first deploy the intended main
+and verify the bot, with no window open. Then accept the current record as the new observation. It
+forgets the fence; it does not deploy, restore data or clear `LAST_FAILED_SHA`. The saved copy keeps
+the previous state. Validate afterwards with `wbb-autodeploy --check-state`.
 
 ```bash
 ack_state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
@@ -317,19 +300,9 @@ flock -w 30 "$ack_state_dir/lock" bash -c '
     -e "/^REGRESSION_FROM_SHA=/d" -e "/^REGRESSION_TO_SHA=/d" \
     -e "/^LAST_HOLD_NOTICE=/d" "$state"
   echo "Operator acknowledged recorded production; prior state saved at $backup"
-' bash "$ack_state_dir/state.env"
+' bash "$ack_state_dir/image-state.env"
+/usr/local/bin/wbb-autodeploy --check-state
 ```
-
-The next tick seeds its observation from the resolved DEPLOYED_SHA, just as
-on first installation. Do not use this procedure to hide an unexplained
-rollback or to bypass build, CI or migration failures.
-
-A failed warning delivery remains pending for the next tick; after successful
-delivery it is not repeated on unchanged observations. A crash between sending
-and saving that success may repeat a message. A missing commit blocks assessment
-without erasing the prior observation. The first tick seeds observation without
-inventing history; changes between ticks and rollbacks before first observation
-may be invisible. Old copies of deploy.sh do not enforce the ancestry guard.
 
 ### Messages (Telegram, sent by the deployer, not the bot)
 
@@ -337,80 +310,65 @@ may be invisible. Old copies of deploy.sh do not enforce the ancestry guard.
 |---|---|---|
 | ✅ `<sha>` is live and settled — #PRs | deployed, window clean | nothing |
 | ⏸ … HELD | a hold is in the range | the steps, then `bash deploy/deploy.sh` |
+| ⏸ … is HELD — the settled … does not start | `COMPAT FAILED`: no code-only rollback | `bash deploy/deploy.sh --ack-incompatible` (no automatic rollback) |
 | ⛔ CI failed on `<sha>` | once per SHA | re-run the failed job; that releases it |
-| ⛔ refused `<sha>`: build / audit / trial migration | recorded as `LAST_FAILED_SHA`, not retried | fix and merge again (the next merge is tried) |
-| ⚠️ … UNVERIFIED | live, but its window was not watched to the end | check the bot; the `-unverified-pre.db` is kept |
-| 🔥 ROLLED BACK | code and DB went back to `pre` | reconcile `post` |
-| 🔥 ROLLBACK FAILED / INTERRUPTED | production state unknown | intervene now |
-| ⚠️ deploy lock held for N min | a stuck `deploy.sh` blocks every tick | `fuser -v ~/.local/state/wbb-autodeploy/lock` |
-| ⚠️ production went BACKWARDS / DIVERGED | observed deployed record lost ancestry; automatic deployments held | check whether deliberate; deploy current main manually to recover |
-| ⚠️ installed deployer is out of date | a merged fix is not live | `sudo bash deploy/install-autodeploy.sh` |
+| ⛔ refused `<sha>`: audit / trial | recorded as `LAST_FAILED_SHA`, not retried | fix and merge again |
+| ⚠️ … failed inside its window … rolling back | code-only rollback to the settled image | look at why; the pre is kept |
+| 🔥 INCIDENT | rollback failed, a manual window failed, or the unit is not ours | restore production, then `--resolve-incident` |
+| ⚠️ deploy lock held for N min | a stuck run blocks every tick | `fuser -v ~/.local/state/wbb-autodeploy/lock` |
+| ⚠️ production went BACKWARDS / DIVERGED | the record lost ancestry; unattended deploys held | check whether deliberate; deploy main by hand |
+| ⚠️ installed deployer is out of date | a merged fix is not live | `sudo bash deploy/install-image.sh` and `sudo bash deploy/install-autodeploy.sh` |
+| ⛔ there is no settled image yet | before the first image release | the bootstrap below |
+
+Messages of a manual run carry `[manual]`.
 
 ### State
 
-`~/.local/state/wbb-autodeploy/state.env`: `DEPLOYED_SHA` (written by
-`deploy.sh` too) / `PREVIOUS_SHA`, `LAST_FAILED_SHA` (delete the line to retry that
-exact commit), `MAIN_SEEN_*` (the quiet clock), `WINDOW_*` and
-`ROLLBACK_STARTED` (a window or rollback in progress — a tick that finds them
-finishes or reports it), and once-a-day markers `LAST_*_NOTICE`.
-
-`LAST_SEEN_DEPLOYED_SHA` records the last resolved deployed observation.
-`REGRESSION_FROM_SHA` keeps the original recovery point and
-`REGRESSION_TO_SHA` the most recent observed regression target. Manual
-`record-deployed.sh` preserves these keys; only the tick updates/clears them
-from its Git evidence. They are not proof of runtime health.
-
-`deploy.sh` and a tick exclude each other through the same lock: a manual
-deploy waits up to 30 s and refuses while a tick watches a window.
+`~/.local/state/wbb-autodeploy/image-state.env` (spec §7.1): the gate keys (`DEPLOYED_SHA`,
+`PREVIOUS_SHA`, `LAST_SEEN_DEPLOYED_SHA`, `LAST_FAILED_SHA` — delete the line to retry that exact
+commit —, `MAIN_SEEN_*`, the fence `REGRESSION_*`), the images (`DEPLOYED_*`, `SETTLED_*`), the
+window (`WINDOW_*`, written before production changes), `INCIDENT`, retained snapshots and once-a-day
+markers. A damaged file stops everything with `STATE CORRUPT` (exit 3); check it any time with
+`wbb-autodeploy --check-state`. The flat deployer's `state.env` becomes `state.env.flat` plus a
+directory `state.env/` at the migration (below), so an old `deploy.sh` refuses before any `sudo`.
 
 ### Install / upgrade
 
 ```bash
-sudo bash deploy/install-autodeploy.sh   # copies into /usr/local/bin + units
-sudo systemctl daemon-reload
+sudo bash deploy/install-image.sh        # the root helper wbb-image + its sudoers
+sudo bash deploy/install-autodeploy.sh   # refuses unless the helper is current; then the controller
 ```
 
-Re-run after any merge that changes an installed copy; those merges are holds
-anyway, and the deployer waits (and says so daily) while its copy is stale.
+Re-run after any merge that changes an installed copy; those merges are holds anyway, and the
+deployer waits (and says so daily) while a copy is stale. Neither enables or disables the timer.
 
-For #767/#768, update **every checkout used for manual deploys** to current
-main, then run the install above and `bash deploy/deploy.sh` from current main.
-Installing the tick cannot update an old manual script in another checkout.
+### Migrating the flat deployer's state (once, at the switchover)
+
+With the timer stopped and after `install-autodeploy.sh`:
+
+```bash
+bash deploy/migrate-state-to-image.sh
+```
+
+It carries the gate keys of `state.env` into `image-state.env`, validates the result with the
+installed controller (`--check-state`), and only then renames `state.env` to `state.env.flat` and
+leaves a `state.env/` directory with a README. Anything unexpected (an unknown key, an unfinished
+flat window or rollback, a running timer, a held lock, an existing `image-state.env`) refuses and
+changes nothing. Then the first image release (bootstrap, below).
 
 ### Emergency stop — no password required
 
-Arming the timer costs a password (`systemctl enable --now wbb-autodeploy.timer`,
-and `sudoers` pins `systemctl` to the `warsaw-beer-bot` and `litestream` units,
-not to `wbb-autodeploy`) — so stopping it must not, or the brake is
-unavailable exactly when the operator is asleep.
-
-To pause, any unprivileged process — the operator, a script, a future
-watchdog — creates a file:
+Arming the timer costs a password; stopping it must not. Any unprivileged process creates a file:
 
 ```bash
 mkdir -p ~/.local/state/wbb-autodeploy
 touch ~/.local/state/wbb-autodeploy/PAUSED
 ```
 
-Every run of `wbb-autodeploy` checks for this file first, before touching
-git, the lock, or anything else, and if it exists exits 0 with a single
-journal line — no Telegram message. The timer itself keeps ticking every 5
-minutes; each tick just does almost nothing while the file exists.
-
-To resume:
-
-```bash
-rm ~/.local/state/wbb-autodeploy/PAUSED
-```
-
-PAUSED stops the **next** tick, not one that is already watching a window.
-
-**Stated plainly:** this brake lives *inside* the script it brakes, so it
-cannot help against a deployer that is broken before it reaches that check
-(e.g. a corrupted script, or a `set -e` bug earlier in the file). It is a
-first line of defense, not the only one — the privileged `sudo systemctl
-stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
-stop.
+A tick checks it first and exits 0 quietly; a manual run refuses (exit 1) with an explanation. To
+resume: `rm ~/.local/state/wbb-autodeploy/PAUSED`. PAUSED stops the **next** run, not one already
+watching a window. The brake lives inside the script it brakes; the load-bearing stop is
+`sudo systemctl stop wbb-autodeploy.timer`.
 
 ## Installing the release control plane (stage В core — switches nothing)
 

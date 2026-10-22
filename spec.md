@@ -2981,23 +2981,32 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   root-юніт `wbb-reboot-request.path` (`deploy/install-reboot-request.sh`) виконує його лише поки
   існує `/run/reboot-required`. «О 04:00» — за Варшавою; повторне натискання не планує другого.
 - SQLite у `/var/lib/warsaw-beer-bot/bot.db` (WAL).
-- Деплой — **merge-deploy** (`deploy/autodeploy.sh`, таймер кожні 5 хв, спека
-  `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md`): хост сам деплоїть голову
-  `main`, коли вона 10 хв не рухалась, CI зелений саме на цьому SHA і в діапазоні немає hold.
-  Мердж — це дозвіл: право писати в `main` означає прод. Перед деплоєм: збірка й `npm audit` у
-  клоні (вердикт — з JSON-звіту, не з коду виходу: high/critical → відмова, звіту нема → повтор
-  на наступному тіку, #795), знімок БД `VACUUM INTO` і пробна міграція на копії.
-  Протягом 10 хв після рестарту збій (3 невдалі `/health` поспіль, старт довше 120 с, зміна
-  `NRestarts`) відкочує **код і БД** до знімка, зберігаючи `post` для людини. Hold: шлях, що
-  потребує root (sudoers, юніти, litestream, `install-*.sh`, `rsync-filter`, встановлені копії
-  деплоєра), або PR з міткою `deploy:hold` і маркером `[deploy:hold]` на початку заголовка. Hold
-  знімає ручний `bash deploy/deploy.sh`.
-  Сам `deploy.sh`: rsync allowlist build/runtime-файлів → `/opt` → `npm ci` → `npm run build` →
-  `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**.
-  (`enable --now` на запущеному unit'і не перезапускає).
+- Деплой — **merge-deploy образом** (`deploy/autodeploy.sh`, таймер кожні 5 хв, спеки
+  `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md` і
+  `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`): хост сам деплоїть
+  голову `main`, коли вона 10 хв не рухалась, CI зелений саме на цьому SHA (`ci` і `image` одного
+  запуску) і в діапазоні немає hold. Мердж — це дозвіл: право писати в `main` означає прод.
+  Деплоїться OCI-образ цього SHA з GHCR за digest-ом (`gh attestation verify` доводить, що його
+  зібрав CI з `main`); root-кроки робить хелпер `wbb-image` через `sudo -n`. Перед деплоєм:
+  `npm audit` в образі (high/critical → відмова SHA, «не вдалося» → повтор), знімок БД `VACUUM INTO`,
+  trial на копії: міграція, старт нового коду, і compat — старт останнього settled-образу на БД,
+  яку мігрував новий (провал compat — hold для людини). Однакова мітка `wbb.content` — noop без
+  рестарту. Активація — Quadlet-юніт `warsaw-beer-bot.service` з образом за digest-ом; 10 хв
+  вікно (`/health` з `releaseSha`, `NRestarts`, стан юніта); провал → відкат **лише коду** до
+  останнього settled-образу, БД автоматично не відновлюється ніколи (двокрокові міграції,
+  CLAUDE.md); невдалий відкат — інцидент, що блокує деплої до людини. Hold: шлях, що потребує root
+  (sudoers, юніти, litestream, `install-*.sh`, `rsync-filter`, встановлені копії деплоєра, хелпер),
+  або PR з міткою `deploy:hold` і маркером `[deploy:hold]`; мітки `rollback:unsafe`/
+  `migration:contract` — лише ручний деплой без автовідкату. Ручний вхід — `bash deploy/deploy.sh`
+  (запуск і є підтвердженням hold-у; `--ack-incompatible`, `--force`, `--bootstrap`,
+  `--resolve-incident --settled <sha>|--flat`): він кличе встановлену копію контролера з тим самим
+  станом і вікном. Стан — `~/.local/state/wbb-autodeploy/image-state.env` оператора (розбирається
+  й валідується, ніколи не виконується). До сеансу перемикання хоста (стадія «в») на хості
+  працює встановлена копія попереднього flat-деплоєра (збірка на хості, rsync у `/opt`, відкат коду
+  й БД).
 - **Runtime-образ (деплой образом і відкат лише коду, спека
-  `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`; зараз — ядро, лише
-  CI, хост образ не використовує).** Job `image` у `.github/workflows/ci.yml` на кожному PR і push
+  `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`; зараз — CI будує образ
+  на кожен push, хост деплоїть ним після перемикання стадії «в»).** Job `image` у `.github/workflows/ci.yml` на кожному PR і push
   збирає образ `deploy/image/Dockerfile` (`linux/amd64`, один маніфест; build-stage
   `node:24-bookworm`, runtime `node:24-bookworm-slim`, обидва за digest із `mirror.gcr.io`;
   runtime-digest — літерал у `FROM`, щоб його бампав Dependabot `docker`). У `/app` — payload
