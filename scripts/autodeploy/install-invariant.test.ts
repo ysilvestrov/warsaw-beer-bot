@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 const autodeploy = readFileSync(resolve(__dirname, '../../deploy/autodeploy.sh'), 'utf8');
 const installer = readFileSync(resolve(__dirname, '../../deploy/install-autodeploy.sh'), 'utf8');
+const imageInstaller = readFileSync(resolve(__dirname, '../../deploy/install-image.sh'), 'utf8');
 
 /**
  * #527 — a fifth installed file is a fifth way to be silently stale, and it
@@ -21,13 +22,13 @@ describe('every checked installed copy is actually installed', () => {
 
   it('names every installed script the tick depends on', () => {
     // Pinned explicitly. Without this the loop below is vacuously green the
-    // moment a pair is deleted from the list.
+    // moment a pair is deleted from the list. Since stage «в» deploy/autodeploy.sh is the image
+    // controller: it calls neither ships.sh nor trial-migrate.cjs (the helper's trial replaced it).
     expect(declared).toContain('deploy/autodeploy.sh');
     expect(declared).toContain('deploy/read-env.sh');
     expect(declared).toContain('deploy/installed-current.sh');
-    expect(declared).toContain('deploy/ships.sh');
     expect(declared).toContain('deploy/db-snapshot.sh');
-    expect(declared).toContain('deploy/trial-migrate.cjs');
+    expect(declared).toContain('deploy/image/helper/wbb_image.py');
   });
 
   // A bare substring search would treat a commented-out line — e.g.
@@ -50,7 +51,20 @@ describe('every checked installed copy is actually installed', () => {
     });
   }
 
-  it('installs every declared copy', () => {
-    for (const path of declared) expect(installsPath(path)).toBe(true);
+  // The image helper's copies (deploy/image/…) are install-image.sh's: one `"<source> <target> <mode>"`
+  // row of its FILES table each.
+  function imageInstallsPath(path: string): boolean {
+    return imageInstaller.split('\n').some((line) => line.trim().startsWith(`"${path} `));
+  }
+
+  const helperCopies = declared.filter((p) => p.startsWith('deploy/image/'));
+  const deployerCopies = declared.filter((p) => !p.startsWith('deploy/image/'));
+
+  it('install-autodeploy.sh installs every declared copy outside deploy/image/', () => {
+    expect(deployerCopies.map((p) => [p, installsPath(p)])).toEqual(deployerCopies.map((p) => [p, true]));
+  });
+
+  it('install-image.sh installs every declared copy of the image helper', () => {
+    expect(helperCopies.map((p) => [p, imageInstallsPath(p)])).toEqual(helperCopies.map((p) => [p, true]));
   });
 });

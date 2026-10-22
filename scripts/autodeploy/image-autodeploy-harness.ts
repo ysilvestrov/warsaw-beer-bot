@@ -1,8 +1,8 @@
 /**
- * Test harness of the image controller deploy/image/autodeploy.sh (plan
+ * Test harness of the image controller deploy/autodeploy.sh (plan
  * docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md, Global Constraints).
  *
- * The tick is real bash and real git (a throwaway bare "origin" per world, as in autodeploy.test.ts).
+ * The tick is real bash and real git (a throwaway bare "origin" per world).
  * Every other contact is a WBB_* seam pointing at a fake here, and the fakes share ONE simulated host:
  * a directory of plain files —
  *
@@ -46,7 +46,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-export const SCRIPT = resolve(__dirname, '../../deploy/image/autodeploy.sh');
+export const SCRIPT = resolve(__dirname, '../../deploy/autodeploy.sh');
 export const DB_SNAPSHOT = resolve(__dirname, '../../deploy/db-snapshot.sh');
 export const GOLDEN_DIR = resolve(__dirname, 'fixtures/wbb-image');
 export const QUIET_S = 600;

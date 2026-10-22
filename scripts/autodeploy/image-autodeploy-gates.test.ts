@@ -9,13 +9,13 @@ import {
   tickEnv, writeStateText, type Image, type ImageWorld,
 } from './image-autodeploy-harness';
 
-// Each test drives real bash ticks through real git (~1–3 s on a 4-core box); see autodeploy.test.ts.
+// Each test drives real bash ticks through real git (~1–3 s on a 4-core box): the default 5 s left too little headroom.
 vi.setConfig({ testTimeout: 20_000 });
 
 /**
- * The image controller deploy/image/autodeploy.sh, Task 1 of
+ * The image controller deploy/autodeploy.sh (under deploy/image/ until stage «в»), Task 1 of
  * docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md: its state, the gates carried
- * over from deploy/autodeploy.sh, CI with `image`, the incident gate, and resolve → attest → pull → noop.
+ * over from the flat deployer, CI with `image`, the incident gate, and resolve → attest → pull → noop.
  * Bullets (а)–(ї) of the task are the describe blocks below.
  */
 
@@ -246,7 +246,7 @@ describe('(а) installed copies (plan п.15)', () => {
     expect(readFileSync(args, 'utf8').split('\n').filter((l) => l !== '')).toEqual([
       w.repo,
       'origin/main',
-      `deploy/image/autodeploy.sh=${SCRIPT}`,
+      `deploy/autodeploy.sh=${SCRIPT}`,
       'deploy/read-env.sh=/opt/test/bin/wbb-read-env',
       'deploy/db-snapshot.sh=/opt/test/bin/wbb-db-snapshot',
       `deploy/installed-current.sh=${stale}`,
@@ -280,11 +280,19 @@ describe('(а) installed copies (plan п.15)', () => {
 describe('(а) holds by path and by label, fail closed', () => {
   it.each([
     'deploy/sudoers.d/wbb-image',
+    'deploy/sudoers.d/warsaw-beer-bot',
+    'deploy/litestream.yml',
+    'deploy/litestream.service',
     'deploy/wbb-autodeploy.service',
+    'deploy/wbb-autodeploy.timer',
     'deploy/install-image.sh',
+    'deploy/install-autodeploy.sh',
     'deploy/rsync-filter',
     'deploy/autodeploy.sh',
-    'deploy/image/autodeploy.sh',
+    'deploy/ships.sh',
+    'deploy/read-env.sh',
+    'deploy/installed-current.sh',
+    'deploy/trial-migrate.cjs',
     'deploy/image/helper/wbb_image.py',
     'deploy/image/helper/bounded.py',
     'deploy/image/helper/wbb-image.sh',
@@ -302,7 +310,6 @@ describe('(а) holds by path and by label, fail closed', () => {
   });
 
   it.each([
-    'deploy/image/deploy.sh',
     'deploy/image/Dockerfile',
     'deploy/image/start-check.cjs',
     'deploy/warsaw-beer-bot.service',
@@ -368,6 +375,24 @@ describe('(а) holds by path and by label, fail closed', () => {
     tick(w);
     expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
   });
+
+  // Stage «в» audit (autodeploy.test.ts, "renames are seen from both ends"): a rename is a deletion of
+  // its source, and a held source holds although the destination is not held.
+  it('holds a commit that moves a held path away (the source side counts)', () => {
+    const w = imageWorld();
+    const added = push(w, { 'deploy/sudoers.d/warsaw-beer-bot': 'a\nb\nc\nd\n' }, 'add');
+    patchState(w, { DEPLOYED_SHA: added });
+    mkdirSync(join(w.seed, 'docs'), { recursive: true });
+    git(w.seed, 'mv', 'deploy/sudoers.d/warsaw-beer-bot', 'docs/sudoers-example');
+    git(w.seed, 'commit', '-q', '-m', 'rename');
+    git(w.seed, 'push', '-q', 'origin', 'main');
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual([]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• path deploy/sudoers.d/warsaw-beer-bot needs a human step\n${HOLD_TAIL}`,
+    ]);
+  });
 });
 
 describe('(в) a PR whose code-only rollback is not proven is a hold with --ack-incompatible', () => {
@@ -424,6 +449,28 @@ describe('(б) CI: ci AND image succeeded in one check suite', () => {
     ready(w, { WBB_CHECKS_CMD: checks });
     tick(w, { WBB_CHECKS_CMD: checks });
     expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  // Stage «в» audit (autodeploy.test.ts): `ci` itself is required, whatever else passed.
+  it('waits, silently, while the ci check has not appeared, even if image and others passed', () => {
+    const w = imageWorld();
+    const { x } = noopCandidate(w);
+    const checks = checksStub(w, 'checks-no-ci', ['image\tcompleted\tsuccess\t101', 'build (root)\tcompleted\tsuccess\t101']);
+    ready(w, { WBB_CHECKS_CMD: checks });
+    expect(tick(w, { WBB_CHECKS_CMD: checks }).code).toBe(0);
+    expect([events(w), notes(w)]).toEqual([[`checks ${x}`], []]);
+  });
+
+  // Stage «в» audit (autodeploy.test.ts): a failed check is no verdict on the commit — a green re-run releases it.
+  it('goes on once a failed check is re-run green', () => {
+    const w = imageWorld();
+    const { x, img } = noopCandidate(w);
+    const red = checksStub(w, 'checks-red', ['ci\tcompleted\tfailure\t101', 'image\tcompleted\tsuccess\t101']);
+    ready(w, { WBB_CHECKS_CMD: red });
+    tick(w, { WBB_CHECKS_CMD: red });
+    tick(w);
+    expect(events(w)).toEqual([`checks ${x}`, ...noopEvents(x, img, [w.settled.digest])]);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
   });
 
   it('reports a failed image check once per SHA and does not record LAST_FAILED_SHA', () => {
@@ -812,6 +859,19 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     }
   });
 
+  // Stage «в» audit (autodeploy.test.ts): Telegram caps a message; the tick cuts it rather than lose it.
+  it('cuts a message longer than Telegram accepts at 3500 characters, saying so', () => {
+    const w = imageWorld();
+    const { x, img } = noopCandidate(w);
+    const detail = 'E'.repeat(5000);
+    reply(w, 'attest', img.digest, { code: 1, stderr: `${detail}\n` });
+    ready(w);
+    tick(w);
+    const full = `⛔ merge-deploy: the image of ${short(x)} (${img.digest}) did not pass attestation (exit 1) — not deploying it; `
+      + `NOT recorded as a failed commit.\n${detail}`;
+    expect(notes(w)).toEqual([`${full.slice(0, 3500)}\n… truncated`]);
+  });
+
   it('refuses (exit 4) to write a value with a newline', () => {
     const w = imageWorld();
     seedState(w, { ...settledState(w.settled), LAST_SEEN_DEPLOYED_SHA: w.base });
@@ -950,6 +1010,148 @@ describe('(а) the observed-production fence (#768)', () => {
     } finally {
       chmodSync(w.stateDir, 0o755);
     }
+  });
+});
+
+/**
+ * Stage «в» audit: the facts of the flat deployer's fence tests (autodeploy.test.ts, #768) that the
+ * block above did not repeat. The fence is carried over unchanged (spec §4), so they hold here too.
+ */
+describe('(а) the observed-production fence: the rest of the flat deployer\'s facts', () => {
+  const record = (w: ImageWorld, sha: string) => patchState(w, { DEPLOYED_SHA: sha });
+  function observed() {
+    const w = imageWorld();
+    const one = push(w, { 'src/a.ts': '2\n' }, 'one');
+    const two = push(w, { 'src/a.ts': '3\n' }, 'two');
+    record(w, two);
+    tick(w);
+    return { w, one, two };
+  }
+  const backwards = (notesNow: string[]) => notesNow.filter((m) => m.includes('production went BACKWARDS:'));
+  /** deploy/README.md → Operator acknowledgement: the observation and the fence are forgotten, nothing else. */
+  function acknowledge(w: ImageWorld): void {
+    const st = readState(w);
+    for (const k of ['LAST_SEEN_DEPLOYED_SHA', 'REGRESSION_FROM_SHA', 'REGRESSION_TO_SHA', 'LAST_HOLD_NOTICE']) delete st[k];
+    seedState(w, st);
+  }
+
+  it('reports an unknown PR count when even one lost commit cannot be looked up', () => {
+    const { w, one, two } = observed();
+    record(w, w.base);
+    const labels = stub(w.bin, 'lost-pr-fails', `[ "$1" != "${one}" ] || exit 1; printf '17\\t\\n'`);
+    tick(w, { WBB_PR_LABELS_CMD: labels });
+    expect(notes(w)[0]).toBe(`⚠️ merge-deploy: production went BACKWARDS: ${short(two)} → ${short(w.base)} (2 commits, unknown PRs no longer reachable) — `
+      + 'was this a deliberate rollback? Unattended deploys are HELD. Deploy main by hand to recover.');
+    expect([readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual([two, []]);
+  });
+
+  it('reports a further regression once and keeps the original recovery point', () => {
+    const { w, one, two } = observed();
+    record(w, one);
+    tick(w);
+    record(w, w.base);
+    tick(w);
+    ready(w);
+    tick(w);
+    const warnings = backwards(notes(w));
+    expect(warnings.length).toBe(2);
+    expect(warnings[1]).toBe(`⚠️ merge-deploy: production went BACKWARDS: ${short(one)} → ${short(w.base)} (1 commits, 1 PRs no longer reachable) — `
+      + 'was this a deliberate rollback? Unattended deploys are HELD. Deploy main by hand to recover.');
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).REGRESSION_TO_SHA, events(w)]).toEqual([two, w.base, []]);
+  });
+
+  it('keeps the last observation while no deployed commit is recorded, and judges the next record against it', () => {
+    const { w, two } = observed();
+    const st = readState(w);
+    delete st.DEPLOYED_SHA;
+    seedState(w, st);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    record(w, w.base);
+    tick(w);
+    expect([backwards(notes(w)).length, readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual([1, two, []]);
+  });
+
+  it('reports an unassessable previous observation rather than inventing a regression', () => {
+    const w = imageWorld();
+    seedState(w, { ...settledState(w.settled), LAST_SEEN_DEPLOYED_SHA: 'a'.repeat(40) });
+    tick(w);
+    expect(notes(w)).toEqual([
+      '⚠️ merge-deploy: cannot assess the deployed transition — previous observation (aaaaaaa) is not a locally available commit. '
+      + 'Keeping it; unattended deploys are blocked. Recover the Git history or deploy and verify intended main, '
+      + 'then follow deploy/README.md → Operator acknowledgement of a replacement baseline.',
+    ]);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual(['a'.repeat(40), undefined, []]);
+  });
+
+  it('releases the fence after a manual recovery to a strict descendant of the recovery point', () => {
+    const { w } = observed();
+    record(w, w.base);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual([]);
+    const newer = push(w, { 'src/a.ts': '4\n' }, 'newer main');
+    record(w, newer);
+    tick(w);
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).LAST_SEEN_DEPLOYED_SHA]).toEqual([undefined, newer]);
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  it('releases a divergent fence when production is main again, containing the recovery point', () => {
+    const { w, two } = observed();
+    git(w.seed, 'checkout', '-q', '-b', 'sibling', w.base);
+    const sibling = commitTo(w, { 'src/a.ts': 'other\n' }, 'sibling', 'sibling');
+    record(w, sibling);
+    tick(w);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    record(w, two);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA]).toEqual([two, undefined]);
+    git(w.seed, 'checkout', '-q', 'main');
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  it('resumes after the operator acknowledges a baseline main cannot contain (a squash-merged feature commit)', () => {
+    const w = imageWorld();
+    git(w.seed, 'checkout', '-q', '-b', 'feature');
+    const feature = commitTo(w, { 'src/a.ts': 'feature\n' }, 'feature', 'feature');
+    record(w, feature);
+    tick(w);
+    git(w.seed, 'checkout', '-q', 'main');
+    const main = push(w, { 'src/a.ts': 'feature\n' }, 'squash');
+    record(w, main);
+    ready(w);
+    tick(w);
+    expect([readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual([feature, []]);
+    acknowledge(w);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA]).toEqual([main, undefined]);
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  it('resumes from a missing prior observation only after the operator acknowledges, keeping LAST_FAILED_SHA', () => {
+    const w = imageWorld();
+    const missing = 'a'.repeat(40);
+    seedState(w, { ...settledState(w.settled), LAST_SEEN_DEPLOYED_SHA: missing, LAST_FAILED_SHA: missing });
+    ready(w);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, events(w)]).toEqual([missing, []]);
+    acknowledge(w);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).LAST_FAILED_SHA]).toEqual([w.base, missing]);
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
   });
 });
 

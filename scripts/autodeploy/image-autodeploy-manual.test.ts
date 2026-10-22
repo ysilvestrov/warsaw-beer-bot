@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
@@ -418,6 +418,84 @@ describe('(и) production is not an ancestor of X', () => {
       + 'A deliberate rollback must not be overwritten automatically.\n'
       + `Deploy main by hand (bash deploy/deploy.sh; --force if histories diverge) if it contains ${short(b)}. `
       + 'If main omits that commit, verify intended production and follow deploy/README.md → Operator acknowledgement of a replacement baseline.',
+    ]);
+  });
+});
+
+/**
+ * Stage «в» audit: the ancestry facts of the flat deploy.sh (deploy-ancestry.test.ts) that (и) does not
+ * repeat. The manual entry is now the controller's own; its ancestry gate is the same question.
+ */
+describe('(и2) ancestry: the rest of the flat deploy.sh\'s facts', () => {
+  const MISSING = 'a'.repeat(40);
+
+  it('a divergent production (a side branch) refuses (1) without --force, changing nothing', () => {
+    const m = manualWorld();
+    git(m.w.seed, 'checkout', '-q', '-b', 'side', m.w.base);
+    const side = commitTo(m.w, { 'src/side.ts': 's\n' }, 'side', 'side');
+    patchState(m.w, { DEPLOYED_SHA: side });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1, `production (${short(side)}) is not an ancestor of ${short(m.x)} — a downgrade or a jump across histories; if it is deliberate, run again with --force\n`,
+      before, [], [],
+    ]);
+  });
+
+  it('a recorded commit the repository does not have refuses (1) without --force, changing nothing', () => {
+    const m = manualWorld();
+    patchState(m.w, { DEPLOYED_SHA: MISSING });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1, `production (aaaaaaa) is not an ancestor of ${short(m.x)} — a downgrade or a jump across histories; if it is deliberate, run again with --force\n`,
+      before, [], [],
+    ]);
+  });
+
+  // The flat deploy.sh admitted this recovery with --force alone. --force still releases the ancestry
+  // gate; the range from a commit git does not have cannot be read, so it is also unproven for a
+  // code-only rollback and asks for --ack-incompatible (spec §6.4), and then deploys.
+  it('with --force, a recorded commit the repository does not have passes ancestry; the unreadable range asks for --ack-incompatible', () => {
+    const m = manualWorld();
+    patchState(m.w, { DEPLOYED_SHA: MISSING });
+    const before = stateText(m.w);
+    const refused = deploy(m, ['--force']);
+    // git's own complaints about the missing object reach stderr too; their wording is git's, not ours.
+    const ours = refused.out.split('\n').filter((l) => !l.startsWith('fatal: ')).join('\n');
+    expect([refused.code, ours, stateText(m.w), events(m.w)]).toEqual([
+      1, contractRefusal({ ...m, w: { ...m.w, base: MISSING } }, ['could not list the changed paths', 'could not list the commits']), before, [],
+    ]);
+    const r = deploy(m, ['--force', '--ack-incompatible']);
+    expect([r.code, readState(m.w).DEPLOYED_SHA, readState(m.w).SETTLED_SHA]).toEqual([0, m.x, m.x]);
+  });
+
+  it('an unreadable state is STATE CORRUPT (3) even with --force: nothing runs', () => {
+    const m = manualWorld();
+    chmodSync(m.w.statePath, 0o000);
+    try {
+      const r = deploy(m, ['--force']);
+      // The reason is masked: read_state's NUL-byte check runs before its read check and names an
+      // unreadable file "holds a NUL byte" — the refusal is right, its reason is not (a separate defect).
+      const masked = notes(m.w).map((n) => n.replace(`${m.w.statePath}: the file holds a NUL byte.`, `${m.w.statePath}: <reason>.`));
+      expect([r.code, events(m.w), masked]).toEqual([3, [], [
+        `[manual] 🔥 merge-deploy: STATE CORRUPT — ${m.w.statePath}: <reason>. Nothing runs until a human repairs the file; it is never taken for a first start.`,
+      ]]);
+    } finally {
+      chmodSync(m.w.statePath, 0o644);
+    }
+    expect(readState(m.w)).toEqual(initial(m));
+  });
+
+  // The flat deploy.sh admitted a first deploy with no baseline; the image's first release is the
+  // bootstrap (spec §8 п.2), and a plain deploy names it.
+  it('with nothing settled, a deploy refuses (1) and names --bootstrap', () => {
+    const m = manualWorld();
+    seedState(m.w, { DEPLOYED_SHA: m.w.base });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1, 'there is no settled image yet — the first image release is bash deploy/deploy.sh --bootstrap\n', before, [], [],
     ]);
   });
 });

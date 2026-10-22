@@ -5,16 +5,16 @@ import { join, resolve } from 'node:path';
 import { makeTempDirectory } from '../test-temp';
 
 /**
- * deploy/image/deploy.sh — the human's wrapper over the manual mode of the image controller (plan
+ * deploy/deploy.sh — the human's wrapper over the manual mode of the image controller (plan
  * docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-b2-harness.md, "Рішення" п.1–4, Task 1).
  *
  * Real bash and real git: a throwaway bare origin and a checkout cloned from it, holding a copy of the
- * wrapper and a deploy/image/autodeploy.sh. The "installed" controller (WBB_INSTALLED_CONTROLLER) is a
+ * wrapper and a deploy/autodeploy.sh beside it. The "installed" controller (WBB_INSTALLED_CONTROLLER) is a
  * stub that writes its argv to a file and exits with WBB_STUB_EXIT; the same stub bytes are the
  * checkout's autodeploy.sh, so the byte check passes unless a test breaks it. Expected argv, codes and
  * messages are literals of the test.
  */
-const WRAPPER = resolve(__dirname, '../../deploy/image/deploy.sh');
+const WRAPPER = resolve(__dirname, '../../deploy/deploy.sh');
 
 const STUB = `#!/usr/bin/env bash
 printf '%s\\n' "$@" > "$WBB_STUB_LOG"
@@ -60,11 +60,11 @@ function world(): World {
   git(seed, 'config', 'user.email', 't@example.com');
   git(seed, 'config', 'user.name', 'T');
   git(seed, 'remote', 'add', 'origin', remote);
-  mkdirSync(join(seed, 'deploy/image'), { recursive: true });
-  writeFileSync(join(seed, 'deploy/image/deploy.sh'), readFileSync(WRAPPER));
-  chmodSync(join(seed, 'deploy/image/deploy.sh'), 0o755);
-  writeFileSync(join(seed, 'deploy/image/autodeploy.sh'), STUB);
-  chmodSync(join(seed, 'deploy/image/autodeploy.sh'), 0o755);
+  mkdirSync(join(seed, 'deploy'), { recursive: true });
+  writeFileSync(join(seed, 'deploy/deploy.sh'), readFileSync(WRAPPER));
+  chmodSync(join(seed, 'deploy/deploy.sh'), 0o755);
+  writeFileSync(join(seed, 'deploy/autodeploy.sh'), STUB);
+  chmodSync(join(seed, 'deploy/autodeploy.sh'), 0o755);
   const head = commitIn(seed, 'src/a.ts', 'export const a = 1;\n', 'base');
   git(seed, 'push', '-q', 'origin', 'main');
 
@@ -90,7 +90,7 @@ function world(): World {
 interface Run { status: number | null; stderr: string; argv: string[] | 'never called' }
 
 function run(w: World, args: string[], opts: { cwd?: string; script?: string; env?: Record<string, string> } = {}): Run {
-  const r = spawnSync('bash', [opts.script ?? 'deploy/image/deploy.sh', ...args], {
+  const r = spawnSync('bash', [opts.script ?? 'deploy/deploy.sh', ...args], {
     cwd: opts.cwd ?? w.checkout,
     encoding: 'utf8',
     timeout: 30_000,
@@ -114,12 +114,12 @@ const USAGE = `usage: bash deploy/deploy.sh [--force] [--ack-incompatible]   dep
 `;
 
 const mismatch = (w: World, what: string): string =>
-  `ERROR: the installed controller ${w.installed} ${what} this checkout's ${w.checkout}/deploy/image/autodeploy.sh. ` +
+  `ERROR: the installed controller ${w.installed} ${what} this checkout's ${w.checkout}/deploy/autodeploy.sh. ` +
   'A manual run must execute the controller the timer runs, so nothing is started. ' +
   'Before stage «в» this always refuses: the installed copy is still the flat deployer. ' +
   'After stage «в»: sudo bash deploy/install-autodeploy.sh (from this checkout), then run this again.\n';
 
-describe('deploy/image/deploy.sh', () => {
+describe('deploy/deploy.sh', () => {
   describe('(а) translates each command into the installed controller\'s --manual call', () => {
     test.each<[string[], number, (w: World) => string[]]>([
       [[], 0, (w) => ['--manual', 'deploy', '--target', w.head]],
@@ -256,7 +256,7 @@ describe('deploy/image/deploy.sh', () => {
   describe('(е) the script finds its own checkout', () => {
     test('run from another cwd (/) by its path', () => {
       const w = world();
-      expect(run(w, [], { cwd: '/', script: join(w.checkout, 'deploy/image/deploy.sh') })).toEqual({
+      expect(run(w, [], { cwd: '/', script: join(w.checkout, 'deploy/deploy.sh') })).toEqual({
         status: 0, stderr: '', argv: ['--manual', 'deploy', '--target', w.head],
       });
     });

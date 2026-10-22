@@ -547,14 +547,15 @@ sudo bash deploy/install-image.sh            # visudo -cf + quadlet -dryrun of t
 sudo bash deploy/install-image.sh --check    # 0 when every installed copy matches this checkout
 ```
 
-### Image controller (stage «б»: in the repo, not installed)
+### Image controller (stage «в»: `deploy/autodeploy.sh`, not installed yet)
 
-`deploy/image/autodeploy.sh` is the merge-deploy controller for images (spec
+`deploy/autodeploy.sh` is the merge-deploy controller for images (spec
 `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md` §4, §7; plans
 `docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md`,
 `…/2026-10-21-wbb-image-transition-b2-core.md`, `…/2026-10-22-wbb-image-transition-b2-harness.md`).
-Nothing runs it yet: the timer still runs the installed copy of `deploy/autodeploy.sh` (flat tree)
-until stage «в» moves this file over it. Its state is `~/.local/state/wbb-autodeploy/image-state.env`
+Stage «в» moved it (and its wrapper `deploy/deploy.sh`) over the flat deployer's files. Until a human
+runs `sudo bash deploy/install-autodeploy.sh` on the host, the timer still runs the old installed
+copy (the flat deployer). Its state is `~/.local/state/wbb-autodeploy/image-state.env`
 (parsed and validated, never sourced; a damaged file stops it with `STATE CORRUPT`). It reads the
 helper's verdict per action, never by exit code alone: `AUDIT ADVISORY`, `TRIAL FAILED`,
 `START FAILED` and `ACTIVATE FAILED` mark the SHA failed (only main's head is recorded);
@@ -569,7 +570,7 @@ Run from a clean checkout of `main` on the host, as the operator (never root). U
 wrapper refuses every command: the installed controller is still the flat deployer, and the wrapper
 runs only the installed copy that equals this checkout's controller byte for byte.
 
-| Command (until «в»: `bash deploy/image/deploy.sh …`) | What it does |
+| Command | What it does |
 |---|---|
 | `bash deploy/deploy.sh [--force] [--ack-incompatible]` | Deploys HEAD through the tick's own gates and window, **in the foreground, ~10 min**. A path hold or `deploy:hold` is released by running it (as today). `--force`: a deliberate downgrade (the next tick fences it). `--ack-incompatible`: `COMPAT FAILED` or a `rollback:unsafe`/`migration:contract` PR in the range — deployed with **no automatic rollback**; a failure is an incident. To deploy another commit: `git checkout <sha>` first. |
 | `bash deploy/deploy.sh --bootstrap` | The first image release (below). |
