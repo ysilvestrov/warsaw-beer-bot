@@ -93,13 +93,21 @@ cmd_unmark() {
     *) die "not a marked pre snapshot: $marked" ;;
   esac
   [ -f "$marked" ] || die "no snapshot at $marked"
+  # A run killed between the two renames below left only the snapshot to move: finish it.
+  if [ ! -e "$marked.sha256" ] && [ -f "$pre.sha256" ] && [ ! -e "$pre" ]; then
+    mv "$marked" "$pre"
+    echo "$pre"
+    return 0
+  fi
   [ -f "$marked.sha256" ] || die "no checksum for $marked"
   [ ! -e "$pre" ] && [ ! -e "$pre.sha256" ] || die "refusing to overwrite $pre"
-  mv "$marked" "$pre"
-  # The pair moves together or not at all: a failed second rename puts the first one back.
-  if ! mv "$marked.sha256" "$pre.sha256"; then
-    mv "$pre" "$marked" || die "unmark half done: $pre has no checksum, it is at $marked.sha256"
-    die "could not rename $marked.sha256; nothing was renamed"
+  # The checksum first (#905 AI review): a kill between the renames leaves the snapshot under its
+  # marked name, which prune never deletes, and the next unmark finishes the move (above). A failed
+  # second rename puts the first one back.
+  mv "$marked.sha256" "$pre.sha256" || die "could not rename $marked.sha256; nothing was renamed"
+  if ! mv "$marked" "$pre"; then
+    mv "$pre.sha256" "$marked.sha256" || die "unmark half done: $marked has its checksum at $pre.sha256"
+    die "could not rename $marked; nothing was renamed"
   fi
   echo "$pre"
 }

@@ -22,7 +22,10 @@ function cleanup(): void {
   tempCleanups().delete(cleanup);
 }
 
-afterAll(cleanup);
+// The timeout is set here because this hook is registered at import, before a test file's
+// vi.setConfig can raise hookTimeout. A file with many git worlds (image-autodeploy-manual, ~150)
+// took longer than vitest's 10 s default to remove under the full suite's load (#905).
+afterAll(cleanup, 120_000);
 
 export function makeTempDirectory(prefix: string): string {
   if (!prefix || prefix === '.' || prefix === '..' || prefix.includes('/') || prefix.includes('\\')) {

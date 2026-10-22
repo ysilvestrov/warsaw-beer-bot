@@ -9,9 +9,7 @@ import {
 } from './image-autodeploy-harness';
 
 // A manual deploy watches a whole simulated 10-minute window in the foreground (61 polls).
-// hookTimeout: test-temp's afterAll removes every world of this file (~150 git repos); under the
-// full suite's load that alone ran past vitest's 10 s default (#904).
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+vi.setConfig({ testTimeout: 60_000 });
 
 /**
  * The controller's manual entry `--manual deploy` — Task 2 of

@@ -326,6 +326,28 @@ describe('db-snapshot.sh unmark (plan b2 Task 3: a resolved incident returns its
     ]);
   });
 
+  it('a snapshot that cannot be renamed puts its checksum back: nothing renamed, 1', () => {
+    const name = '20260930T120000Z-abc1234-rollback-pre.db';
+    const dir = pair(name);
+    const bin = makeTempDirectory('wbb-snap-bin-');
+    // mv on PATH that refuses the snapshot and does every other rename itself.
+    writeFileSync(join(bin, 'mv'), '#!/bin/bash\ncase "$1" in *.sha256) exec /bin/mv "$@" ;; esac\nexit 1\n', { mode: 0o755 });
+    const r = spawnSync('bash', [SCRIPT, 'unmark', join(dir, name)], { encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` } });
+    expect([r.status, r.stdout, r.stderr, readdirSync(dir).sort()]).toEqual([
+      1, '', `db-snapshot: could not rename ${join(dir, name)}; nothing was renamed\n`, [name, `${name}.sha256`],
+    ]);
+  });
+
+  it('finishes a run killed between the renames (the checksum moved, the snapshot not): 0, the pair whole', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    writeFileSync(join(dir, '20260930T120000Z-abc1234-rollback-pre.db'), 'db');
+    writeFileSync(join(dir, '20260930T120000Z-abc1234-pre.db.sha256'), 'h\n');
+    const r = snap('unmark', join(dir, '20260930T120000Z-abc1234-rollback-pre.db'));
+    expect([r.code, r.out, r.err, readdirSync(dir).sort()]).toEqual([
+      0, `${join(dir, '20260930T120000Z-abc1234-pre.db')}\n`, '', ['20260930T120000Z-abc1234-pre.db', '20260930T120000Z-abc1234-pre.db.sha256'],
+    ]);
+  });
+
   it('refuses an unmarked snapshot, and renames nothing', () => {
     const dir = pair('20260930T120000Z-abc1234-pre.db');
     const p = join(dir, '20260930T120000Z-abc1234-pre.db');
