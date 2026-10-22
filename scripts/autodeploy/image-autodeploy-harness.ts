@@ -13,6 +13,7 @@
  *   nrestarts     systemd's NRestarts (default 0); a successful `activate` resets it to 0 (V14)
  *   boot_id       the kernel's boot id
  *   unhealthy     present: /health fails
+ *   flat          present: the flat tree runs (the old unit): /health answers running_sha with no container of ours
  *   unit_state    present: what `systemctl show -p ActiveState,SubState,MainPID` prints
  *   registry/<D>  an image in GHCR: "<id> <revision sha> <wbb.content>"
  *   tags/<sha>    the tag <sha> → its digest
@@ -40,7 +41,7 @@
  * literals of the test (an image's digest, id and content are names given here, nothing more).
  */
 import { makeTempDirectory } from '../test-temp';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -299,7 +300,7 @@ if [ -f "$H/swap" ] && [ -f "$H/activated_at" ]; then
     rm -f "$H/swap"
   fi
 fi
-[ -f "$H/container" ] && [ ! -f "$H/unhealthy" ] && [ -s "$H/running_sha" ] || exit 1
+{ [ -f "$H/container" ] || [ -f "$H/flat" ]; } && [ ! -f "$H/unhealthy" ] && [ -s "$H/running_sha" ] || exit 1
 faulty health && exit 1
 if faulty health-sha; then echo ffffffffffffffffffffffffffffffffffffffff; exit 0; fi
 cat "$H/running_sha"
@@ -649,4 +650,18 @@ export function manual(w: ImageWorld, args: string[], over: Record<string, strin
 export function ready(w: ImageWorld, over: Record<string, string> = {}): void {
   tick(w, over);
   advance(w, QUIET_S);
+}
+
+/**
+ * Holds `lock` in another process with a real flock (the deploy lock as a tick or deploy.sh holds it);
+ * resolves once it is held. The caller kills the holder.
+ */
+export async function holdLock(lock: string, seconds = 60): Promise<ChildProcess> {
+  const holder = spawn('flock', ['-o', lock, 'sleep', String(seconds)], { stdio: 'ignore' });
+  for (let i = 0; i < 100; i += 1) {
+    if (spawnSync('flock', ['-n', lock, 'true']).status === 1) return holder;
+    await new Promise((res) => setTimeout(res, 20));
+  }
+  holder.kill();
+  throw new Error('the lock holder never acquired the lock');
 }

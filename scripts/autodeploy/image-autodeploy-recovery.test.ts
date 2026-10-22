@@ -98,7 +98,7 @@ describe('§7.2 row 1: activating, the Quadlet file names S, S runs', () => {
     });
     expect(notes(r.w)).toEqual([
       `⚠️ merge-deploy: the deploy of ${short(r.x)} was interrupted before its activation; production still runs the settled ${short(r.s.sha)}, `
-      + `so the window is cancelled and ${short(r.x)} is tried again next tick.`,
+      + 'so the window is cancelled — the timer deploys main\'s head as usual; a manual deploy is run again by hand.',
     ]);
     expect(tick(r.w).code).toBe(0);
     expect(events(r.w).filter((e) => e.startsWith('image activate'))).toEqual([`image activate --digest ${r.img.digest}`]);

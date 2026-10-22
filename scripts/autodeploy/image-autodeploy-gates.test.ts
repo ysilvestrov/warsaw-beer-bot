@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, CHECKS_OK, DAY1, GOLDEN_DIR, SCRIPT,
-  advance, checksStub, clonedMain, commitTo, events, git, golden, hostSet, imageOf, imageWorld, notes, patchState,
+  advance, checksStub, clonedMain, commitTo, events, git, golden, holdLock, hostSet, imageOf, imageWorld, notes, patchState,
   publish, push, readState, ready, reply, runImage, seedState, settledState, short, stateText, stub, syncs, tick,
   tickEnv, writeStateText, type Image, type ImageWorld,
 } from './image-autodeploy-harness';
@@ -954,17 +954,6 @@ describe('(а) the observed-production fence (#768)', () => {
 });
 
 describe('(а) a stalled lock', () => {
-  /** Holds the tick's lock in another process; resolves once it is held. */
-  async function holdLock(lock: string): Promise<ChildProcess> {
-    const holder = spawn('flock', ['-o', lock, 'sleep', '60'], { stdio: 'ignore' });
-    for (let i = 0; i < 100; i += 1) {
-      if (spawnSync('flock', ['-n', lock, 'true']).status === 1) return holder;
-      await new Promise((res) => setTimeout(res, 20));
-    }
-    holder.kill();
-    throw new Error('the lock holder never acquired the lock');
-  }
-
   // LOCK_STALL_S = TICK_BUDGET_S (7500) + 300.
   it('says nothing for 7799 s, then reports a held lock once a day', async () => {
     const w = imageWorld();
@@ -1175,7 +1164,7 @@ describe('PR #866 review: a malformed lock-busy-since does not abort the tick (i
     const w = imageWorld();
     const busy = join(w.stateDir, 'lock-busy-since');
     writeFileSync(busy, '100000 junk\n');
-    const holder = await holdTheLock(join(w.stateDir, 'lock'));
+    const holder = await holdLock(join(w.stateDir, 'lock'));
     try {
       expect(tick(w).code).toBe(0);
       expect(readFileSync(busy, 'utf8')).toBe('100000\n');
@@ -1189,17 +1178,6 @@ describe('PR #866 review: a malformed lock-busy-since does not abort the tick (i
     }
   });
 });
-
-/** Holds the tick's lock in another process; resolves once it is held. */
-async function holdTheLock(lock: string): Promise<ChildProcess> {
-  const holder = spawn('flock', ['-o', lock, 'sleep', '60'], { stdio: 'ignore' });
-  for (let i = 0; i < 100; i += 1) {
-    if (spawnSync('flock', ['-n', lock, 'true']).status === 1) return holder;
-    await new Promise((res) => setTimeout(res, 20));
-  }
-  holder.kill();
-  throw new Error('the lock holder never acquired the lock');
-}
 
 describe('PR #866 review, round 2', () => {
   /** A pre snapshot as db-snapshot.sh leaves it, under the world's snapshot directory. */
@@ -1228,7 +1206,7 @@ describe('PR #866 review, round 2', () => {
     const w = imageWorld();
     const busy = join(w.stateDir, 'lock-busy-since');
     writeFileSync(busy, '200000\n');
-    const holder = await holdTheLock(join(w.stateDir, 'lock'));
+    const holder = await holdLock(join(w.stateDir, 'lock'));
     try {
       expect(tick(w).code).toBe(0);
       expect(readFileSync(busy, 'utf8')).toBe('100000\n');

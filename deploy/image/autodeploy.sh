@@ -16,9 +16,17 @@
 # candidate whose wbb.content equals the deployed one changes nothing that runs (spec §4.1):
 # it is recorded as deployed (noop) without a restart.
 #
-# The same file is the human's manual entry (spec §7.4): `--manual deploy --target <sha>` deploys X
-# through the same state, gates (minus the ones a human's presence releases) and window, in the
-# foreground; a run that is interrupted is finished by the next tick from the state.
+# The same file is the human's manual entry (spec §7.4), through the same state; a run that is
+# interrupted is finished by the next tick from the state. Its subcommands:
+#   --manual deploy --target <sha> [--force] [--ack-incompatible] — deploys X through the same gates
+#       (minus the ones a human's presence releases), pipeline and window, in the foreground;
+#   --manual bootstrap --target <sha> — the first image release, over the flat tree, with no settled
+#       image: a first run while the old unit runs (a dry trial, then the root steps printed), and a
+#       run after those steps that deploys X in a manual window with no rollback target;
+#   --manual resolve-incident --settled <sha> — closes an incident through a watched resolve window
+#       of the image S the human restored;
+#   --manual resolve-incident --flat — closes an incident of the first image release after the human
+#       brought the old unit and the flat tree back: R recorded as deployed, nothing settled, no window.
 #
 # Runs as the operator user (ysi). Root steps go through `sudo -n wbb-image <verb>`, one sudoers
 # rule per verb. Git runs in a private clone, only for the gates — nothing is checked out.
@@ -370,12 +378,22 @@ notify() {
 # "Could not verify" (or "wait"): the tick says so once a day and exits — the next tick looks again
 # (exit $3, default 0). A manual run is refused at once (1): the human is in front of it and runs
 # again; nothing is recorded, not even the daily marker, so the timer's own notice is not muted.
-halt() { # <daily marker> <message> [the tick's exit]
+# A 4th argument is a detail (another tool's output) on the lines after the message: the tick sends
+# them as one text; the human's "— run again" ends the message, before the detail (plan b2 п.37).
+halt() { # <daily marker> <message> [the tick's exit] [detail]
   if [ "$MANUAL" = 1 ]; then
-    printf '%s\n' "$(manual_text "$2")$(way_back)" >&2
+    if [ "$#" -ge 4 ]; then
+      printf '%s\n%s%s\n' "$(manual_text "$2")" "$4" "$(way_back)" >&2
+    else
+      printf '%s\n' "$(manual_text "$2")$(way_back)" >&2
+    fi
     exit 1
   fi
-  once_a_day "$1" "$2"
+  if [ "$#" -ge 4 ]; then
+    once_a_day "$1" "$2"$'\n'"$4"
+  else
+    once_a_day "$1" "$2"
+  fi
   exit "${3:-0}"
 }
 # Plan b2 п.21: a stop that leaves an open window (an activation not confirmed) may have changed
@@ -843,6 +861,10 @@ once_a_day() {
 # run fetched it): the tick deploys nothing else, so a record of an older commit — a manual deploy
 # behind a head that already failed — would only overwrite the head's and let the tick redeploy
 # it. A head that cannot be read records as before.
+# A window this run resumed (resume_window, then its failure) reads the fetch of the run that opened
+# it: the tick fetches only after resume_window, and a manual run refuses an open window before its
+# fetch. That is correct only because nothing fetches while a window is open — origin/main is then
+# the head the window's own run saw, and X was that head or it was not.
 is_main_head() {
   local head
   head=$(git -C "$REPO" rev-parse -q --verify "origin/main^{commit}" 2>/dev/null) || return 0
@@ -1154,8 +1176,8 @@ attest_image() {
   local out rc
   out=$("$ATTEST_CMD" "$D" "$X" 2>&1) && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
-    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: the image of ${X:0:7} (${D}) did not pass attestation (exit ${rc}) — not deploying it; NOT recorded as a failed commit.
-$(tail -n 5 <<< "$out")"
+    halt LAST_ASSESS_NOTICE "⛔ merge-deploy: the image of ${X:0:7} (${D}) did not pass attestation (exit ${rc}) — not deploying it; NOT recorded as a failed commit." "" \
+      "$(tail -n 5 <<< "$out")"
   fi
 }
 
@@ -1348,12 +1370,7 @@ retry_pending_marks() {
 # complete). Never returns.
 open_incident() {
   local blame="$1" reason="${2//$'\n'/ }" x="$WINDOW_SHA" d="$WINDOW_DIGEST" mode="$WINDOW_MODE" out
-  # Plan b2 п.28: after a failed first image release there may be nothing of ours to settle — the
-  # human may have brought the old unit and the flat tree back instead.
-  out="bash deploy/deploy.sh --resolve-incident --settled <sha>"
-  if [ "$WINDOW_KIND" = bootstrap ]; then
-    out="bash deploy/deploy.sh --resolve-incident --settled <sha> (an image of ours runs from the Quadlet file), or bash deploy/deploy.sh --resolve-incident --flat (the old unit and the flat tree run again)"
-  fi
+  out=$(incident_ways)
   if [ "$blame" = 1 ] && is_main_head "$x"; then LAST_FAILED_SHA="$x"; fi
   INCIDENT="$x $d $reason"
   write_state
@@ -1364,6 +1381,17 @@ open_incident() {
 Pre-deploy snapshot: ${PRE_NOTE}
 Nothing deploys until a human restores production and runs: ${out}"
   exit 3
+}
+
+# Plan b2 п.28, п.34: how a human closes an incident. With nothing settled — whatever window failed —
+# there may be nothing of ours to settle: the human may have brought the old unit and the flat tree
+# back instead, and --flat is the way out.
+incident_ways() {
+  if [ -n "$SETTLED_DIGEST" ]; then
+    printf '%s' "bash deploy/deploy.sh --resolve-incident --settled <sha>"
+  else
+    printf '%s' "bash deploy/deploy.sh --resolve-incident --settled <sha> (an image of ours runs from the Quadlet file), or bash deploy/deploy.sh --resolve-incident --flat (the old unit and the flat tree run again)"
+  fi
 }
 
 # What `current`, the unit and /health say about the settled image S: 0 it runs and answers,
@@ -1476,15 +1504,22 @@ window_failed() {
 # $1 = compare: the start after an activation. `activate` always ends in `systemctl restart`, and a
 # restart resets NRestarts to 0 while daemon-reload leaves it alone (spec V14), so from here on the
 # counter counts the candidate's own restarts: above 0 means it already restarted.
+# $1 = base, $2 = the counter its caller has just read (resolve: its precondition, plan b2 п.35) —
+# no second read between that check and the write, which is what a failure there would have been
+# written into: a window with no phase.
 start_watching() {
   local r start
-  start=$(now)
-  until r=$(read_restarts); do
-    if [ $(( $(now) - start )) -ge "$OBSERVE_MAX_S" ]; then
-      window_failed "could not observe production: NRestarts unreadable for $(( $(now) - start ))s at the start of the window"
-    fi
-    "$SLEEP_CMD" "$POLL_S"
-  done
+  if [ "${1:-}" = base ]; then
+    r="$2"
+  else
+    start=$(now)
+    until r=$(read_restarts); do
+      if [ $(( $(now) - start )) -ge "$OBSERVE_MAX_S" ]; then
+        window_failed "could not observe production: NRestarts unreadable for $(( $(now) - start ))s at the start of the window"
+      fi
+      "$SLEEP_CMD" "$POLL_S"
+    done
+  fi
   if [ "${1:-}" = compare ] && [ "$r" -gt 0 ]; then
     window_failed "the candidate restarted during startup (NRestarts ${r} since its activation)"
   fi
@@ -1865,21 +1900,26 @@ It is tried again in $(( CANDIDATE_RETRY_S / 60 )) min; nothing is recorded agai
       halt LAST_ASSESS_NOTICE "⚠️ merge-deploy: the trial of ${X:0:7} could not judge it: ${IMG_VERDICT} — NOT a finding; retrying next tick." ;;
   esac
 
-  # Spec §7.1: the window is in the state BEFORE anything changes production.
+  open_window deploy "$DEPLOY_MODE" "$SETTLED_DIGEST" "$pre" "$boot"
+  activate_candidate
+}
+
+# Spec §7.1: the window of X is in the state BEFORE anything changes production — one write that
+# also takes the pre out of PENDING_PRE (it is the window's now).
+open_window() { # <kind> <mode> <prev digest> <pre> <boot id>
   WINDOW_SHA="$X"
   WINDOW_DIGEST="$D"
   WINDOW_ID="$CAND_ID"
   WINDOW_CONTENT="$CAND_CONTENT"
   WINDOW_OLD="$DEPLOYED_SHA"
-  WINDOW_PREV_DIGEST="$SETTLED_DIGEST"
-  WINDOW_KIND=deploy
-  WINDOW_MODE="$DEPLOY_MODE"
+  WINDOW_PREV_DIGEST="$3"
+  WINDOW_KIND="$1"
+  WINDOW_MODE="$2"
   WINDOW_PHASE=activating
-  WINDOW_PRE="$pre"
-  WINDOW_BOOT="$boot"
+  WINDOW_PRE="$4"
+  WINDOW_BOOT="$5"
   PENDING_PRE=""
   write_state
-  activate_candidate
 }
 
 # Plan п.9: a candidate held for COMPAT FAILED stays held only for the exact pair it was proven
@@ -1944,7 +1984,7 @@ resume_window() {
       fi
       # Row 1: the Quadlet file still names S — activate never ran, production is unchanged.
       if [ -n "$WINDOW_PREV_DIGEST" ] && [ "$q" = "$WINDOW_PREV_DIGEST" ]; then
-        cancel_window "⚠️ merge-deploy: the deploy of ${X:0:7} was interrupted before its activation; production still runs the settled ${SETTLED_SHA:0:7}, so the window is cancelled and ${X:0:7} is tried again next tick."
+        cancel_window "⚠️ merge-deploy: the deploy of ${X:0:7} was interrupted before its activation; production still runs the settled ${SETTLED_SHA:0:7}, so the window is cancelled — the timer deploys main's head as usual; a manual deploy is run again by hand."
       fi
       if [ "$q" != "$WINDOW_DIGEST" ]; then
         open_incident 0 "the Quadlet file names ${q}, neither ${X:0:7} nor the settled image, in an activating window"
@@ -2196,14 +2236,14 @@ bootstrap_run() {
   read_current
   case "$CUR_UNIT" in
     # Plan b2 п.14: the old unit in /etc would override the Quadlet-generated one.
-    foreign) first=1 ;;
+    foreign)
+      first=1
+      # Plan b2 п.33: the root steps would hand systemd a Quadlet unit from a file left behind.
+      if [ "$CUR_QUADLET" != none ]; then refuse_leftover "$CUR_QUADLET" "$CUR_DIGEST"; fi ;;
     quadlet)
       manual_refuse "a Quadlet unit exists but nothing is settled — check by hand (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST})" ;;
   esac
   if [ "$first" = 0 ]; then
-    if [ "$CUR_QUADLET" != none ] || [ "$CUR_DIGEST" != none ]; then
-      manual_refuse "no unit, but a Quadlet file or a container is there (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST}) and nothing is settled — check by hand"
-    fi
     # Plan b2 п.26: unit=absent does not prove the bot stopped — systemd keeps a running unit whose
     # file was moved as not-found/active. The snapshot is of a database at rest only if it is.
     unit_running || urc=$?
@@ -2211,7 +2251,12 @@ bootstrap_run() {
       0) manual_refuse "the old bot still runs (unit=absent but active) — sudo systemctl stop warsaw-beer-bot, then run again" ;;
       2) manual_refuse "could not read whether the old bot runs (systemctl show warsaw-beer-bot) — run again" ;;
     esac
+    # Plan b2 п.29, п.33: the old bot is stopped and its unit gone — from here on, every refusal,
+    # the leftover check below included, says how to bring it back.
     WAY_BACK="$BOOTSTRAP_WAY_BACK"
+    if [ "$CUR_QUADLET" != none ] || [ "$CUR_DIGEST" != none ]; then
+      manual_refuse "no unit, but a Quadlet file or a container is there (quadlet=${CUR_QUADLET} container-digest=${CUR_DIGEST}) and nothing is settled — check by hand"
+    fi
   fi
   manual_stale_gate
   manual_ci_gate
@@ -2242,21 +2287,27 @@ bootstrap_run() {
     discard_pending "$PRE_PATH"
     bootstrap_verdict
   fi
-  # Spec §7.1: the window is in the state BEFORE anything changes production.
-  WINDOW_SHA="$X"
-  WINDOW_DIGEST="$D"
-  WINDOW_ID="$CAND_ID"
-  WINDOW_CONTENT="$CAND_CONTENT"
-  WINDOW_OLD="$DEPLOYED_SHA"
-  WINDOW_PREV_DIGEST=""
-  WINDOW_KIND=bootstrap
-  WINDOW_MODE=manual
-  WINDOW_PHASE=activating
-  WINDOW_PRE="$PRE_PATH"
-  WINDOW_BOOT="$boot"
-  PENDING_PRE=""
-  write_state
+  # No settled image: no rollback target, so the window is manual (spec §7.4).
+  open_window bootstrap manual "" "$PRE_PATH" "$boot"
   activate_candidate
+}
+
+# An incident whose second write never happened still carries its window (open_incident): what that
+# write would have done — the pre kept, the window cleared — comes first. $1 = write: recorded at once
+# (resolve-incident --settled); without it the caller's own write records it (--flat).
+drop_incident_window() {
+  [ -n "$WINDOW_PHASE" ] || return 0
+  retain_pre
+  clear_window
+  if [ "${1:-}" = write ]; then write_state; fi
+  echo "the incident's window was still in the state; its pre: ${PRE_NOTE}"
+}
+
+# Plan b2 п.33: a failed first image release may leave its Quadlet file (or a container) behind. With
+# the old unit moved aside, the unit Quadlet generates from that file is what systemd would run — not
+# the new release, and not the stopped bot the second bootstrap run requires. Refused while it is there.
+refuse_leftover() { # <quadlet> <container-digest>
+  manual_refuse "a Quadlet file or a container of ours is left although nothing is settled (quadlet=${1} container-digest=${2}) — with the old unit moved aside, systemd would run it instead of a new release. Remove it: sudo rm /etc/containers/systemd/warsaw-beer-bot.container (a container left: sudo podman rm -f warsaw-beer-bot), then run again"
 }
 
 # --- resolve-incident --flat (plan b2 п.28, spec §7.4 "Уточнення bootstrap") -----------------------------
@@ -2278,6 +2329,7 @@ resolve_flat() {
   if [ "$u" != foreign ]; then
     manual_refuse "the old unit is not there (unit=${u}) — --flat closes the incident only when the old unit runs the flat tree again"
   fi
+  if [ "$q" != none ] || [ "$d" != none ]; then refuse_leftover "$q" "$d"; fi
   unit_running || urc=$?
   case "$urc" in
     1) manual_refuse "the old unit does not run — start it (sudo systemctl start warsaw-beer-bot), then run again" ;;
@@ -2298,12 +2350,8 @@ resolve_flat() {
   if ! git -C "$REPO" merge-base --is-ancestor "$r" origin/main 2>/dev/null; then
     manual_refuse "/health answers releaseSha ${r:0:7}, which is not on origin/main — it cannot be recorded as deployed"
   fi
-  # An incident whose second write never happened still carries its window (open_incident).
-  if [ -n "$WINDOW_PHASE" ]; then
-    retain_pre
-    clear_window
-    echo "the incident's window was still in the state; its pre: ${PRE_NOTE}"
-  fi
+  # Written below, in the one write that closes the incident.
+  drop_incident_window
   INCIDENT=""
   DEPLOYED_SHA="$r"
   LAST_SEEN_DEPLOYED_SHA="$r"
@@ -2326,19 +2374,12 @@ resolve_flat() {
 # interruption leaves either the incident or a window the timer finishes (the incident gate stands
 # before resume_window), never both and never neither. Never returns.
 resolve_incident() {
-  local kind d i c rev h boot
+  local kind d i c rev h boot r
   # A refusal leaves the state as it is (plan b2 п.25): this check comes before anything is written.
   if [ -z "$DEPLOYED_SHA" ]; then
     manual_refuse "the state records no deployed commit — there is nothing a resolve window could start from"
   fi
-  # An incident whose second write never happened still carries its window (open_incident): what
-  # that write would have done — the pre kept, the window cleared — comes first.
-  if [ -n "$WINDOW_PHASE" ]; then
-    retain_pre
-    clear_window
-    write_state
-    echo "the incident's window was still in the state; its pre: ${PRE_NOTE}"
-  fi
+  drop_incident_window write
   X="$SETTLED_ARG"
   resolve_digest
   attest_image
@@ -2365,7 +2406,7 @@ resolve_incident() {
   fi
   # Plan b2 п.22: the window's base is read before the write that clears the incident — a counter
   # that cannot be read now is the human's to retry, not a window that fails before it exists.
-  if ! read_restarts >/dev/null; then
+  if ! r=$(read_restarts); then
     manual_refuse "could not read NRestarts — run again"
   fi
   INCIDENT=""
@@ -2379,8 +2420,9 @@ resolve_incident() {
   WINDOW_MODE=manual
   WINDOW_PRE=""
   WINDOW_BOOT="$boot"
-  # No activation: the base is the counter as it is (spec §7.3). S was just seen up and answering.
-  start_watching
+  # No activation: the base is the counter as it is (spec §7.3), as the precondition read it (п.35).
+  # S was just seen up and answering.
+  start_watching base "$r"
   watch_window 1
 }
 
@@ -2395,10 +2437,10 @@ if [ -n "$INCIDENT" ]; then
   read -r _inc_sha _inc_digest _inc_reason <<< "$INCIDENT"
   if [ "$MANUAL" = 1 ]; then
     manual_refuse "an INCIDENT is open — ${_inc_sha:0:7} (${_inc_digest}): ${_inc_reason}
-Nothing deploys until it is resolved: bash deploy/deploy.sh --resolve-incident --settled <sha>"
+Nothing deploys until it is resolved: $(incident_ways)"
   fi
   once_a_day LAST_INCIDENT_NOTICE "🔥 merge-deploy: an INCIDENT is open — ${_inc_sha:0:7} (${_inc_digest}): ${_inc_reason}
-Nothing deploys until a human resolves it: bash deploy/deploy.sh --resolve-incident --settled <sha>."
+Nothing deploys until a human resolves it: $(incident_ways)."
   echo "incident open; nothing to do"
   exit 0
 fi
