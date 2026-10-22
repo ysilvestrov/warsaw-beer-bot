@@ -45,6 +45,8 @@ no local cache to fall back on:
 the new ABI in the same sitting: stop `warsaw-beer-bot` (and `48-hours-trip`, which shares
 `/usr/bin/node`), install the new major, then run `deploy/deploy.sh`, whose `npm ci` does the rebuild.
 A restart in between comes up on the new interpreter with the old `.node` and fails to start.
+(Flat, until the switchover session: after it the bot runs from its image, whose Node and native addons
+come from CI, and the host's Node no longer runs the bot.)
 
 `build-essential` + `python3` are needed for the `better-sqlite3` native build.
 
@@ -139,6 +141,11 @@ Do not widen permissions on `.local/state/wbb-resource-monitor` or remove its
 state to silence inventory notifications. Installing the new monitor is the
 step that disables them; deploying bot code alone cannot update an old cron copy.
 
+**Flat, until the switchover session.** What follows describes the previous flat `deploy.sh` (rsync
+into `/opt`, build on the host), which the host's old installed tooling still is until the session;
+since stage «в» `deploy/deploy.sh` in the repo is the image wrapper (Manual commands, below), and the
+old script is in git history (`git show d8c7ff6^:deploy/deploy.sh`).
+
 From a dev checkout:
 
 ```bash
@@ -220,6 +227,22 @@ your checkout).
 **Until the switchover session of stage «в»** the host still runs the installed copy of the previous
 flat deployer (build on the host, rsync to `/opt`, code+DB rollback); its runbook is in git history
 (`git show d8c7ff6^:deploy/README.md`). After the session, everything below holds.
+
+### Switchover session (stage «в»)
+
+**Between the merge and the switchover session.** The old timer keeps running the installed flat
+deployer. It deploys nothing: its copy no longer matches `main`, so it waits and reports "the installed
+deployer is out of date" once a day — ignore it until the session, and do not run the installer early.
+The wrapper `bash deploy/deploy.sh` refuses (the installed copy is not this checkout's controller).
+Production is frozen from the merge until the bootstrap, so merge at the start of the session.
+
+The session, in order (the full runbook comes with the stage's harness plan):
+1. `sudo systemctl disable --now wbb-autodeploy.timer`; wait until `wbb-autodeploy.service` is inactive
+   and the lock is free (`fuser -v ~/.local/state/wbb-autodeploy/lock` shows nobody).
+2. `bash deploy/migrate-state-to-image.sh` (Migrating, below).
+3. `sudo bash deploy/install-image.sh --check`, then `sudo bash deploy/install-autodeploy.sh`.
+4. The bootstrap (The first image release, below).
+5. `sudo systemctl enable --now wbb-autodeploy.timer`.
 
 ### When a merge is deployed
 
@@ -317,7 +340,7 @@ flock -w 30 "$ack_state_dir/lock" bash -c '
 | 🔥 INCIDENT | rollback failed, a manual window failed, or the unit is not ours | restore production, then `--resolve-incident` |
 | ⚠️ deploy lock held for N min | a stuck run blocks every tick | `fuser -v ~/.local/state/wbb-autodeploy/lock` |
 | ⚠️ production went BACKWARDS / DIVERGED | the record lost ancestry; unattended deploys held | check whether deliberate; deploy main by hand |
-| ⚠️ installed deployer is out of date | a merged fix is not live | `sudo bash deploy/install-image.sh` and `sudo bash deploy/install-autodeploy.sh` |
+| ⚠️ installed deployer is out of date | a merged fix is not live (before the switchover session: expected, see Switchover session) | `sudo bash deploy/install-image.sh`, then `sudo bash deploy/install-autodeploy.sh` |
 | ⛔ there is no settled image yet | before the first image release | the bootstrap below |
 
 Messages of a manual run carry `[manual]`.
@@ -341,20 +364,37 @@ sudo bash deploy/install-autodeploy.sh   # refuses unless the helper is current;
 
 Re-run after any merge that changes an installed copy; those merges are holds anyway, and the
 deployer waits (and says so daily) while a copy is stale. Neither enables or disables the timer.
+`install-autodeploy.sh` refuses, installing nothing, while the timer is active and the operator's
+`image-state.env` is missing (a first tick of the new controller would write one of its own, and the
+migration would then refuse for good); after installing it checks the copies with
+`wbb-installed-current` and fails when they do not match HEAD.
 
 ### Migrating the flat deployer's state (once, at the switchover)
 
-With the timer stopped and after `install-autodeploy.sh`:
+With the timer stopped and **before** `install-autodeploy.sh` (while the flat deployer is still the
+installed one, so an unfinished flat window can still be finished by it):
 
 ```bash
 bash deploy/migrate-state-to-image.sh
 ```
 
-It carries the gate keys of `state.env` into `image-state.env`, validates the result with the
-installed controller (`--check-state`), and only then renames `state.env` to `state.env.flat` and
-leaves a `state.env/` directory with a README. Anything unexpected (an unknown key, an unfinished
-flat window or rollback, a running timer, a held lock, an existing `image-state.env`) refuses and
-changes nothing. Then the first image release (bootstrap, below).
+It carries the gate keys of `state.env` into `image-state.env` and validates the result with the
+controller of **this checkout** (`deploy/autodeploy.sh --check-state`; only exit 0 with the exact line
+`STATE OK — <path>` passes — the installed copy is still the flat deployer). Only then does it prepare
+`state.env.new/` with a README and rename, back to back, `state.env` → `state.env.flat` and
+`state.env.new` → `state.env`. Anything unexpected (an unknown key, an unfinished flat window or
+rollback, a running timer, a held lock, a different `image-state.env`) refuses and changes nothing.
+
+If a run is interrupted, what it leaves and what to do:
+
+| Left behind | Do |
+|---|---|
+| `image-state.env.migrate.tmp`, nothing else | run it again (the file is rewritten) |
+| `image-state.env` holding exactly the carried keys, `state.env` still a file (maybe `state.env.new/` too) | run it again: it sees its own file and finishes the renames |
+| `state.env.flat` and `state.env.new/`, no `state.env` (killed between the two renames) | `mv ~/.local/state/wbb-autodeploy/state.env.new ~/.local/state/wbb-autodeploy/state.env` |
+| `state.env/` (a directory), `state.env.flat`, `image-state.env` | done |
+
+Then `sudo bash deploy/install-autodeploy.sh` and the first image release (bootstrap, below).
 
 ### Emergency stop — no password required
 
@@ -437,7 +477,7 @@ admin through the Bot API only for failures the tick did not report itself: a ti
 dump, exit 64, 71 or a code the tick does not define (3, 4, 70 it reports on its own) — once per UTC day
 per text.
 
-## Runtime image (CI only, not used by the host yet)
+## Runtime image (built by CI; the host deploys it after the switchover session)
 
 Design: `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`.
 The `image` job in `.github/workflows/ci.yml` builds `deploy/image/Dockerfile` on every PR and
@@ -447,8 +487,8 @@ payload probes, audit verdicts, read-only `/app`). On a push to `main` it pushes
 `IMAGE-DIGEST sha=… digest=… content=…`. Last, it audits the production dependencies from the
 image: on a `main` push a high/critical advisory (or an audit that could not run) fails the job
 after publication, so `ci` is red and merge-deploy does not deploy that SHA; on a PR it only
-annotates (`::error::`) and the job does not fail. Nothing on the host pulls it yet:
-`deploy.sh` and the merge-deploy tick still build on the host as described above.
+annotates (`::error::`) and the job does not fail. Until the switchover session nothing on the host
+pulls it (the old flat tooling builds on the host); after it the merge-deploy tick deploys it.
 
 Check an image from the host (as the operator, `gh` logged in):
 
@@ -465,11 +505,11 @@ Dockerfile's `FROM` (Dependabot `docker` bumps it); `scripts/image-base-digest.s
 build arg. Local build behind a TLS-intercepting proxy:
 `docker build -f deploy/image/Dockerfile --secret id=ca,src=<ca-bundle> --build-arg RUNTIME_BASE_DIGEST="$(scripts/image-base-digest.sh deploy/image/Dockerfile)" --build-arg SOURCE_SHA=$(git rev-parse HEAD) .`
 
-## Root helper `wbb-image` (not installed until the switchover)
+## Root helper `wbb-image`
 
 Design: the spec above, §5; plan `docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-core.md`.
 `deploy/image/helper/wbb_image.py` is the only root step of the image deployer: the merge-deploy
-tick (rewritten in the next stage) calls it through `sudo -n` with the fixed rules of
+controller (`deploy/autodeploy.sh`) calls it through `sudo -n` with the fixed rules of
 `deploy/sudoers.d/wbb-image`. It takes no paths and no podman arguments from its caller — a full
 SHA, `sha256:` digests and a pre-snapshot NAME, all checked — and works only on local images of
 `ghcr.io/ysilvestrov/warsaw-beer-bot` with a `revision` label.
@@ -505,15 +545,14 @@ sudo bash deploy/install-image.sh            # visudo -cf + quadlet -dryrun of t
 sudo bash deploy/install-image.sh --check    # 0 when every installed copy matches this checkout
 ```
 
-### Image controller (stage «в»: `deploy/autodeploy.sh`, not installed yet)
+### Image controller (`deploy/autodeploy.sh`)
 
 `deploy/autodeploy.sh` is the merge-deploy controller for images (spec
 `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md` §4, §7; plans
 `docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md`,
 `…/2026-10-21-wbb-image-transition-b2-core.md`, `…/2026-10-22-wbb-image-transition-b2-harness.md`).
-Stage «в» moved it (and its wrapper `deploy/deploy.sh`) over the flat deployer's files. Until a human
-runs `sudo bash deploy/install-autodeploy.sh` on the host, the timer still runs the old installed
-copy (the flat deployer). Its state is `~/.local/state/wbb-autodeploy/image-state.env`
+Stage «в» moved it (and its wrapper `deploy/deploy.sh`) over the flat deployer's files. Until the
+switchover session installs it, the timer still runs the old installed copy (the flat deployer). Its state is `~/.local/state/wbb-autodeploy/image-state.env`
 (parsed and validated, never sourced; a damaged file stops it with `STATE CORRUPT`). It reads the
 helper's verdict per action, never by exit code alone: `AUDIT ADVISORY`, `TRIAL FAILED`,
 `START FAILED` and `ACTIVATE FAILED` mark the SHA failed (only main's head is recorded);
@@ -524,9 +563,9 @@ incident is resolved.
 
 ### Manual commands (from stage «в»)
 
-Run from a clean checkout of `main` on the host, as the operator (never root). Until stage «в» the
-wrapper refuses every command: the installed controller is still the flat deployer, and the wrapper
-runs only the installed copy that equals this checkout's controller byte for byte.
+Run from a clean checkout of `main` on the host, as the operator (never root). Until the switchover
+session the wrapper refuses every command: the installed controller is still the flat deployer, and
+the wrapper runs only the installed copy that equals this checkout's controller byte for byte.
 
 | Command | What it does |
 |---|---|
