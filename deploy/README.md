@@ -549,17 +549,74 @@ sudo bash deploy/install-image.sh --check    # 0 when every installed copy match
 
 ### Image controller (stage «б»: in the repo, not installed)
 
-`deploy/image/autodeploy.sh` is the merge-deploy controller for images (plan
-`docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md`). Nothing runs it yet:
-the timer still runs the installed copy of `deploy/autodeploy.sh` (flat tree) until stage «в» moves
-this file over it. Its state is `~/.local/state/wbb-autodeploy/image-state.env` (parsed and
-validated, never sourced; a damaged file stops it with `STATE CORRUPT`). It reads the helper's
-verdict per action — `audit` from its first stdout line, `trial` from its last — and never by exit
-code alone: `AUDIT ADVISORY`, `TRIAL FAILED`, `START FAILED` and `ACTIVATE FAILED` mark the SHA
-failed; `COMPAT FAILED` holds that pair of images for a human (`deploy.sh --ack-incompatible`, the next
-plan); `REFUSED` from `trial` retries after an hour; anything else is "could not verify".
-Rollback is code only, to the last settled image; the pre snapshot of any failed window is kept
-(`mark-rollback`).
+`deploy/image/autodeploy.sh` is the merge-deploy controller for images (spec
+`docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md` §4, §7; plans
+`docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md`,
+`…/2026-10-21-wbb-image-transition-b2-core.md`, `…/2026-10-22-wbb-image-transition-b2-harness.md`).
+Nothing runs it yet: the timer still runs the installed copy of `deploy/autodeploy.sh` (flat tree)
+until stage «в» moves this file over it. Its state is `~/.local/state/wbb-autodeploy/image-state.env`
+(parsed and validated, never sourced; a damaged file stops it with `STATE CORRUPT`). It reads the
+helper's verdict per action, never by exit code alone: `AUDIT ADVISORY`, `TRIAL FAILED`,
+`START FAILED` and `ACTIVATE FAILED` mark the SHA failed (only main's head is recorded);
+`COMPAT FAILED` holds that pair of images for a human (`deploy.sh --ack-incompatible`); `REFUSED`
+from `trial` retries after an hour; anything else is "could not verify". Rollback is code only, to
+the last settled image; the pre snapshot of any failed window is kept (`mark-rollback`) until an
+incident is resolved.
+
+### Manual commands (from stage «в»)
+
+Run from a clean checkout of `main` on the host, as the operator (never root). Until stage «в» the
+wrapper refuses every command: the installed controller is still the flat deployer, and the wrapper
+runs only the installed copy that equals this checkout's controller byte for byte.
+
+| Command (until «в»: `bash deploy/image/deploy.sh …`) | What it does |
+|---|---|
+| `bash deploy/deploy.sh [--force] [--ack-incompatible]` | Deploys HEAD through the tick's own gates and window, **in the foreground, ~10 min**. A path hold or `deploy:hold` is released by running it (as today). `--force`: a deliberate downgrade (the next tick fences it). `--ack-incompatible`: `COMPAT FAILED` or a `rollback:unsafe`/`migration:contract` PR in the range — deployed with **no automatic rollback**; a failure is an incident. To deploy another commit: `git checkout <sha>` first. |
+| `bash deploy/deploy.sh --bootstrap` | The first image release (below). |
+| `bash deploy/deploy.sh --resolve-incident --settled <sha>` | Closes an incident: `<sha>`'s image must already run from the Quadlet file and be healthy; a 10-min manual window then makes it the settled image and returns the retained snapshots to ordinary retention. |
+| `bash deploy/deploy.sh --resolve-incident --flat` | Only while no image is settled: after a failed bootstrap, with the old flat unit restored and running, closes the incident and records the flat bot's SHA. Next step: `--bootstrap` again. |
+
+Exit codes: 0 done (settled, noop, up to date), 1 refused (the reason is printed; nothing changed
+unless it says so), 2 rolled back (code only), 3 incident, 4 the state could not be written, 64
+usage. Interrupting a run (Ctrl-C, a lost SSH session) after its window opened is safe: the timer
+finishes the window, in the same mode. Refusals before a window are printed only; anything that may
+have changed production also goes to Telegram, marked `[manual]`.
+
+### The first image release (bootstrap)
+
+The Quadlet file `/etc/containers/systemd/warsaw-beer-bot.container` must **not** exist before it:
+`activate` writes it. The gate keys (`DEPLOYED_SHA`) must already be in `image-state.env` (stage «в»).
+
+1. `bash deploy/deploy.sh --bootstrap` while the old bot runs. It checks CI, resolves and attests
+   the image, pulls it, audits it, and trials it dry on a snapshot of the live database (the
+   snapshot is discarded). A bad release is refused here, with the bot still up. On success it
+   prints the root steps and exits 1; nothing is recorded.
+2. The printed root steps: `sudo systemctl stop warsaw-beer-bot`, `sudo systemctl disable
+   warsaw-beer-bot`, `sudo mv /etc/systemd/system/warsaw-beer-bot.service
+   /etc/systemd/system/warsaw-beer-bot.service.flat`, `sudo systemctl daemon-reload`.
+3. `bash deploy/deploy.sh --bootstrap` again. The bot must be stopped (it refuses otherwise). It
+   repeats the checks and the audit, snapshots the database at rest, trials, activates the image and
+   watches a manual 10-minute window; then the image is the first settled one and the timer deploys
+   `main` against it. **Downtime: ~3–5 min** from step 2 to the image's start.
+
+If the second run stops before its window opens (a refusal or an interruption), the bot stays down
+and the timer does not say so separately. Every refusal prints the way back:
+`sudo mv /etc/systemd/system/warsaw-beer-bot.service.flat /etc/systemd/system/warsaw-beer-bot.service;
+sudo systemctl daemon-reload; sudo systemctl enable warsaw-beer-bot; sudo systemctl start warsaw-beer-bot`.
+A pending `[deploy:hold]` step or a `migration:contract` PR in the range is listed by both runs: they
+do not block bootstrap, but a fallback to the flat tree after a contract PR needs the pre snapshot
+restored.
+
+### After a failed bootstrap
+
+A failed bootstrap window is an incident; nothing is rolled back (there is no settled image). Either
+fix forward (`sudo /usr/local/libexec/wbb-image pull --sha <sha> --digest <D>`, then
+`sudo /usr/local/libexec/wbb-image activate --digest <D>`, then `--resolve-incident --settled <sha>`), or go back to the flat tree:
+
+1. Remove what the failed attempt left: `sudo systemctl stop warsaw-beer-bot`,
+   `sudo rm /etc/containers/systemd/warsaw-beer-bot.container`, `sudo podman rm -f warsaw-beer-bot`.
+2. Put the old unit back (the way-back commands above).
+3. `bash deploy/deploy.sh --resolve-incident --flat`, then, when the cause is fixed, bootstrap again.
 
 ## Runtime artifact (history: replaced by the image above)
 

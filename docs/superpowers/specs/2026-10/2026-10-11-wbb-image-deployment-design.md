@@ -323,8 +323,8 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 
 | Команда | Що робить |
 |---|---|
-| `deploy.sh [--target <sha>] [--force] [--ack-incompatible]` | Деплой X (типово HEAD checkout-а) тим самим pipeline, що й tick (§4, §6.3, §7) |
-| `deploy.sh --bootstrap [--target <sha>]` | Перший образ-реліз (§8 п.2) |
+| `deploy.sh [--force] [--ack-incompatible]` | Деплой X = HEAD чистого checkout-а (з `main`) тим самим pipeline, що й tick (§4, §6.3, §7); інша ціль — `git checkout <sha>` перед запуском |
+| `deploy.sh --bootstrap` | Перший образ-реліз = HEAD checkout-а (§8 п.2) |
 | `deploy.sh --resolve-incident --settled <sha>` | Закриття інциденту через вікно (§7.3) |
 | `deploy.sh --resolve-incident --flat` | Лише коли нічого не settled: після провалу bootstrap повернуто flat-дерево (старий юніт працює, Quadlet-файлу й контейнера нема) — інцидент знято, `DEPLOYED_SHA` = SHA старого бота, вікна нема; далі знову `--bootstrap` |
 
@@ -392,7 +392,8 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 |---|---|
 | `deploy/autodeploy.sh` | Лишається як основа: гейти без змін; збірка, класифікація, деплой, trial, вікно й відкат переписуються (§4, §7) |
 | `deploy/ships.sh`, `deploy/rsync-filter` | Видаляються; замість них `wbb.content` (§4.1) |
-| `read-env.sh`, `installed-current.sh`, `record-deployed.sh`, `db-snapshot.sh` | Лишаються |
+| `read-env.sh`, `installed-current.sh`, `record-deployed.sh`, `db-snapshot.sh` | Лишаються (`db-snapshot.sh` дістає `unmark`, «б2») |
+| `deploy/deploy.sh` (rsync/npm) | Замінюється обгорткою `deploy/image/deploy.sh` («б2», не встановлюється, працює з checkout-а): `git mv` поверх у «в» разом із контролером |
 | `deploy/trial-migrate.cjs`, `scripts/autodeploy/audit-verdict*.ts` | Їдуть в образі |
 | `src/release/identity.ts`, `/health.releaseSha`, `WBB_RELEASE_REQUIRED` | Лишаються; у Quadlet `WBB_RELEASE_REQUIRED=true` |
 | `deploy/release/package_runtime.py`, `tree_manifest.py`, `payload-probe.cjs` | Лишаються як CI-збирач payload; переносяться з `deploy/release/` у `scripts/release/`, щоб їх зміни не давали hold |
