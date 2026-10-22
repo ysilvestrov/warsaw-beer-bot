@@ -164,8 +164,11 @@ function readHandlerFailures(db: DB, now: Date): StatusInputs['handlerFailures']
 // The only place the morning report reads the DB, job_state and files. Every source that can be
 // missing comes back as a value the evaluators can colour, never as an exception.
 export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: StatusInputOptions): StatusInputs {
-  const metrics = collectStatus(db, now);
+  // #902: read the collectors' summaries before the DB queries. They take ~1.3 s, and a summary
+  // published meanwhile is stamped after `now` — a "future" timestamp, i.e. unavailable data.
   const diag = readTestDiagnostics(now, opts.testDiagnosticsPath, opts.testDiagnosticsUid);
+  const hostPatch = readHostPatchInput(now, opts);
+  const metrics = collectStatus(db, now);
   const historyDays = 2 * STATUS_RULES.historyDays - 1; // flows compare d-13..d-7 with d-6..today
   return {
     now,
@@ -188,7 +191,7 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
     disk: diag.kind === 'ok'
       ? { ok: true, value: { bytesAvailable: diag.bytesAvailable, inodesFree: diag.inodesFree, pendingRuns: diag.pendingRuns } }
       : { ok: false, reason: diag.kind === 'stale' ? 'дані монітора застарілі' : 'дані монітора недоступні' },
-    hostPatch: readHostPatchInput(now, opts),
+    hostPatch,
     upstream: readHostUpstream(db, now),
     runtimeNode: process.versions.node,
     fest: readFest(db, now, opts.festEyes ?? { mcp: false, server: false }),

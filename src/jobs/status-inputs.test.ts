@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import childProcess from 'node:child_process';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import { setJobState } from '../storage/job_state';
 import { saveStatusSnapshot } from '../storage/status_snapshots';
 import { recordHandlerFailure } from '../storage/handler_failures';
 import { collectStatusInputs } from './status-inputs';
+import { collectStatus } from '../storage/stats';
 import { CANARY_STATE_KEY } from './enrich-orphans';
 import { TRIAGE_LAST_RESULT_KEY, TRIAGE_LAST_RUN_KEY } from './orphan-triage';
 import { UNLOCK_LAST_RESULT_KEY, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
@@ -17,6 +18,12 @@ import { FEST_MENU_LAST_KEY } from './fest-poll';
 import { KEEPALIVE_LAST_KEY } from './fest-friend-feed';
 import { addCoverage } from '../storage/fest_coverage';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
+
+// Keep the real collectStatus; the #902 test hooks one call to publish a monitor sample mid-report.
+vi.mock('../storage/stats', async (importActual) => {
+  const actual = await importActual<typeof import('../storage/stats')>();
+  return { ...actual, collectStatus: vi.fn(actual.collectStatus) };
+});
 
 const NOW = new Date('2026-10-06T07:00:00.000Z');
 const DATE = '2026-10-06';
@@ -281,6 +288,56 @@ test('testDiagnosticsUid is the trusted owner of the monitor file and `id` is ne
   } finally {
     spy.mockRestore();
     syncBuiltinESMExports();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #902: the monitor publishes every 5 min at :01 and the report's DB queries take ~1.3 s, so a sample
+// stamped after the tick's `now` can land while the report runs. Read after the queries it was a
+// "future" timestamp and turned the infra line yellow. The host-patch summary has the same shape.
+test('#902: summaries published during the DB queries do not make the monitor or host-patch data unavailable', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-status-inputs-902-'));
+  const { collectStatus: realCollect } = await vi.importActual<typeof import('../storage/stats')>('../storage/stats');
+  const monitor = (offsetSeconds: number, inodes: number) => ({
+    version: 1, timestamp: NOW.getTime() / 1000 + offsetSeconds, inodes_free: inodes, bytes_available: 32_212_254_720,
+    runs_inventory_available: true, pending_runs: 0,
+  });
+  const hostPatch = (offsetSeconds: number) => ({
+    version: 1,
+    timestamp: NOW.getTime() / 1000 + offsetSeconds,
+    kernel: { running: '6.8.0-142-generic', newest_installed: '6.8.0-142-generic' },
+    reboot_required: null,
+    livepatch: { state: 'nothing-to-apply', upgrade_required_date: '2027-10-02' },
+    stale_services: [],
+    unattended: { last_run: null, security_pending: 0 },
+    packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: null },
+  });
+  // Atomic replace, as both collectors publish.
+  const publish = (file: string, body: object) => {
+    const next = `${file}.next`;
+    writeFileSync(next, JSON.stringify(body), { mode: 0o644 });
+    chmodSync(next, 0o644);
+    renameSync(next, file);
+  };
+  try {
+    chmodSync(dir, 0o755);
+    const monitorFile = join(dir, 'summary.json');
+    const hostFile = join(dir, 'host-patch.json');
+    publish(monitorFile, monitor(-299, 2_000_000));
+    publish(hostFile, hostPatch(-600));
+    vi.mocked(collectStatus).mockImplementationOnce((db, now) => {
+      publish(monitorFile, monitor(1.3, 1_999_999));
+      publish(hostFile, hostPatch(1.3));
+      return realCollect(db, now);
+    });
+    const inputs = collectStatusInputs(emptyDb(), NOW, DATE, {
+      ...missing, testDiagnosticsPath: monitorFile, testDiagnosticsUid: process.getuid!(),
+      hostPatchPath: hostFile, hostPatchUid: process.getuid!(),
+    });
+    expect([inputs.disk, inputs.hostPatch.ok]).toEqual([
+      { ok: true, value: { bytesAvailable: 32_212_254_720, inodesFree: 2_000_000, pendingRuns: 0 } }, true,
+    ]);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
