@@ -2379,7 +2379,6 @@ resolve_incident() {
   if [ -z "$DEPLOYED_SHA" ]; then
     manual_refuse "the state records no deployed commit — there is nothing a resolve window could start from"
   fi
-  drop_incident_window write
   X="$SETTLED_ARG"
   resolve_digest
   attest_image
@@ -2409,6 +2408,10 @@ resolve_incident() {
   if ! r=$(read_restarts); then
     manual_refuse "could not read NRestarts — run again"
   fi
+  # A leftover incident window (its second write never happened) is completed only now, after every
+  # precondition, and in the same write that opens the resolve window: a refusal above changes
+  # nothing (#904 AI review), and a kill leaves the incident as it was.
+  drop_incident_window
   INCIDENT=""
   WINDOW_SHA="$X"
   WINDOW_DIGEST="$D"

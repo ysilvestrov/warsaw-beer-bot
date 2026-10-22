@@ -96,7 +96,11 @@ cmd_unmark() {
   [ -f "$marked.sha256" ] || die "no checksum for $marked"
   [ ! -e "$pre" ] && [ ! -e "$pre.sha256" ] || die "refusing to overwrite $pre"
   mv "$marked" "$pre"
-  mv "$marked.sha256" "$pre.sha256"
+  # The pair moves together or not at all: a failed second rename puts the first one back.
+  if ! mv "$marked.sha256" "$pre.sha256"; then
+    mv "$pre" "$marked" || die "unmark half done: $pre has no checksum, it is at $marked.sha256"
+    die "could not rename $marked.sha256; nothing was renamed"
+  fi
   echo "$pre"
 }
 

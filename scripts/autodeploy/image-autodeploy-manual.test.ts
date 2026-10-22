@@ -9,7 +9,9 @@ import {
 } from './image-autodeploy-harness';
 
 // A manual deploy watches a whole simulated 10-minute window in the foreground (61 polls).
-vi.setConfig({ testTimeout: 60_000 });
+// hookTimeout: test-temp's afterAll removes every world of this file (~150 git repos); under the
+// full suite's load that alone ran past vitest's 10 s default (#904).
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 /**
  * The controller's manual entry `--manual deploy` — Task 2 of
@@ -842,7 +844,7 @@ describe('(р-в) resolve-incident: the happy path', () => {
     expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, r.pres.map(unmarkedOf))}`]);
   });
 
-  it('an incident whose second write never happened (the window still in the state): its pre is kept first', () => {
+  it('an incident whose second write never happened (the window still in the state): its pre is kept in the write that opens the resolve window', () => {
     const r = incidentWorld();
     const pre = join(r.w.snapshots, `19700102T034640Z-${short(r.x)}-pre.db`);
     writeFileSync(pre, 'pre\n');
@@ -856,10 +858,31 @@ describe('(р-в) resolve-incident: the happy path', () => {
     const res = resolveRun(r);
     expect(res.code).toBe(0);
     const marked = pre.replace(/-pre\.db$/, '-rollback-pre.db');
-    expect(writes(r.w)[0]).toEqual({ ...r.seed, RETAINED_PRE: [...r.pres, marked].join(' ') });
-    expect(events(r.w).slice(0, 5)).toEqual([`mark 19700102T034640Z-${short(r.x)}-pre.db`, ...resolveProbe(r)]);
+    const first = writes(r.w)[0];
+    expect([first.INCIDENT, first.RETAINED_PRE, first.WINDOW_KIND, first.WINDOW_PHASE, first.WINDOW_SHA, first.WINDOW_PRE])
+      .toEqual([undefined, [...r.pres, marked].join(' '), 'resolve', 'watching', r.s.sha, undefined]);
+    expect(events(r.w).slice(0, 5)).toEqual([...resolveProbe(r), `mark 19700102T034640Z-${short(r.x)}-pre.db`]);
     expect(readState(r.w)).toEqual(resolvedState(r));
     expect(notes(r.w)).toEqual([`[manual] ${resolvedNote(r, [...r.pres, marked].map(unmarkedOf))}`]);
+  });
+});
+
+describe('#904 AI review: a refused resolve leaves a leftover incident window as it was', () => {
+  it('the attestation fails: 1, the state byte for byte the same, the pre not marked', () => {
+    const r = incidentWorld();
+    const pre = join(r.w.snapshots, `19700102T034640Z-${short(r.x)}-pre.db`);
+    writeFileSync(pre, 'pre\n');
+    writeFileSync(`${pre}.sha256`, `${'0'.repeat(64)}\n`);
+    seedState(r.w, {
+      ...r.seed,
+      WINDOW_SHA: r.x, WINDOW_DIGEST: r.img.digest, WINDOW_ID: r.img.id, WINDOW_CONTENT: r.img.content, WINDOW_OLD: r.s.sha,
+      WINDOW_PREV_DIGEST: r.s.digest, WINDOW_KIND: 'deploy', WINDOW_MODE: 'manual', WINDOW_PHASE: 'watching', WINDOW_PRE: pre,
+      WINDOW_START: '99000', WINDOW_BOOT: BOOT_ID, WINDOW_NRESTARTS: '0', WINDOW_FAILS: '3', WINDOW_LAST_READ: '99320',
+    });
+    const before = stateText(r.w);
+    reply(r.w, 'attest', r.s.digest, { code: 1, stderr: 'Error: no attestations found\n' });
+    expect([resolveRun(r).code, stateText(r.w), existsSync(pre), events(r.w).some((e) => e.startsWith('mark '))])
+      .toEqual([1, before, true, false]);
   });
 });
 
@@ -1438,7 +1461,8 @@ describe('(р-и) plan b2 п.23–24 and the review of Task 3: what a resolve se
     });
     const failMark = stub(r.w.bin, 'mark-fail', `echo "mark $(basename "$1")" >> "${r.w.eventsLog}"; exit 1`);
     expect(resolveRun(r, { WBB_MARK_CMD: failMark }).code).toBe(0);
-    expect(writes(r.w)[0]).toEqual({ ...r.seed, PENDING_MARK: pre });
+    const first = writes(r.w)[0];
+    expect([first.INCIDENT, first.PENDING_MARK, first.WINDOW_KIND]).toEqual([undefined, pre, 'resolve']);
     expect(readState(r.w)).toEqual(resolvedState(r));
     expect(existsSync(pre)).toBe(true);
   });
