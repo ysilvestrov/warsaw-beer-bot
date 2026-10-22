@@ -2,69 +2,63 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const autodeploy = readFileSync(resolve(__dirname, '../../deploy/autodeploy.sh'), 'utf8');
-const installer = readFileSync(resolve(__dirname, '../../deploy/install-autodeploy.sh'), 'utf8');
-const imageInstaller = readFileSync(resolve(__dirname, '../../deploy/install-image.sh'), 'utf8');
+const read = (p: string) => readFileSync(resolve(__dirname, '../..', p), 'utf8');
+const autodeploy = read('deploy/autodeploy.sh');
+const unit = read('deploy/wbb-autodeploy.service');
 
 /**
- * #527 — a fifth installed file is a fifth way to be silently stale, and it
- * has to be added in two files that nothing ties together: the pair list in
- * `installed_is_stale`, which decides what staleness MEANS, and the installer,
- * which decides what is actually put there. A copy named in one and missing
- * from the other is either never checked or never installed, and both failures
- * are quiet.
+ * #527 — an installed copy has to be named in two places that nothing ties together: the pair list
+ * in the controller's `installed_is_stale`, which decides what staleness MEANS, and an installer,
+ * which decides what is actually put there. A copy named in one and missing from the other is either
+ * never checked or never installed, and both failures are quiet. Since stage «в» the copies come from
+ * two installers: install-autodeploy.sh (the controller and what it runs; one `install -m` line per
+ * copy) and install-image.sh (the root helper; a FILES table of `"<source> <target> <mode>"` rows). The invariant: every pair
+ * the controller checks is a row of one of them, installed exactly where the controller looks.
  */
-describe('every checked installed copy is actually installed', () => {
-  const block = autodeploy.slice(autodeploy.indexOf('installed_is_stale()'));
-  const declared = [
-    ...new Set([...block.matchAll(/"(deploy\/[A-Za-z0-9._/-]+)=/g)].map((m) => m[1])),
-  ];
 
-  it('names every installed script the tick depends on', () => {
-    // Pinned explicitly. Without this the loop below is vacuously green the
-    // moment a pair is deleted from the list. Since stage «в» deploy/autodeploy.sh is the image
-    // controller: it calls neither ships.sh nor trial-migrate.cjs (the helper's trial replaced it).
-    expect(declared).toContain('deploy/autodeploy.sh');
-    expect(declared).toContain('deploy/read-env.sh');
-    expect(declared).toContain('deploy/installed-current.sh');
-    expect(declared).toContain('deploy/db-snapshot.sh');
-    expect(declared).toContain('deploy/image/helper/wbb_image.py');
+/** install-autodeploy.sh's `install -m <mode> <source> "${OWNER[@]}" "$DEST<target>"` lines, as [source, target]. */
+function installLines(installer: string): Array<[string, string]> {
+  return [...read(installer).matchAll(/^install -m 0\d{3} (\S+) +"\$\{OWNER\[@\]\}" "\$DEST(\S+)"$/gm)].map((m) => [m[1], m[2]]);
+}
+
+/** install-image.sh's `"<source> <target> <mode>"` rows of its FILES table, as [source, target]. */
+function rows(installer: string): Array<[string, string]> {
+  const text = read(installer);
+  const table = text.slice(text.indexOf('FILES=('), text.indexOf('\n)\n', text.indexOf('FILES=(')));
+  const lib = /^LIB=(\S+)$/m.exec(text)?.[1] ?? '';
+  return [...table.matchAll(/^\s*"(\S+)\s+(\S+)\s+0\d{3}"$/gm)].map((m) => [m[1], m[2].replace('$LIB', lib)]);
+}
+
+/** Where the controller looks for a copy: `$0` is the unit's ExecStart; a variable, its default. */
+function lookedUpAt(expr: string): string {
+  if (expr === '$0') return /^ExecStart=(\S+)$/m.exec(unit)?.[1] ?? '';
+  const m = /^\$([A-Z_]+)(\/.*)?$/.exec(expr);
+  const def = new RegExp(`^${m?.[1]}="\\$\\{WBB_[A-Z_]+:?-([^}]+)\\}"$`, 'm').exec(autodeploy);
+  return `${def?.[1]}${m?.[2] ?? ''}`;
+}
+
+const block = autodeploy.slice(autodeploy.indexOf('installed_is_stale()'), autodeploy.indexOf('STALE_ADVICE='));
+const declared = [...block.matchAll(/"(deploy\/[A-Za-z0-9._/-]+)=([^"]+)"/g)].map((m) => [m[1], lookedUpAt(m[2])]);
+const installed = [...installLines('deploy/install-autodeploy.sh'), ...rows('deploy/install-image.sh')];
+
+describe('every checked installed copy is installed where the controller looks', () => {
+  it('the controller checks exactly these copies, at these paths', () => {
+    // Pinned explicitly: without it the next test is vacuously green the moment a pair is deleted.
+    expect(declared).toEqual([
+      ['deploy/autodeploy.sh', '/usr/local/bin/wbb-autodeploy'],
+      ['deploy/read-env.sh', '/usr/local/bin/wbb-read-env'],
+      ['deploy/db-snapshot.sh', '/usr/local/bin/wbb-db-snapshot'],
+      ['deploy/installed-current.sh', '/usr/local/bin/wbb-installed-current'],
+      ['deploy/image/helper/wbb_image.py', '/usr/local/lib/wbb-image/wbb_image.py'],
+      ['deploy/image/helper/bounded.py', '/usr/local/lib/wbb-image/bounded.py'],
+      ['deploy/image/helper/wbb-image.sh', '/usr/local/libexec/wbb-image'],
+      ['deploy/image/warsaw-beer-bot.container', '/usr/local/lib/wbb-image/warsaw-beer-bot.container'],
+    ]);
   });
 
-  // A bare substring search would treat a commented-out line — e.g.
-  // `# TODO: install deploy/ships.sh` — as proof the file is installed, and
-  // testing the path against the whole line would let it be satisfied by an
-  // inline comment or by the DESTINATION argument, e.g.
-  //   install -m 0755 deploy/autodeploy.sh /usr/local/bin/wbb-autodeploy # TODO install deploy/ships.sh
-  // Require an actual install command: first non-whitespace token is
-  // `install`, and the path is the SOURCE argument — the real form is
-  // `install -m 0755 <src> <dest>`, so the path must be the second-to-last
-  // whitespace-separated token once any unquoted trailing `#` comment is
-  // stripped.
-  function installsPath(path: string): boolean {
-    return installer.split('\n').some((line) => {
-      const trimmed = line.trimStart();
-      if (!/^install\b/.test(trimmed)) return false;
-      const uncommented = trimmed.replace(/#.*$/, '');
-      const tokens = uncommented.trim().split(/\s+/);
-      return tokens.length >= 2 && tokens[tokens.length - 2] === path;
-    });
-  }
-
-  // The image helper's copies (deploy/image/…) are install-image.sh's: one `"<source> <target> <mode>"`
-  // row of its FILES table each.
-  function imageInstallsPath(path: string): boolean {
-    return imageInstaller.split('\n').some((line) => line.trim().startsWith(`"${path} `));
-  }
-
-  const helperCopies = declared.filter((p) => p.startsWith('deploy/image/'));
-  const deployerCopies = declared.filter((p) => !p.startsWith('deploy/image/'));
-
-  it('install-autodeploy.sh installs every declared copy outside deploy/image/', () => {
-    expect(deployerCopies.map((p) => [p, installsPath(p)])).toEqual(deployerCopies.map((p) => [p, true]));
-  });
-
-  it('install-image.sh installs every declared copy of the image helper', () => {
-    expect(helperCopies.map((p) => [p, imageInstallsPath(p)])).toEqual(helperCopies.map((p) => [p, true]));
+  it('an installer installs each of them, from that source to that path', () => {
+    const key = ([s, t]: string[]) => `${s} -> ${t}`;
+    const have = new Set(installed.map(key));
+    expect(declared.map((d) => [key(d), have.has(key(d))])).toEqual(declared.map((d) => [key(d), true]));
   });
 });

@@ -195,7 +195,7 @@ WORST_PATH_S=$(( 2 * STEP_TIMEOUT_GIT_S + STEP_TIMEOUT_INSTALLED_S + STEP_TIMEOU
   + STEP_TIMEOUT_SNAPSHOT_S + STEP_TIMEOUT_TRIAL_S + STEP_TIMEOUT_ACTIVATE_S + WINDOW_WORST_S
   + STEP_TIMEOUT_SNAPSHOT_OP_S + ROLLBACK_WORST_S + 3 * NOTIFY_WORST_S
   + PENDING_MARK_MAX_PER_TICK * STEP_TIMEOUT_SNAPSHOT_OP_S ))
-# The unit's TimeoutStartSec (stage «в») must be at least this.
+# deploy/wbb-autodeploy.service's TimeoutStartSec must be at least this (scripts/autodeploy/autodeploy-unit.test.ts).
 TICK_BUDGET_S=7500
 # --- timeouts and the tick's budget ------------------------------------------------------- END
 # Quadlet's Type=notify signals the container, not the application: after ACTIVATED wait this
