@@ -56,6 +56,13 @@ describe('every checked installed copy is installed where the controller looks',
     ]);
   });
 
+  // Plan п.14: the installer proves the install with installed-current and the controller's own pairs.
+  it('install-autodeploy.sh checks, after installing, exactly the pairs the controller checks', () => {
+    const pairs = [...read('deploy/install-autodeploy.sh').matchAll(/^\s+"(deploy\/[A-Za-z0-9._/-]+)=\$DEST(\S+)" \\?/gm)]
+      .map((m) => [m[1], m[2].replace(/"? 2>&1\); then$/, '')]);
+    expect(pairs).toEqual(declared);
+  });
+
   it('an installer installs each of them, from that source to that path', () => {
     const key = ([s, t]: string[]) => `${s} -> ${t}`;
     const have = new Set(installed.map(key));

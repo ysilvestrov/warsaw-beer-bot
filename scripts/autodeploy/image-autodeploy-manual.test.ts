@@ -550,7 +550,7 @@ describe('(й) CI and the installed copies', () => {
       1,
       'the installed deployer is out of date — a merged fix is not live until it is installed.\n'
       + 'STALE: 1 installed file(s) differ from origin/main:\n'
-      + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)\n',
+      + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)\n',
       before, [], [],
     ]);
   });
@@ -1209,7 +1209,7 @@ describe('(б-к) plan b2 п.29: every refusal of the second run says how to bri
     ['stale installed copies', (b) => ({ WBB_INSTALLED_CHECK: stub(b.w.bin, 'installed-stale', 'echo "STALE: 1 installed file(s) differ from origin/main:"; exit 1') }),
       () => 'the installed deployer is out of date — a merged fix is not live until it is installed.\n'
         + 'STALE: 1 installed file(s) differ from origin/main:\n'
-        + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+        + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)',
       () => ['image current']],
     ['CI failed', (b) => ({ WBB_CHECKS_CMD: checksStub(b.w, 'checks-fail', ['ci\tcompleted\tfailure\t101', 'image\tcompleted\tsuccess\t101']) }),
       (b) => `CI failed on ${short(b.x)} — not deploying: ci=failure`, (b) => bootProbe(b).slice(0, 2)],

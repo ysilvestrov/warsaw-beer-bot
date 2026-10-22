@@ -30,12 +30,12 @@ describe('wbb-autodeploy.service', () => {
     ]);
   });
 
-  it('gives a tick 125 min, which is not less than the controller\'s TICK_BUDGET_S', () => {
+  it('gives a tick 125 min, exactly the controller\'s TICK_BUDGET_S', () => {
     const timeout = service.filter((d) => d.startsWith('TimeoutStartSec='));
     expect(timeout).toEqual(['TimeoutStartSec=125min']);
     const minutes = Number(/^TimeoutStartSec=(\d+)min$/.exec(timeout[0])?.[1]);
     const budget = Number(/^TICK_BUDGET_S=(\d+)$/m.exec(read('deploy/autodeploy.sh'))?.[1]);
-    expect(minutes * 60 >= budget).toBe(true);
+    expect(minutes * 60).toBe(budget);
   });
 
   it('treats 0, 1 (refused) and 2 (rolled back) as success — 3 and 4 stay failures', () => {

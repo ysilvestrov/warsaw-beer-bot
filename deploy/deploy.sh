@@ -131,7 +131,7 @@ elif ! cmp -s "$INSTALLED" "$OURS"; then
   _what="differs from"
 fi
 if [ -n "$_what" ]; then
-  echo "ERROR: the installed controller $INSTALLED $_what this checkout's $OURS. A manual run must execute the controller the timer runs, so nothing is started. Before stage «в» this always refuses: the installed copy is still the flat deployer. After stage «в»: sudo bash deploy/install-autodeploy.sh (from this checkout), then run this again." >&2
+  echo "ERROR: the installed controller $INSTALLED $_what this checkout's $OURS. A manual run must execute the controller the timer runs, so nothing is started. Until the switchover session the installed copy is the old flat deployer and this always refuses; follow deploy/README.md → Switchover session (stage «в»), not the installer alone." >&2
   exit 1
 fi
 

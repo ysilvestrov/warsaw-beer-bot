@@ -258,7 +258,7 @@ describe('(а) installed copies (plan п.15)', () => {
     expect(notes(w)).toEqual([
       '⚠️ merge-deploy is waiting: the installed deployer is out of date — a merged fix is not live until it is installed.\n'
       + 'STALE: 1 installed file(s) differ from origin/main:\n  deploy/image/helper/wbb_image.py\n'
-      + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+      + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)',
     ]);
   });
 
@@ -271,7 +271,7 @@ describe('(а) installed copies (plan п.15)', () => {
     expect(notes(w)).toEqual([
       '⚠️ merge-deploy: the installed deployer is out of date — a merged fix is not live until it is installed.\n'
       + 'STALE: 1 installed file(s) differ from origin/main:\n'
-      + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+      + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)',
     ]);
     expect(readState(w).LAST_STALE_NOTICE).toBe(DAY1);
   });
@@ -314,6 +314,7 @@ describe('(а) holds by path and by label, fail closed', () => {
     'deploy/image/start-check.cjs',
     'deploy/warsaw-beer-bot.service',
     'deploy/deploy.sh',
+    'deploy/migrate-state-to-image.sh',
     'src/x.ts',
   ])('a change to %s does not hold', (path) => {
     const w = imageWorld();
@@ -1223,7 +1224,7 @@ describe('the harness host', () => {
 });
 
 describe('PR #866 review: the installed-copies check fails closed (item 1)', () => {
-  const ADVICE = 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)';
+  const ADVICE = 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)';
   it.each([
     ['missing', (w: ImageWorld) => join(w.bin, 'no-such-check')],
     ['not executable', (w: ImageWorld) => { const p = join(w.bin, 'not-executable'); writeFileSync(p, '#!/bin/sh\nexit 0\n'); return p; }],

@@ -16,6 +16,8 @@ vi.setConfig({ testTimeout: 20_000 });
  * deploy/autodeploy.sh, as WBB_CONTROLLER) to accept them. Expected files and texts are literals.
  */
 const MIGRATE = resolve(__dirname, '../../deploy/migrate-state-to-image.sh');
+// The local gate runs as another user than the checkout's owner, where git refuses the repo (safe.directory).
+const GIT_ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: resolve(__dirname, '../..') };
 
 describe('autodeploy.sh --check-state', () => {
   const check = (w: ReturnType<typeof imageWorld>) => tick(w, {}, ['--check-state']);
@@ -160,7 +162,7 @@ describe('deploy/migrate-state-to-image.sh', () => {
       `  MAIN_SEEN_SHA=${M}`, '  MAIN_SEEN_S=1792653900', `  LAST_CI_NOTICE_SHA=${F}`,
       `STATE OK — ${h.image}`,
       `Old state: ${h.flat}.flat (state.env is now a directory with a README).`,
-      'Next: bash deploy/deploy.sh --bootstrap (deploy/README.md → The first image release).',
+      'Next: sudo bash deploy/install-autodeploy.sh, then bash deploy/deploy.sh --bootstrap (deploy/README.md → Switchover session).',
       '',
     ].join('\n'));
   });
@@ -176,13 +178,40 @@ describe('deploy/migrate-state-to-image.sh', () => {
       `DEPLOYED_SHA=${D}\nLAST_SEEN_DEPLOYED_SHA=${R}\nREGRESSION_FROM_SHA=${R}\nREGRESSION_TO_SHA=${D}\n`);
   });
 
-  it('a second run is refused: image-state.env exists', () => {
+  it('a second run is refused: state.env is a directory now', () => {
     const h = host();
     migrate(h);
     const after = tree(h.dir);
     const r = migrate(h);
     expect([r.code, r.stderr, tree(h.dir)]).toEqual([
-      1, refused(`${h.image} already exists — the state was migrated already, or the image controller wrote it`), after,
+      1, refused(`${h.flat} is not a regular file — nothing to carry (a directory there means it was migrated already)`), after,
+    ]);
+  });
+
+  // Plan п.9: the checkout's own controller judges, by default — not the installed copy.
+  it('validates with the controller next to it when WBB_CONTROLLER is not set', () => {
+    const h = host();
+    const r = migrate(h, { WBB_CONTROLLER: '' });
+    expect([r.code, r.stderr, readFileSync(h.image, 'utf8')]).toEqual([0, '', PROD_IMAGE]);
+  });
+
+  // Plan п.13: a run killed after image-state.env was written (before or between the renames) left it
+  // holding exactly what is carried, and maybe a prepared state.env.new/: a re-run finishes.
+  it('finishes a run killed after image-state.env was written: the renames, nothing else', () => {
+    const h = host();
+    writeFileSync(h.image, PROD_IMAGE);
+    mkdirSync(`${h.flat}.new`);
+    writeFileSync(`${h.flat}.new/README`, 'half written');
+    const r = migrate(h);
+    expect([r.code, r.stderr, r.stdout.split('\n')[0]]).toEqual([
+      0, '', `Finished an interrupted migration: ${h.image} already held exactly the carried keys.`,
+    ]);
+    expect(tree(h.dir)).toEqual([
+      `image-state.env = ${PROD_IMAGE}`,
+      'lock = ',
+      'state.env/',
+      `state.env/README = ${README}`,
+      `state.env.flat = ${PROD}`,
     ]);
   });
 
@@ -229,6 +258,45 @@ describe('deploy/migrate-state-to-image.sh', () => {
       const r = migrate(h);
       expect([r.code, r.stderr, tree(h.dir)]).toEqual([
         1, refused(`${h.image} already exists — the state was migrated already, or the image controller wrote it`), before,
+      ]);
+    });
+
+    it('state.env.new exists and is not a directory', () => {
+      const h = host();
+      writeFileSync(`${h.flat}.new`, 'x\n');
+      const before = tree(h.dir);
+      const r = migrate(h);
+      expect([r.code, r.stderr, tree(h.dir)]).toEqual([1, refused(`${h.flat}.new exists and is not the directory this script prepares`), before]);
+    });
+
+    // Plan п.9: success is exit 0 AND the exact line — a controller that says nothing of the state
+    // (the old flat one, finding the lock busy) must not pass.
+    it('a controller that exits 0 without `STATE OK — <path>`: refused, the new file removed, no lock-busy-since', () => {
+      const h = host();
+      const ctl = stub(h.bin, 'ctl-silent', 'echo "another process holds the lock (0s); exiting"; exit 0');
+      const before = tree(h.dir);
+      const r = migrate(h, { WBB_CONTROLLER: ctl });
+      expect([r.code, r.stderr, tree(h.dir)]).toEqual([
+        1,
+        refused(`the controller (${ctl}) does not accept the carried state (exit 0, want exactly 'STATE OK — ${h.image}'): another process holds the lock (0s); exiting`),
+        before,
+      ]);
+    });
+
+    it('the old flat controller (e8f20e9) as the controller: refused, nothing migrated', () => {
+      const h = host();
+      const old = join(h.bin, 'old-autodeploy.sh');
+      writeFileSync(old, spawnSync('git', ['show', 'e8f20e9:deploy/autodeploy.sh'], { cwd: resolve(__dirname, '../..'), env: { ...process.env, ...GIT_ENV } }).stdout);
+      chmodSync(old, 0o755);
+      const before = tree(h.dir);
+      const r = migrate(h, { WBB_CONTROLLER: old });
+      // The old controller, finding the lock busy, records lock-busy-since as it always did; that is its
+      // file, not the migration's. Everything the migration owns is as before.
+      // Its message names how long it found the lock held, in whole seconds of the wall clock.
+      expect([r.code, r.stderr.replace(/lock \(\d+s\)/, 'lock (Ns)'), tree(h.dir).filter((e) => !e.startsWith('lock-busy-since'))]).toEqual([
+        1,
+        refused(`the controller (${old}) does not accept the carried state (exit 0, want exactly 'STATE OK — ${h.image}'): another process holds the lock (Ns); exiting`),
+        before,
       ]);
     });
 
@@ -289,7 +357,7 @@ describe('deploy/migrate-state-to-image.sh', () => {
       const r = migrate(h);
       expect([r.code, r.stderr, tree(h.dir)]).toEqual([
         1,
-        refused(`the controller (${SCRIPT}) does not accept the carried state: STATE CORRUPT — ${h.image}: REGRESSION_FROM_SHA is set but REGRESSION_TO_SHA is not`),
+        refused(`the controller (${SCRIPT}) does not accept the carried state (exit 3, want exactly 'STATE OK — ${h.image}'): STATE CORRUPT — ${h.image}: REGRESSION_FROM_SHA is set but REGRESSION_TO_SHA is not`),
         before,
       ]);
     });

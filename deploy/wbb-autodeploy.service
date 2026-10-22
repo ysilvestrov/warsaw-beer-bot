@@ -8,10 +8,10 @@ Type=oneshot
 User=ysi
 Environment=HOME=/home/ysi
 ExecStart=/usr/local/bin/wbb-autodeploy
-# The image controller bounds its worst tick by TICK_BUDGET_S (7500 s, deploy/autodeploy.sh: every
-# step under `timeout`, the window, the rollback loop); a oneshot's start timeout must never cut a
-# tick short, so it is the budget plus a margin (owner's decision 6, spec amendment 3). A test reads
-# both numbers.
+# 125 min = TICK_BUDGET_S (7500 s) of deploy/autodeploy.sh: a oneshot's start timeout must never cut
+# a tick short. The margin is inside the budget, not here: the worst tick the controller builds from
+# its step timeouts (WORST_PATH_S, 7290 s) is checked to fit TICK_BUDGET_S (owner's decision 6, spec
+# amendment 3). A test reads both numbers and requires them equal.
 TimeoutStartSec=125min
 # 1 = refused, 2 = rolled back (code only) — both are reported to Telegram by the controller itself
 # and are not systemd failures worth restarting. 3 = an incident opened or STATE CORRUPT, and

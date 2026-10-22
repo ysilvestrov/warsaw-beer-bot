@@ -8,8 +8,10 @@
 # Stage «в» (plan docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-core.md): this
 # file took the flat deployer's place (`git mv` from deploy/image/). The timer runs the
 # copy deploy/install-autodeploy.sh puts at /usr/local/bin/wbb-autodeploy; until a human runs that
-# installer on the host, the installed copy is still the old flat deployer, and a merge of this file
-# switches nothing (it is a hold path).
+# installer on the host (the switchover session, deploy/README.md), the installed copy is still the old
+# flat deployer. It deploys nothing in between: its own installed_is_stale finds this file differing
+# from its installed copy, so it waits and says "the installed deployer is out of date" daily (plan
+# "Рішення" п.12) — production is frozen from the merge to the bootstrap.
 #
 # The rule is the old one: production runs what was merged into main, after CI passed on THAT
 # commit (`ci` AND `image`, from one check suite), unless a hold says a human must be present.
@@ -915,7 +917,7 @@ installed_is_stale() {
       "deploy/image/warsaw-beer-bot.container=$IMAGE_LIB_DIR/warsaw-beer-bot.container" 2>&1)
 }
 
-STALE_ADVICE="Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)"
+STALE_ADVICE="Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)"
 report_stale_once() {
   installed_is_stale || return 0
   once_a_day LAST_STALE_NOTICE "⚠️ merge-deploy: the installed deployer is out of date — a merged fix is not live until it is installed.

@@ -116,8 +116,8 @@ const USAGE = `usage: bash deploy/deploy.sh [--force] [--ack-incompatible]   dep
 const mismatch = (w: World, what: string): string =>
   `ERROR: the installed controller ${w.installed} ${what} this checkout's ${w.checkout}/deploy/autodeploy.sh. ` +
   'A manual run must execute the controller the timer runs, so nothing is started. ' +
-  'Before stage «в» this always refuses: the installed copy is still the flat deployer. ' +
-  'After stage «в»: sudo bash deploy/install-autodeploy.sh (from this checkout), then run this again.\n';
+  'Until the switchover session the installed copy is the old flat deployer and this always refuses; ' +
+  'follow deploy/README.md → Switchover session (stage «в»), not the installer alone.\n';
 
 describe('deploy/deploy.sh', () => {
   describe('(а) translates each command into the installed controller\'s --manual call', () => {

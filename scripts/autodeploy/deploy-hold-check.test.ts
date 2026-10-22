@@ -28,6 +28,7 @@ const TABLE_COMMON: Array<[string, boolean]> = [
   ['scripts/ops/reboot_request.py', true],
   ['deploy/warsaw-beer-bot.service', false],
   ['deploy/deploy.sh', false],
+  ['deploy/migrate-state-to-image.sh', false],
   ['deploy/record-deployed.sh', false],
   ['deploy/README.md', false],
   ['src/index.ts', false],
