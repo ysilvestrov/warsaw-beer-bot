@@ -86,15 +86,19 @@ cmd_mark() {
 # the evidence goes back to ordinary retention and prune counts it again. Exactly one rename pair or
 # none: everything is checked before the first mv, and nothing existing is ever overwritten.
 cmd_unmark() {
-  local marked="$1" pre
+  local marked="$1" pre want got
   case "$marked" in
     *-rollback-pre.db) pre="${marked%-rollback-pre.db}-pre.db" ;;
     *-unverified-pre.db) pre="${marked%-unverified-pre.db}-pre.db" ;;
     *) die "not a marked pre snapshot: $marked" ;;
   esac
   [ -f "$marked" ] || die "no snapshot at $marked"
-  # A run killed between the two renames below left only the snapshot to move: finish it.
+  # A run killed between the two renames below left only the snapshot to move: finish it — when the
+  # checksum already moved is this snapshot's (#905 AI review), never a stray one.
   if [ ! -e "$marked.sha256" ] && [ -f "$pre.sha256" ] && [ ! -e "$pre" ]; then
+    want=$(tr -d '[:space:]' < "$pre.sha256")
+    got=$(sha256sum < "$marked" | cut -d' ' -f1)
+    [ "$want" = "$got" ] || die "$pre.sha256 is not the checksum of $marked; nothing was renamed"
     mv "$marked" "$pre"
     echo "$pre"
     return 0

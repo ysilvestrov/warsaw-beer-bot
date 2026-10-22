@@ -341,10 +341,23 @@ describe('db-snapshot.sh unmark (plan b2 Task 3: a resolved incident returns its
   it('finishes a run killed between the renames (the checksum moved, the snapshot not): 0, the pair whole', () => {
     const dir = makeTempDirectory('wbb-snap-');
     writeFileSync(join(dir, '20260930T120000Z-abc1234-rollback-pre.db'), 'db');
-    writeFileSync(join(dir, '20260930T120000Z-abc1234-pre.db.sha256'), 'h\n');
+    // sha256 of the 2 bytes "db" (printf db | sha256sum).
+    writeFileSync(join(dir, '20260930T120000Z-abc1234-pre.db.sha256'), '7bdc25d1694ef984782a16f6f1710c1c6bc83ba7a131b515baf532bea021d011\n');
     const r = snap('unmark', join(dir, '20260930T120000Z-abc1234-rollback-pre.db'));
     expect([r.code, r.out, r.err, readdirSync(dir).sort()]).toEqual([
       0, `${join(dir, '20260930T120000Z-abc1234-pre.db')}\n`, '', ['20260930T120000Z-abc1234-pre.db', '20260930T120000Z-abc1234-pre.db.sha256'],
+    ]);
+  });
+
+  it('a checksum at the unmarked name that is not the snapshot\'s: refused (1), nothing renamed', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const marked = join(dir, '20260930T120000Z-abc1234-rollback-pre.db');
+    writeFileSync(marked, 'db');
+    writeFileSync(join(dir, '20260930T120000Z-abc1234-pre.db.sha256'), `${'0'.repeat(64)}\n`);
+    const r = snap('unmark', marked);
+    expect([r.code, r.out, r.err, readdirSync(dir).sort()]).toEqual([
+      1, '', `db-snapshot: ${join(dir, '20260930T120000Z-abc1234-pre.db.sha256')} is not the checksum of ${marked}; nothing was renamed\n`,
+      ['20260930T120000Z-abc1234-pre.db.sha256', '20260930T120000Z-abc1234-rollback-pre.db'],
     ]);
   });
 
