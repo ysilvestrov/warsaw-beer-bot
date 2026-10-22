@@ -22,7 +22,8 @@ const USAGE = 'usage: autodeploy.sh                     (no arguments: the timer
   + '       autodeploy.sh --manual deploy --target <sha> [--force] [--ack-incompatible]\n'
   + '       autodeploy.sh --manual bootstrap --target <sha>\n'
   + '       autodeploy.sh --manual resolve-incident --settled <sha>\n'
-  + '       autodeploy.sh --manual resolve-incident --flat\n';
+  + '       autodeploy.sh --manual resolve-incident --flat\n'
+  + '       autodeploy.sh --check-state       (validate image-state.env: STATE OK, or why not; changes nothing)\n';
 const GH = 'https://github.com/ysilvestrov/warsaw-beer-bot/pull';
 
 interface M { w: ImageWorld; x: string; img: Image; s: Image; pre: string }
@@ -100,6 +101,12 @@ describe('(а) usage: anything outside the grammar is 64 and does nothing', () =
     ['--flat with a value', ['--manual', 'resolve-incident', '--flat', X]],
     ['--flat in deploy', ['--manual', 'deploy', '--target', X, '--flat']],
     ['--flat in bootstrap', ['--manual', 'bootstrap', '--target', X, '--flat']],
+    // Plan 2026-10-22 v-core п.7: --check-state stands alone.
+    ['--check-state with a value', ['--check-state', X]],
+    ['--check-state twice', ['--check-state', '--check-state']],
+    ['--check-state after --manual', ['--manual', '--check-state']],
+    ['--check-state in a deploy', ['--manual', 'deploy', '--target', X, '--check-state']],
+    ['--check-state before --manual', ['--check-state', '--manual', 'deploy', '--target', X]],
   ])('%s', (_name, args) => {
     const w = imageWorld();
     const before = stateText(w);
@@ -475,11 +482,8 @@ describe('(и2) ancestry: the rest of the flat deploy.sh\'s facts', () => {
     chmodSync(m.w.statePath, 0o000);
     try {
       const r = deploy(m, ['--force']);
-      // The reason is masked: read_state's NUL-byte check runs before its read check and names an
-      // unreadable file "holds a NUL byte" — the refusal is right, its reason is not (a separate defect).
-      const masked = notes(m.w).map((n) => n.replace(`${m.w.statePath}: the file holds a NUL byte.`, `${m.w.statePath}: <reason>.`));
-      expect([r.code, events(m.w), masked]).toEqual([3, [], [
-        `[manual] 🔥 merge-deploy: STATE CORRUPT — ${m.w.statePath}: <reason>. Nothing runs until a human repairs the file; it is never taken for a first start.`,
+      expect([r.code, events(m.w), notes(m.w)]).toEqual([3, [], [
+        `[manual] 🔥 merge-deploy: STATE CORRUPT — ${m.w.statePath}: the file cannot be read. Nothing runs until a human repairs the file; it is never taken for a first start.`,
       ]]);
     } finally {
       chmodSync(m.w.statePath, 0o644);

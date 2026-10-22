@@ -29,6 +29,10 @@
 #       of the image S the human restored;
 #   --manual resolve-incident --flat — closes an incident of the first image release after the human
 #       brought the old unit and the flat tree back: R recorded as deployed, nothing settled, no window.
+# And one outside the manual mode:
+#   --check-state — validates image-state.env as every run does and says STATE OK (0) or why not (3);
+#       no lock, no seam, no network, nothing written (plan 2026-10-22 v-core п.7: the state migration
+#       asks the controller itself, so it never repeats the validation).
 #
 # Runs as the operator user (ysi). Root steps go through `sudo -n wbb-image <verb>`, one sudoers
 # rule per verb. Git runs in a private clone, only for the gates — nothing is checked out.
@@ -54,6 +58,7 @@ export LC_ALL=C.UTF-8
 # Assigned here, never taken from the environment: a stray MANUAL=1 must not make a tick manual.
 MANUAL=0
 MANUAL_CMD=""
+CHECK_STATE=0
 TARGET=""
 SETTLED_ARG=""
 # Plan b2 п.28: resolve-incident --flat — the old unit and the flat tree are back, nothing is settled.
@@ -69,12 +74,15 @@ usage: autodeploy.sh                     (no arguments: the timer's tick)
        autodeploy.sh --manual bootstrap --target <sha>
        autodeploy.sh --manual resolve-incident --settled <sha>
        autodeploy.sh --manual resolve-incident --flat
+       autodeploy.sh --check-state       (validate image-state.env: STATE OK, or why not; changes nothing)
 USAGE
   exit 64
 }
 # A full commit SHA as git prints it: 40 hex, lower case.
 _is_sha() { [[ ${1:-} =~ ^[0-9a-f]{40}$ ]]; }
-if [ "$#" -gt 0 ]; then
+if [ "$#" -eq 1 ] && [ "$1" = --check-state ]; then
+  CHECK_STATE=1
+elif [ "$#" -gt 0 ]; then
   [ "$1" = --manual ] && [ "$#" -ge 2 ] || usage
   MANUAL=1
   MANUAL_CMD="$2"
@@ -531,7 +539,8 @@ parse_verdict() {
 
 # --- brake, lock --------------------------------------------------------------------------------
 # Unprivileged emergency stop (#435 §7). Checked before anything else; a paused tick writes
-# nothing and says nothing.
+# nothing and says nothing. --check-state neither deploys nor writes: no brake, no lock, no directory.
+if [ "$CHECK_STATE" = 0 ]; then
 if [ -f "$STATE_DIR/PAUSED" ]; then
   # A human who asked for a deploy is owed an answer (plan b2 п.2); the timer is not.
   if [ "$MANUAL" = 1 ]; then
@@ -572,6 +581,7 @@ fi
 if [ "$MANUAL" = 0 ]; then rm -f "$STATE_DIR/lock-busy-since"; fi
 TICK_TMP=$(mktemp -d)
 trap 'rm -rf "$TICK_TMP"' EXIT
+fi # CHECK_STATE = 0
 
 # --- state -----------------------------------------------------------------------------------------
 # Plan п.4: every key, in the order write_state writes them. Nothing outside this list is ever
@@ -784,6 +794,8 @@ read_state() {
   if [ -L "$STATE" ]; then STATE_PROBLEM="the path is a symlink"; return 1; fi
   [ -e "$STATE" ] || return 0
   if [ ! -f "$STATE" ]; then STATE_PROBLEM="not a regular file"; return 1; fi
+  # Before the NUL check: that one reads the file too, and an unreadable file would fail it.
+  if [ ! -r "$STATE" ]; then STATE_PROBLEM="the file cannot be read"; return 1; fi
   if ! tr -d '\000' < "$STATE" | cmp -s - "$STATE"; then STATE_PROBLEM="the file holds a NUL byte"; return 1; fi
   if ! content=$(cat "$STATE" && printf x); then STATE_PROBLEM="the file cannot be read"; return 1; fi
   content="${content%x}"
@@ -2433,6 +2445,19 @@ resolve_incident() {
 }
 
 # --- the run -----------------------------------------------------------------------------------------
+# Plan 2026-10-22 v-core п.7: the same reader and validator as every run; nothing else.
+if [ "$CHECK_STATE" = 1 ]; then
+  if [ ! -e "$STATE" ] && [ ! -L "$STATE" ]; then
+    echo "STATE MISSING — ${STATE}: no such file" >&2
+    exit 3
+  fi
+  if ! read_state; then
+    echo "STATE CORRUPT — ${STATE}: ${STATE_PROBLEM}" >&2
+    exit 3
+  fi
+  echo "STATE OK — ${STATE}"
+  exit 0
+fi
 read_state || state_corrupt
 retry_pending_marks
 # Spec §7.3: an open incident blocks everything but PAUSED and the lock — before the window,

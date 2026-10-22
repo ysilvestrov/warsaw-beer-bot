@@ -93,6 +93,7 @@ describe('deploy rsync payload', () => {
       'deploy/litestream.env.example',
       'deploy/litestream.service',
       'deploy/litestream.yml',
+      'deploy/migrate-state-to-image.sh',
       'deploy/read-env.sh',
       'deploy/record-deployed.sh',
       'deploy/refresh-cookie.sh',
