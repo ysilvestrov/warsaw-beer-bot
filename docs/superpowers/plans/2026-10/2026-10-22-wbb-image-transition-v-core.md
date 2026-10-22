@@ -1,0 +1,143 @@
+# Деплой образом — стадія «в», ядро (В1): контролер образів стає `deploy/autodeploy.sh`, інсталятор, перенесення стану — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** код готовий до перемикання хоста.
+- Контролер образів і його обгортка займають місце flat-деплоєра: `git mv deploy/image/autodeploy.sh deploy/autodeploy.sh`, `git mv deploy/image/deploy.sh deploy/deploy.sh`.
+- `install-autodeploy.sh` ставить їх разом із залежностями.
+- Юніт таймера отримує бюджет tick-а образного контролера.
+- Одноразовий скрипт переносить гейтові ключі зі `state.env` в `image-state.env`.
+- `spec.md` описує образний деплой.
+
+**Хост перемикає людина, а не мердж.** PR несе `[deploy:hold]`. Кроки (сеанс на хості) описує окремий план обв'язки «в» і runbook. Поки людина не запустила інсталятор, на хості працює встановлена копія старого контролера, як і досі.
+
+Це **ядро «в»** (CLAUDE.md, «Велика зміна йде стадіями»). Після наскрізного рев'ю ядра пишуться ще два плани:
+- **обв'язка «в»**: набір для репетиції (поправка 4, рішення 1), `unit=` у статусі через хостовий збирач (рішення 3), runbook сеансу на хості;
+- **В2, прибирання**: після першого settled і кількох автоматичних деплоїв.
+
+Спека: `docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md`, поправка 4 (секція «Для власника»; **чекає на затвердження**), §7.1, §8 п.2–4, §10, §11.
+
+## Рішення
+
+1. **`git mv` поверх старих файлів.**
+   - `deploy/image/autodeploy.sh` → `deploy/autodeploy.sh`, `deploy/image/deploy.sh` → `deploy/deploy.sh`. Старі flat-файли зникають разом із цим.
+   - Хелпер, шаблон, `start-check.cjs`, `offline-telegram.cjs` і `Dockerfile` лишаються в `deploy/image/`.
+   - Обгортка шукає контролер поруч із собою (`$(dirname "$0")/autodeploy.sh`), тож її код не змінюється.
+2. **Шляхи, що називають контролер, оновлюються в одному коміті з `git mv`.**
+   - `installed_is_stale` (пара `deploy/autodeploy.sh=$0`).
+   - Hold-списки: `path_is_held` у контролері і `scripts/autodeploy/deploy-hold-check.ts`. Рядок `deploy/image/autodeploy.sh` зникає, `deploy/autodeploy.sh` лишається held; `deploy/deploy.sh` не held, як і досі.
+   - Тексти контролера, що називають `bash deploy/deploy.sh`, уже правильні.
+   - `README`.
+3. **Тести flat-деплоєра, чия поведінка зникає, видаляються. Тести образного контролера йдуть за файлом.**
+   - Видаляються: `autodeploy.test.ts`, `deploy-ancestry.test.ts`, `deploy-lock.test.ts` (старий `deploy.sh`), `autodeploy-timer.test.ts` — його факти про юніт переносяться в новий тест юніта (п.5).
+   - Лишаються до В2 (вони перевіряють файли, які ще існують): `ships.test.ts`, `deploy-rsync.test.ts`, `record-deployed.test.ts`.
+   - Harness і `image-*` тести беруть `SCRIPT` з нового шляху.
+   - Перед видаленням кожен видалений тест звіряється з `image-*`: чи має його факт відповідника. Ціль звірки — гейти, які перенесено «без змін» (§4): quiet, ancestry, fence, lock-stall, PAUSED. Факт без відповідника — це пропуск у ядрі «б», і для нього пишеться тест в `image-*`, а не видаляється мовчки.
+4. **`install-autodeploy.sh` ставить те, що кличе новий контролер.**
+   - Ставить: `wbb-db-snapshot`, `wbb-read-env`, `wbb-installed-current`, `wbb-autodeploy` (залежності першими, як M2 #527), юніт і таймер.
+   - `wbb-ships` і `wbb-trial-migrate` більше не ставляться. Їхні старі копії на хості прибирає В2.
+   - Перед встановленням інсталятор перевіряє `bash deploy/install-image.sh --check`: без поточного хелпера новий контролер однаково чекав би. Якщо копії не збігаються, установка припиняється з порадою.
+   - Якщо `~/.local/state/wbb-autodeploy/image-state.env` оператора немає, інсталятор друкує: «перенеси стан (`deploy/migrate-state-to-image.sh`) і зроби bootstrap; доти таймер нічого не деплоїть».
+   - Таймер, як і досі, не вмикає й не вимикає.
+5. **Юніт `wbb-autodeploy.service`.**
+   - `TimeoutStartSec=125min`: `TICK_BUDGET_S=7500` + запас, рішення власника 6.
+   - `SuccessExitStatus=0 1 2`: 3 (інцидент / `STATE CORRUPT`) і 4 (запис стану) — збої юніта, як і досі.
+   - Тест юніта, що лишається на місці `autodeploy-timer.test.ts`, фіксує обидва значення і те, що `TimeoutStartSec` ≥ `TICK_BUDGET_S` контролера (число читається з файлу контролера).
+6. **`deploy/migrate-state-to-image.sh`: одноразове перенесення стану, запускає оператор.**
+   - Працює лише тоді, коли таймер зупинений (`systemctl is-active wbb-autodeploy.timer` → не `active`) і lock вільний.
+   - Читає `state.env` рядок за рядком, ніколи не виконує його як код (`source` не використовується). Переносить лише дозволені ключі з тим самим сенсом (§7.1, «чинні гейтові»): `DEPLOYED_SHA`, `PREVIOUS_SHA`, `LAST_SEEN_DEPLOYED_SHA`, `LAST_FAILED_SHA`, `MAIN_SEEN_SHA`, `MAIN_SEEN_S`, `REGRESSION_FROM_SHA`, `REGRESSION_TO_SHA`, `LAST_CI_NOTICE_SHA`. Денні маркери не переносяться: новий контролер скаже свої повідомлення заново.
+   - Невідомий ключ, дубль або неформатне значення — відмова, нічого не записано.
+   - `image-state.env` уже існує → відмова.
+   - Записує атомарно: тимчасовий файл, `fsync`, `mv`. Потім перевіряє результат самим новим контролером (`--check-state`, див. п.7).
+   - Лише після цього перейменовує `state.env` у `state.env.flat` і створює каталог `state.env/` з `README`. Старі `deploy.sh` з захистом (§8 п.3) тоді відмовляють до першого `sudo`.
+   - Друкує, що перенесено, і наступний крок (bootstrap).
+7. **`autodeploy.sh --check-state`** — нова підкоманда для п.6. Вона розбирає й валідує `image-state.env` тією самою `check_state`, друкує `STATE OK` або причину і виходить 0 або 3. Lock і стан не чіпає, мережі не торкається. Так скрипт перенесення не дублює валідацію і не вгадує її.
+8. **`spec.md`.** Розділ merge-deploy (≈рядок 2984) описує образний контролер:
+   - що деплоїться: образ;
+   - відкат лише коду;
+   - вікно;
+   - ручний вхід `bash deploy/deploy.sh` і команди §7.4.
+
+   Опис flat-шляху прибирається. Hold-правило CLAUDE.md («`rsync-filter`» у переліку кроків на хості) лишається до В2, бо файл ще існує.
+
+## Таблиця «заявка → доказ»
+
+| Заявка | Що стверджує | Доказ | Сила |
+|---|---|---|---|
+| `image-state.env` після перенесення | гейтова база нового контролера = база flat-деплоєра | ключі з тим самим сенсом (§7.1); валідація `--check-state` новим контролером; тест на справжньому `state.env` з prod-формату (фікстура з проби 21.10, A4) | сильний для перелічених ключів |
+| Інсталятор поставив новий контролер | таймер запускає саме образний контролер | `installed-current.sh` після встановлення (як у M2); `--check` хелпера перед встановленням | сильний |
+| Бюджет юніта | systemd не вб'є найгірший tick | тест: `TimeoutStartSec` ≥ `TICK_BUDGET_S` з файлу контролера | сильний як межа |
+
+Проб до плану не потрібно: формат `state.env` уже зафіксовано пробою 21.10 (A4), стан хелпера — інсталяцією 21.10.
+
+## Global Constraints
+
+- Правила тестів CLAUDE.md. Гейт: `su tester -c 'cd /home/user/warsaw-beer-bot && npm test && npm run typecheck'` (дивитися справжні коди виходу; повний прогін у фоні з тайм-аутом ≥ 40 хв) і від root `npm test -- scripts/release.test.ts`.
+- Ніколи `chown`/`chmod` репо.
+- `ships.sh`, `rsync-filter`, `record-deployed.sh`, `deploy/release/**` і хелпер **не змінюються**: це В2.
+- PR: `[deploy:hold]` + мітка `deploy:hold`. Кроки — посилання на runbook з обв'язки «в». Поки його немає, PR не мерджиться (так і скажеш в описі).
+
+---
+
+### Task 1: `git mv` і шляхи
+
+**Files:** контролер, обгортка (лише `git mv`), `scripts/autodeploy/deploy-hold-check.ts` (+test), harness і `image-*` тести, `scripts/deploy-rsync.test.ts` (перелік), `deploy/README.md`; видаляються тести flat-деплоєра з п.3.
+
+- [ ] Звірка п.3: таблиця «факт видаленого тесту → тест в `image-*`». Для кожного факту без відповідника спершу пишеться тест, і він має пройти на поточному контролері. Таблиця йде в опис коміту.
+- [ ] `git mv` обох файлів. Оновити пару `installed_is_stale`, hold-списки обох копій і `SCRIPT` у harness і тестах обгортки.
+- [ ] `deploy-hold-check.test.ts`: `deploy/autodeploy.sh` held, `deploy/image/autodeploy.sh` (якого вже немає) не в списку, `deploy/deploy.sh` не held.
+- [ ] Гейт. Коміт називає механізм: «the image controller takes the flat deployer's place».
+
+### Task 2: `--check-state` і скрипт перенесення стану
+
+**Files:** `deploy/autodeploy.sh` (підкоманда), новий `deploy/migrate-state-to-image.sh`, новий `scripts/autodeploy/migrate-state.test.ts`, `image-autodeploy-manual.test.ts` (usage).
+
+- [ ] Тести спершу:
+  - `--check-state`: валідний стан → `STATE OK`, 0; кожен рядок CORRUPT-таблиці → причина, 3; файлу нема → своя причина, 3; нуль подій і lock не чіпається.
+  - Перенесення на фікстурі prod-формату (ключі з проби A4): точний `image-state.env`; `state.env.flat` дорівнює старому файлу байт у байт; `state.env/README` є.
+  - Відмови перенесення, після кожної нічого не змінено:
+    - таймер `active` (seam `WBB_SYSTEMCTL_CMD`);
+    - lock зайнятий;
+    - `image-state.env` існує;
+    - невідомий ключ;
+    - дубль;
+    - `$(…)` у значенні (не виконується);
+    - `--check-state` відмовив.
+  - Повторний запуск після успіху → відмова (`image-state.env` існує).
+- [ ] Реалізація за п.6–7.
+- [ ] Мутації:
+  - перейменування `state.env` до перевірки → відмова через `--check-state` лишає стан змінений → тест червоніє;
+  - `source` замість розбору → тест `$(…)`.
+- [ ] Гейт, коміт.
+
+### Task 3: інсталятор і юніт
+
+**Files:** `deploy/install-autodeploy.sh`, `deploy/wbb-autodeploy.service`, `scripts/autodeploy/install-invariant.test.ts`, новий тест юніта на місці `autodeploy-timer.test.ts`.
+
+- [ ] Тести спершу:
+  - інсталятор (з DESTDIR-подібним seam, як `install-image.test.ts`) ставить рівно чотири скрипти з п.4 і юніт із таймером, з правильними правами;
+  - `install-image.sh --check` ≠ 0 → нічого не встановлено;
+  - без `image-state.env` друкується порада;
+  - юніт: `TimeoutStartSec=125min` ≥ `TICK_BUDGET_S`, `SuccessExitStatus=0 1 2`.
+- [ ] Реалізація за п.4–5.
+- [ ] Гейт, коміт.
+
+### Task 4: `spec.md` і README (дрібна, інлайн)
+
+- [ ] `spec.md`, розділ merge-deploy — за п.8.
+- [ ] `deploy/README.md`:
+  - розділи «Merge-deploy» і «Image controller» зливаються в один, що описує образний контролер;
+  - flat-runbook (rsync, `ships`) позначається «до В2, лише як fallback»;
+  - додається розділ «Перенесення стану».
+- [ ] Гейт, коміт.
+
+---
+
+## Після
+
+- Наскрізне рев'ю ядра «в», з інлайновою задачею 4 у пакеті.
+- План обв'язки «в»:
+  - набір для репетиції: обгортка хелпера з підміненими іменами, шаблон з підставним оточенням і офлайн-Telegram, сценарії §7.2, прибирання навіть після Ctrl-C;
+  - `unit=` у статусі через `host_patch_collect.py`;
+  - runbook сеансу на хості: зупинити таймер → репетиція + P3 → `migrate-state-to-image.sh` → `install-autodeploy.sh` → bootstrap → увімкнути таймер.
+- PR В1 (ядро + обв'язка) з `[deploy:hold]`, сеанс на хості, потім В2.
