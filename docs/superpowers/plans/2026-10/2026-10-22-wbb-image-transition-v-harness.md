@@ -101,7 +101,7 @@
 
    - нічого не лишилось від репетиції (корінь набору, юніт, Quadlet-файл, контейнер `wbb-rehearsal`).
 
-   Друкує PASS / EXPECTED / FAIL по кожному пункту і вихід 0 лише тоді, коли FAIL нема. Як збудовано (Task 4): `HEAD` має **дорівнювати** голові `origin/main` (сеанс bootstrap-ить щойно змердженe), голова читається `git ls-remote`, без fetch; `state.env` перевіряється правилами й списками ключів самого `migrate-state-to-image.sh` (не `--check-state`, той валідує `image-state.env`); перевірка образу бере `_resolve_default`/`_attest_default` дослівно з контролера; preflight нічого не пише (тест порівнює дерево до/після).
+   Друкує PASS / EXPECTED / FAIL по кожному пункту і вихід 0 лише тоді, коли FAIL нема. Як збудовано (Task 4): `HEAD` має **дорівнювати** голові `origin/main` (сеанс bootstrap-ить щойно змерджене), голова читається `git ls-remote`, без fetch; `state.env` перевіряється правилами й списками ключів самого `migrate-state-to-image.sh` (не `--check-state`, той валідує `image-state.env`); перевірка образу бере `_resolve_default`/`_attest_default` дослівно з контролера; preflight нічого не пише (тест порівнює дерево до/після).
 7. **Runbook у README** («Switchover session (stage «в»)»):
    1. мердж В1 на початку сеансу;
    2. `sudo systemctl disable --now wbb-autodeploy.timer`;
