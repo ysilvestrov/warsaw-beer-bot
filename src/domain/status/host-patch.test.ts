@@ -16,7 +16,6 @@ const FACTS: HostPatchFacts = {
   staleServices: [{ unit: 'code-server@ysi.service', since: T - 30 * DAY }],
   unattended: { lastRun: T - 3600, securityPending: 0 },
   packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: '0.5.11' },
-  image: null,
 };
 const ok = (patch: Partial<HostPatchFacts> = {}): Avail<HostPatchFacts> => ({ ok: true, value: { ...FACTS, ...patch } });
 const at = (iso: string) => new Date(iso);

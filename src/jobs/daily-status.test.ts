@@ -21,6 +21,7 @@ import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 const missingMonitor = {
   testDiagnosticsPath: join(tmpdir(), 'wbb-daily-missing', 'summary.json'),
   hostPatchPath: join(tmpdir(), 'wbb-daily-missing', 'host-patch.json'),
+  hostImagePath: join(tmpdir(), 'wbb-daily-missing', 'image.json'),
 };
 
 const silentLog = pino({ level: 'silent' });
@@ -489,23 +490,25 @@ describe('the image line in the daily report', () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wbb-daily-image-')); chmodSync(dir, 0o755); });
   afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-  const report = (summary: unknown): string => {
-    const file = join(dir, 'host-patch.json');
-    writeFileSync(file, JSON.stringify(summary), { mode: 0o644 });
+  const put = (name: string, value: unknown): string => {
+    const file = join(dir, name);
+    writeFileSync(file, JSON.stringify(value), { mode: 0o644 });
     chmodSync(file, 0o644);
+    return file;
+  };
+  /** The report over a readable summary, with image.json as given (undefined: no such file). */
+  const report = (image?: unknown): string => {
+    const hostPatchPath = put('summary.json', base);
+    if (image !== undefined) put('image.json', image);
     return buildDailyReport(emptyDb(), now, '2026-10-06', {
-      ...missingMonitor, hostPatchPath: file, hostPatchUid: process.getuid!(),
+      ...missingMonitor, hostPatchPath, hostImagePath: join(dir, 'image.json'), hostPatchUid: process.getuid!(),
     });
   };
   const footers = (text: string): string[] => text.split('\n').filter((l) => l.startsWith('ℹ️'));
-  // Read, not refused: the summary's own null Livepatch is reported, not «підсумок … недоступний».
-  const read = (text: string): boolean[] =>
-    [text.includes('  • нема даних: стан Livepatch'), text.includes('підсумок патчів хоста недоступний')];
+  const image = { version: 1, timestamp: now.getTime() / 1000 - 60, unit: 'quadlet', running_digest: D, deployed_digest: D };
 
-  it('a new summary puts the line among the footers, before the events footer', () => {
-    const text = report({ ...base, image: { unit: 'quadlet', running_digest: D, deployed_digest: D } });
-    expect(read(text)).toEqual([true, false]);
-    expect(footers(text)).toEqual([
+  it('image.json puts the line among the footers, before the events footer', () => {
+    expect(footers(report(image))).toEqual([
       'ℹ️ історія: 0/7 днів — порівняльні правила без потрібних днів ще не діють',
       'ℹ️ unit=quadlet · образ abcdef012345 (= задеплоєного)',
       `ℹ️ ${EVENTS_FOOTER}`,
@@ -513,13 +516,22 @@ describe('the image line in the daily report', () => {
     ]);
   });
 
-  it('an old summary without `image` still reads, and there is no line', () => {
-    const text = report(base);
-    expect(read(text)).toEqual([true, false]);
-    expect(footers(text)).toEqual([
+  it('without image.json (a collector from before it) there is no line', () => {
+    expect(footers(report())).toEqual([
       'ℹ️ історія: 0/7 днів — порівняльні правила без потрібних днів ще не діють',
       `ℹ️ ${EVENTS_FOOTER}`,
       'ℹ️ не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)',
     ]);
+  });
+
+  it('a malformed image.json changes nothing in the report: no line, the same verdicts and colours', () => {
+    expect(report({ ...image, unit: 'flat' })).toBe(report());
+  });
+
+  it('image.json never touches the host-patch verdict: the report differs from one without it by the line alone', () => {
+    const without = report().split('\n');
+    const withImage = report(image).split('\n');
+    expect(withImage.filter((l) => !without.includes(l))).toEqual(['ℹ️ unit=quadlet · образ abcdef012345 (= задеплоєного)']);
+    expect(withImage.length).toBe(without.length + 1);
   });
 });

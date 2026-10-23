@@ -28,7 +28,6 @@ export const GREEN_HOST_PATCH: HostPatchFacts = {
   staleServices: [{ unit: 'code-server@ysi.service', since: T - 30 * 86_400 }],
   unattended: { lastRun: T - 3600, securityPending: 0 },
   packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: '0.5.17' },
-  image: null,
 };
 export const GREEN_UPSTREAM: HostUpstream = {
   nodeSecurity: { ok: true, value: { version: '24.18.1', date: '2026-07-28' } },
@@ -51,6 +50,7 @@ export function greenInputs(overrides: Partial<StatusInputs> = {}): StatusInputs
     handlerFailures: { ok: true, value: [] },
     disk: { ok: true, value: { bytesAvailable: 32 * GIB_BYTES, inodesFree: 2_000_000, pendingRuns: 0 } },
     hostPatch: { ok: true, value: GREEN_HOST_PATCH },
+    hostImage: null,
     upstream: GREEN_UPSTREAM,
     runtimeNode: '24.21.0',
     fest: null,

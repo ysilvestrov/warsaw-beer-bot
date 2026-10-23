@@ -71,6 +71,7 @@ export interface DailyStatusDeps {
   testDiagnosticsUid?: number;
   hostPatchPath?: string;
   hostPatchUid?: number;
+  hostImagePath?: string;
   /** Which fest eyes are configured, for the status to tell a dead eye from a switched-off one (#885). */
   festEyes?: { mcp: boolean; server: boolean };
 }
@@ -89,8 +90,8 @@ export function dailyStatusEnvDeps(
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
 
 // Spec 2026-10-11 §10: which unit runs the bot and from which image, next to what the controller deployed.
-// Null when the host summary has no `image` (a collector installed before it) or cannot be read: the
-// Інфраструктура row already says so. Before the switchover the flat unit is `foreign`, and that is expected.
+// Null when there is no fresh readable image.json (a collector installed before it, or one that stopped): no
+// line, and nothing else changes. Before the switchover the flat unit is `foreign`, and that is expected.
 const short = (digest: string): string => digest.slice('sha256:'.length, 'sha256:'.length + 12);
 export function buildImageLine(image: ImageFacts | null): string | null {
   if (image === null) return null;
@@ -141,7 +142,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
     pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
   } catch { /* see above */ }
   // The pause is a channel-health fact (🔴 Канали), so the users section shows activity only.
-  const imageLine = buildImageLine(inputs.hostPatch.ok ? inputs.hostPatch.value.image : null);
+  const imageLine = buildImageLine(inputs.hostImage);
   const bugReportLine = opts.repo && inputs.bugReports
     ? buildBugReportLine(inputs.bugReports.summary, null, opts.repo)
     : null;
@@ -185,7 +186,8 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     if (!markerReadable) throw new Error('daily-status: last-sent marker unreadable');
     text = buildDailyReport(db, now, dateKey, {
       repo: deps.repo, testDiagnosticsPath: deps.testDiagnosticsPath, testDiagnosticsUid: deps.testDiagnosticsUid,
-      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid, festEyes: deps.festEyes,
+      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid, hostImagePath: deps.hostImagePath,
+      festEyes: deps.festEyes,
     });
   } catch (e) {
     // The report itself broke. Say so once per Warsaw day instead of going silent; the delivery

@@ -37,10 +37,9 @@ export interface HostPatchFacts {
   staleServices: { unit: string; since: number }[] | null;
   unattended: { lastRun: number | null; securityPending: number | null };
   packages: { nodejs: string | null; cloudflared: string | null; litestream: string | null };
-  /** Spec 2026-10-11 §10. Null: the summary has no `image` (a collector from before it); a part it could not read is null. */
-  image: ImageFacts | null;
 }
 
+/** Spec 2026-10-11 §10, the collector's image.json; a part it could not read is null. */
 export interface ImageFacts {
   unit: 'quadlet' | 'foreign' | 'absent' | null;
   runningDigest: string | null;  // sha256:<64 hex>
@@ -88,6 +87,7 @@ export interface StatusInputs {
   bugReports: { summary: BugReportSummary; paused: { since: string; status: number } | null; pausedUnreadable?: boolean } | null; // null = no repo configured
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
   hostPatch: Avail<HostPatchFacts>; // #469 stage 2: the root collector's summary
+  hostImage: ImageFacts | null;     // spec 2026-10-11 §10: the collector's image.json; null = no fresh readable one
   upstream: HostUpstream;           // #469 stage 2: Node/litestream releases, fetched daily
   runtimeNode: string;             // process.versions.node of the bot (spec 2026-10-11 §10)
   fest: FestInputs | null;         // null = no current or upcoming fest

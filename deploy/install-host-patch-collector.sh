@@ -9,7 +9,7 @@
 # timer and runs the collector once so the first summary exists before the bot reads it.
 # The operator is whoever ran sudo (SUDO_USER, as install-autodeploy.sh): the drop-in
 # wbb-host-patch.service.d/image-state.conf names its image-state.env, whose DEPLOYED_DIGEST the
-# status shows next to the running image (spec 2026-10-11 §10). Without an operator the drop-in is
+# collector writes to image.json next to the summary, with the running image (spec 2026-10-11 §10). Without an operator the drop-in is
 # left as it is.
 # Idempotent. A refused run changes nothing.
 #

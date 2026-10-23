@@ -1,17 +1,14 @@
-import { chmodSync, linkSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readHostPatch } from './host-patch';
+import { readHostImage, readHostPatch } from './host-patch';
 
 /** #469 stage 2 — the summary written by scripts/ops/host_patch_collect.py. */
 let directory: string;
 let path: string;
 const owner = (): number => process.getuid!();
 const now = new Date(1_791_440_000_000);
-
-const D1 = `sha256:${'1'.repeat(64)}`;
-const D2 = `sha256:${'2'.repeat(64)}`;
 
 const summary = {
   version: 1,
@@ -49,7 +46,6 @@ describe('readHostPatch', () => {
         staleServices: [{ unit: 'litestream.service', since: 1_791_000_000 }],
         unattended: { lastRun: 1_791_400_000, securityPending: 2 },
         packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: null },
-        image: null,
       },
     });
   });
@@ -65,7 +61,6 @@ describe('readHostPatch', () => {
         timestamp: 1_791_439_000, kernel: null, rebootRequired: null, livepatch: null, staleServices: null,
         unattended: { lastRun: null, securityPending: null },
         packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: null },
-        image: null,
       },
     });
   });
@@ -74,31 +69,6 @@ describe('readHostPatch', () => {
     write({ ...summary, livepatch: { state: 'applied', upgrade_required_date: '02.10.2027' } });
     expect(readHostPatch(now, path, owner())).toMatchObject({
       kind: 'ok', facts: { livepatch: { state: 'applied', upgradeRequiredDate: '02.10.2027' } } });
-  });
-
-  // Spec 2026-10-11 §10. The summary without `image` above is the one a collector installed before it writes.
-  it('maps the image of a summary that has one', () => {
-    write({ ...summary, image: { unit: 'quadlet', running_digest: D1, deployed_digest: D2 } });
-    expect(readHostPatch(now, path, owner())).toMatchObject({
-      kind: 'ok', facts: { image: { unit: 'quadlet', runningDigest: D1, deployedDigest: D2 } } });
-  });
-
-  it('keeps every unreadable part of the image null', () => {
-    write({ ...summary, image: { unit: null, running_digest: null, deployed_digest: null } });
-    expect(readHostPatch(now, path, owner())).toMatchObject({
-      kind: 'ok', facts: { image: { unit: null, runningDigest: null, deployedDigest: null } } });
-  });
-
-  it.each([
-    ['an unknown unit', { unit: 'flat', running_digest: null, deployed_digest: null }],
-    ['a digest without its algorithm', { unit: 'quadlet', running_digest: '1'.repeat(64), deployed_digest: null }],
-    ['a short digest', { unit: 'quadlet', running_digest: null, deployed_digest: D1.slice(0, -1) }],
-    ['a missing part', { unit: 'quadlet', running_digest: D1 }],
-    ['an extra key', { unit: 'quadlet', running_digest: D1, deployed_digest: D2, deployed_sha: 'x' }],
-    ['null instead of the object', null],
-  ])('refuses an image with %s', (_what, image) => {
-    write({ ...summary, image });
-    expect(readHostPatch(now, path, owner())).toEqual({ kind: 'unavailable' });
   });
 
   it('accepts a summary exactly three hours old and calls one second older stale', () => {
@@ -177,5 +147,80 @@ describe('readHostPatch', () => {
   it('refuses a summary over 16 KiB', () => {
     write({ ...summary, stale_services: Array.from({ length: 200 }, (_, k) => ({ unit: `u${k}`.padEnd(90, 'x'), since: 1 })) });
     expect(readHostPatch(now, path, owner())).toEqual({ kind: 'unavailable' });
+  });
+});
+
+// Spec 2026-10-11 §10: image.json, the collector's own file next to the summary (so the summary keeps its shape).
+const FIXTURES = resolve(__dirname, '../../scripts/ops/fixtures/host-patch');
+const D1 = `sha256:${'1'.repeat(64)}`;
+const D2 = `sha256:${'2'.repeat(64)}`;
+const image = { version: 1, timestamp: 1_791_439_000, unit: 'quadlet', running_digest: D1, deployed_digest: D2 };
+
+describe('the collector\'s files, as scripts/ops/test_host_patch_collect.py pins them byte for byte', () => {
+  const copy = (name: string): void => {
+    writeFileSync(path, readFileSync(join(FIXTURES, name)), { mode: 0o644 });
+    chmodSync(path, 0o644);
+  };
+  const fixtureNow = new Date(1_791_440_000_000);
+
+  // Rollback: every release since #469 reads summary.json with this strict reader, unchanged by image.json.
+  it('the strict summary reader accepts the summary the new collector writes', () => {
+    copy('collector-summary.json');
+    expect(readHostPatch(fixtureNow, path, owner())).toMatchObject({ kind: 'ok', facts: { timestamp: 1_791_440_000 } });
+  });
+
+  it('the image reader accepts the image.json it writes', () => {
+    copy('collector-image.json');
+    expect(readHostImage(fixtureNow, path, owner())).toEqual({ unit: 'quadlet', runningDigest: D1, deployedDigest: D1 });
+  });
+});
+
+describe('readHostImage', () => {
+  it('maps a fresh image.json', () => {
+    write(image);
+    expect(readHostImage(now, path, owner())).toEqual({ unit: 'quadlet', runningDigest: D1, deployedDigest: D2 });
+  });
+
+  it('keeps every unreadable part null', () => {
+    write({ ...image, unit: null, running_digest: null, deployed_digest: null });
+    expect(readHostImage(now, path, owner())).toEqual({ unit: null, runningDigest: null, deployedDigest: null });
+  });
+
+  it('accepts one exactly three hours old and drops one a second older', () => {
+    write({ ...image, timestamp: 1_791_440_000 - 10_800 });
+    const fresh = readHostImage(now, path, owner());
+    write({ ...image, timestamp: 1_791_440_000 - 10_801 });
+    expect([fresh, readHostImage(now, path, owner())]).toEqual([{ unit: 'quadlet', runningDigest: D1, deployedDigest: D2 }, null]);
+  });
+
+  it.each([
+    ['from the future', { timestamp: 1_791_440_001 }],
+    ['version 2', { version: 2 }],
+    ['an unknown unit', { unit: 'flat' }],
+    ['a digest without its algorithm', { running_digest: '1'.repeat(64) }],
+    ['a short digest', { deployed_digest: D1.slice(0, -1) }],
+    ['a missing part', { deployed_digest: undefined }],
+    ['an extra key', { deployed_sha: 'x' }],
+  ])('is null for one %s', (_what, patch) => {
+    write({ ...image, ...patch });
+    expect(readHostImage(now, path, owner())).toBe(null);
+  });
+
+  it('is null when the file is missing', () => {
+    expect(readHostImage(now, path, owner())).toBe(null);
+  });
+
+  it('trusts only root by default', () => {
+    write(image);
+    expect(readHostImage(now, path)).toBe(null);
+  });
+
+  it.each([
+    ['a 0600 file', () => chmodSync(path, 0o600)],
+    ['a 0777 directory', () => chmodSync(directory, 0o777)],
+  ])('is null for %s', (_what, spoil) => {
+    write(image);
+    spoil();
+    expect(readHostImage(now, path, owner())).toBe(null);
   });
 });

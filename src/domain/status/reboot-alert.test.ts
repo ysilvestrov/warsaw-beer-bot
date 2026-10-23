@@ -15,7 +15,6 @@ const FACTS: HostPatchFacts = {
   staleServices: [],
   unattended: { lastRun: T - 3600, securityPending: 0 },
   packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: '0.5.17' },
-  image: null,
 };
 const ok = (patch: Partial<HostPatchFacts> = {}): HostPatchRead => ({ kind: 'ok', facts: { ...FACTS, ...patch } });
 const TEXT = '🔁 Хосту потрібне перезавантаження — чекає 4 дні: libc6, dbus.\nLivepatch: nothing-to-apply.';

@@ -3,7 +3,9 @@
 
 Writes /var/tmp/wbb-host-patch/summary.json atomically: directory 0755 and file 0644,
 both owned by the user running it (root in production). A fact it cannot read is
-written as null, never guessed. Spec:
+written as null, never guessed. Next to it, image.json (spec 2026-10-11 §10) with the
+same discipline: its own file, so summary.json keeps the shape every bot release reads
+(its reader refuses an unknown key). Spec:
 docs/superpowers/specs/2026-10/2026-10-06-469-host-patching-design.md (Stage 2).
 """
 import argparse
@@ -18,6 +20,7 @@ import time
 
 OUT_DIR = '/var/tmp/wbb-host-patch'
 SUMMARY = 'summary.json'
+IMAGE = 'image.json'
 PACKAGES = ('nodejs', 'cloudflared', 'litestream')
 LIVEPATCH_OK = ('applied', 'nothing-to-apply')
 TIMEOUT_SECONDS = 120
@@ -201,7 +204,7 @@ def deployed_digest(path):
     return values[0]
 
 
-def collect(run_command, root, now, previous, image_state=None):
+def collect(run_command, root, now, previous):
     needrestart = attempt(lambda: parse_needrestart(run_command(['needrestart', '-b', '-r', 'l'])))
     return {
         'version': 1,
@@ -216,12 +219,17 @@ def collect(run_command, root, now, previous, image_state=None):
             'security_pending': attempt(lambda: count_security(run_command(['apt', 'list', '--upgradable']))),
         },
         'packages': {name: attempt(lambda name=name: package_version(run_command, name)) for name in PACKAGES},
-        # Spec 2026-10-11 §10: what runs, and under which unit, next to what the controller deployed.
-        'image': {
-            'unit': attempt(lambda: unit_type(run_command)),
-            'running_digest': attempt(lambda: running_digest(run_command)),
-            'deployed_digest': attempt(lambda: deployed_digest(image_state)),
-        },
+    }
+
+
+def collect_image(run_command, now, image_state):
+    """Spec 2026-10-11 §10: what runs, and under which unit, next to what the controller deployed."""
+    return {
+        'version': 1,
+        'timestamp': now,
+        'unit': attempt(lambda: unit_type(run_command)),
+        'running_digest': attempt(lambda: running_digest(run_command)),
+        'deployed_digest': attempt(lambda: deployed_digest(image_state)),
     }
 
 
@@ -243,16 +251,16 @@ def prepare_directory(out_dir):
     os.chmod(out_dir, 0o755)
 
 
-def write_summary(out_dir, summary):
+def write_summary(out_dir, summary, name=SUMMARY):
     prepare_directory(out_dir)
-    fd, temporary = tempfile.mkstemp(dir=out_dir, prefix='.summary-')
+    fd, temporary = tempfile.mkstemp(dir=out_dir, prefix=f'.{name.split(".")[0]}-')
     try:
         with os.fdopen(fd, 'w') as stream:
             json.dump(summary, stream, sort_keys=True)
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temporary, 0o644)
-        os.replace(temporary, os.path.join(out_dir, SUMMARY))
+        os.replace(temporary, os.path.join(out_dir, name))
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -267,8 +275,10 @@ def main(argv=None):
     parser.add_argument('--root', default='/', help=argparse.SUPPRESS)  # tests only
     args = parser.parse_args(argv)
     prepare_directory(args.out_dir)  # root reads nothing from a directory it has not verified
-    summary = collect(run, Path(args.root), int(time.time()), read_previous(args.out_dir), args.image_state)
-    write_summary(args.out_dir, summary)
+    now = int(time.time())
+    write_summary(args.out_dir, collect(run, Path(args.root), now, read_previous(args.out_dir)))
+    # After the summary: whatever happens here, the summary of this run is already written.
+    write_summary(args.out_dir, collect_image(run, now, args.image_state), IMAGE)
     return 0
 
 

@@ -73,8 +73,8 @@ class Host(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def collect(self, overrides=None, previous=None, now=NOW, image_state=None):
-        return hp.collect(runner(overrides), self.root, now, previous, image_state)
+    def collect(self, overrides=None, previous=None, now=NOW):
+        return hp.collect(runner(overrides), self.root, now, previous)
 
 
 class TestCollect(Host):
@@ -88,7 +88,6 @@ class TestCollect(Host):
             'stale_services': [{'unit': 'code-server@ysi.service', 'since': NOW}],
             'unattended': {'last_run': STAMP, 'security_pending': 0},
             'packages': {'nodejs': '24.21.0-1nodesource1', 'cloudflared': '2026.10.0', 'litestream': '0.5.11'},
-            'image': {'unit': 'foreign', 'running_digest': None, 'deployed_digest': None},
         })
 
     def test_reboot_required_carries_its_mtime_and_unique_packages_in_order(self):
@@ -263,7 +262,9 @@ class TestImage(Host):
         return str(path)
 
     def image(self, overrides=None, image_state=None):
-        return self.collect(overrides, image_state=image_state)['image']
+        image = hp.collect_image(runner(overrides), NOW, image_state)
+        self.assertEqual((image.pop('version'), image.pop('timestamp')), (1, NOW))
+        return image
 
     def test_after_the_switchover_quadlet_with_both_digests(self):
         state = self.state(f'DEPLOYED_SHA={"a" * 40}\nDEPLOYED_DIGEST={D1}\nDEPLOYED_ID={"b" * 64}\nSETTLED_DIGEST={D2}\n')
@@ -285,13 +286,12 @@ class TestImage(Host):
         def run(argv):
             asked.append(tuple(argv))
             return table(argv)
-        hp.collect(run, self.root, NOW, None, None)
-        self.assertEqual([a for a in asked if a[0] in ('systemctl', 'podman')], [SHOW, INSPECT])
+        hp.collect_image(run, NOW, None)
+        self.assertEqual(asked, [SHOW, INSPECT])
 
-    def test_unreadable_podman_and_systemctl_are_null_and_the_rest_of_the_summary_stands(self):
-        s = self.collect({SHOW: RuntimeError('systemctl exited 1'), INSPECT: FileNotFoundError('podman')})
-        self.assertEqual((s['image'], s['livepatch']['state']),
-                         ({'unit': None, 'running_digest': None, 'deployed_digest': None}, 'nothing-to-apply'))
+    def test_unreadable_podman_and_systemctl_are_null(self):
+        self.assertEqual(self.image({SHOW: RuntimeError('systemctl exited 1'), INSPECT: FileNotFoundError('podman')}),
+                         {'unit': None, 'running_digest': None, 'deployed_digest': None})
 
     def test_systemctl_output_without_a_load_state_is_null(self):
         self.assertEqual(self.image({SHOW: 'SourcePath=\n'})['unit'], None)
@@ -349,19 +349,42 @@ class TestImage(Host):
         self.assertEqual((self.image(image_state=self.state(at_cap))['deployed_digest'],
                           self.image(image_state=self.state(at_cap + 'Y'))['deployed_digest']), (D1, None))
 
-    def test_main_passes_the_image_state_argument(self):
-        state = self.state(f'DEPLOYED_DIGEST={D1}\n')
-        argv = ['--out-dir', str(self.out), '--root', str(self.root), f'--image-state={state}']
-        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=NOW):
+    def main(self, *extra, overrides=None):
+        argv = ['--out-dir', str(self.out), '--root', str(self.root), *extra]
+        with patch.object(hp, 'run', runner(overrides)), patch.object(hp.time, 'time', return_value=NOW + 0.7):
             self.assertEqual(hp.main(argv), 0)
-        self.assertEqual(json.loads((self.out / 'summary.json').read_text())['image'],
-                         {'unit': 'foreign', 'running_digest': None, 'deployed_digest': D1})
+        return json.loads((self.out / 'summary.json').read_text()), json.loads((self.out / 'image.json').read_text())
+
+    def test_main_writes_image_json_next_to_the_summary_with_the_image_state_argument(self):
+        state = self.state(f'DEPLOYED_DIGEST={D1}\n')
+        _summary, image = self.main(f'--image-state={state}')
+        self.assertEqual(image, {'version': 1, 'timestamp': NOW, 'unit': 'foreign', 'running_digest': None,
+                                 'deployed_digest': D1})
+
+    def test_image_json_is_written_like_the_summary_0644_into_the_0755_directory(self):
+        self.main()
+        files = [os.stat(self.out / name) for name in ('summary.json', 'image.json')]
+        self.assertEqual([(stat.S_IMODE(f.st_mode), f.st_uid, f.st_nlink) for f in files],
+                         [(0o644, os.geteuid(), 1), (0o644, os.geteuid(), 1)])
+        self.assertEqual(sorted(os.listdir(self.out)), ['image.json', 'summary.json'])
 
     def test_main_with_the_unit_s_empty_default_reports_deployed_as_null(self):
-        argv = ['--out-dir', str(self.out), '--root', str(self.root), '--image-state=']
-        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=NOW):
-            self.assertEqual(hp.main(argv), 0)
-        self.assertEqual(json.loads((self.out / 'summary.json').read_text())['image']['deployed_digest'], None)
+        _summary, image = self.main('--image-state=')
+        self.assertEqual(image['deployed_digest'], None)
+
+    def test_the_summary_keeps_exactly_the_keys_it_had_before_image_json(self):
+        # Every bot release reads summary.json with a reader that refuses an unknown key: rollback safety.
+        summary, _image = self.main(overrides={SHOW: QUADLET_SHOW, INSPECT: D1})
+        self.assertEqual(sorted(summary), ['kernel', 'livepatch', 'packages', 'reboot_required', 'stale_services',
+                                           'timestamp', 'unattended', 'version'])
+
+    def test_the_written_files_are_the_fixtures_the_bot_s_readers_are_tested_on(self):
+        # src/jobs/host-patch.test.ts reads these two fixtures with the bot's readers (the summary one with the
+        # reader every release since #469 has): byte equality ties what the collector writes to what they accept.
+        state = self.state(f'DEPLOYED_DIGEST={D1}\n')
+        self.main(f'--image-state={state}', overrides={SHOW: QUADLET_SHOW, INSPECT: D1})
+        self.assertEqual([(self.out / name).read_text() for name in ('summary.json', 'image.json')],
+                         [fixture('collector-summary.json'), fixture('collector-image.json')])
 
 
 class TestUnitRuleIsTheHelpers(unittest.TestCase):
