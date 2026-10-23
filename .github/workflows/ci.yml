@@ -140,12 +140,16 @@ jobs:
             || { echo "::error::push said '$pushed', the registry says '$digest'"; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/attest-build-provenance@v2
+      # v4 also writes an artifact-metadata storage record by default: it needs an
+      # `artifact-metadata: write` permission this job does not grant, and the API is an org one.
+      # Off, the step does exactly what v2 did. It runs on a main push only, so a PR never shows it.
+      - uses: actions/attest-build-provenance@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           subject-name: ${{ env.REPOSITORY }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+          create-storage-record: false
 
       - name: Record digest
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

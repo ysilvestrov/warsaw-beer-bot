@@ -83,6 +83,8 @@ describe('ci.yml image job', () => {
     'subject-name: ${{ env.REPOSITORY }}',
     'subject-digest: ${{ steps.push.outputs.digest }}',
     'push-to-registry: true',
+    // attest v4 defaults it on and needs a permission the job does not have; the step only runs on main.
+    'create-storage-record: false',
   ])('has %s', (line) => {
     expect(trimmed).toContain(line);
   });
@@ -102,7 +104,7 @@ describe('ci.yml image job', () => {
       ['- name: Label content', null],
       ['- name: Log in to GHCR', MAIN_PUSH],
       ['- name: Push', MAIN_PUSH],
-      ['- uses: actions/attest-build-provenance@v2', MAIN_PUSH],
+      ['- uses: actions/attest-build-provenance@v4', MAIN_PUSH],
       ['- name: Record digest', MAIN_PUSH],
       ['- name: Audit production dependencies', null],
     ]);
