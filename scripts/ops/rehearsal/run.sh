@@ -27,12 +27,16 @@
 # P3: how long pull, audit and trial took in (а), from the kit's own events around each helper call.
 #
 # Exit: 0 every scenario PASS, production unchanged and everything removed; 1 anything else (a refusal
-# included: then nothing was created); 64 usage; 130 / 143 interrupted (after the cleanup).
+# included: then nothing was created); 64 usage; 129 / 130 / 143 hung up / interrupted / terminated (after
+# the cleanup).
 #
 # Seams (tests only; each defaults to the real thing): REHEARSAL_SUDO, REHEARSAL_SYSTEMCTL, REHEARSAL_PODMAN,
 # REHEARSAL_CURL, REHEARSAL_DF, REHEARSAL_CLOCK, REHEARSAL_CONTROLLER, REHEARSAL_SHIM, REHEARSAL_GIT_DIR,
 # REHEARSAL_ETC, REHEARSAL_PROD_DB, REHEARSAL_CONTAINERS_ROOT, REHEARSAL_EUID, REHEARSAL_POLL_S,
-# REHEARSAL_KEEPALIVE_S.
+# REHEARSAL_KEEPALIVE_S, REHEARSAL_TERM_GRACE_S, REHEARSAL_PR_LABELS_CMD.
+#
+# Every sudo is `sudo -n`: a ticket that lapsed is a loud failure, never a password prompt from a background
+# process group (which would stop it on SIGTTIN and hang the hour).
 set -uo pipefail
 export LC_ALL=C.UTF-8
 
@@ -54,6 +58,9 @@ CONTAINERS_ROOT="${REHEARSAL_CONTAINERS_ROOT:-/var/lib/containers}"
 RUN_EUID="${REHEARSAL_EUID:-$EUID}"
 POLL_S="${REHEARSAL_POLL_S:-2}"
 KEEPALIVE_S="${REHEARSAL_KEEPALIVE_S:-60}"
+# How long a TERMed controller gets to go (its helper call ends with it) before the KILL.
+TERM_GRACE_S="${REHEARSAL_TERM_GRACE_S:-30}"
+PR_LABELS_CMD="${REHEARSAL_PR_LABELS_CMD:-}"
 # The operator's own values must not steer a scenario: these are set per scenario, nowhere else.
 unset REHEARSAL_SICK_DIGEST REHEARSAL_PAUSE REHEARSAL_EVENTS REHEARSAL_NOTIFY_FILE
 
@@ -75,17 +82,26 @@ PROD_QUADLET="$ETC/containers/systemd/warsaw-beer-bot.container"
 BOT_USER=warsaw-beer-bot
 
 MIN_FREE_KIB=$(( 5 * 1024 * 1024 ))
-# How far into the watched window (г3) is killed: well inside it, so a tick that went on with it ends
-# measurably before a full WINDOW_S.
-KILL_IN_WATCHING_S=60
-# How long a TERMed controller gets to go (its helper call ends with it) before the KILL.
-TERM_GRACE_S=30
+# How far into the watched window (г3) is killed: past the controller's STARTUP_S (120 s), so the tick that
+# goes on with it counts a failed health at once, and far enough from WINDOW_S that a tick which went on with
+# the window ends measurably before a full one.
+KILL_IN_WATCHING_S=180
 ACCEPT='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'
 # Production's `current`, from the checkout's helper (read only: podman inspect and systemctl show).
 PROD_CURRENT_PY='import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wbb_image; sys.exit(wbb_image.main(["current"]))'
 
 now() { if [ -n "$CLOCK" ]; then "$CLOCK"; else date +%s; fi; }
 nap() { sleep "$POLL_S"; }
+
+# What a human runs when the kit was not (or not fully) removed: the same steps as the cleanup.
+manual_recipe() {
+  printf '  sudo systemctl stop %s\n' "$KIT_UNIT"
+  printf '  sudo rm -f %s %s\n' "$QUADLET" "$UNIT_FILE"
+  printf '  sudo systemctl daemon-reload\n'
+  printf '  sudo systemctl reset-failed %s\n' "$KIT_UNIT"
+  printf '  sudo podman rm -f --ignore %s\n' "$KIT_CONTAINER"
+  printf '  sudo rm -rf %s\n' "${KIT_ROOT:-/var/lib/wbb-rehearsal}"
+}
 
 # --- preconditions: reads only; each refusal leaves nothing behind (п.4) ------------------------------------
 refuse() {
@@ -111,10 +127,13 @@ KIT_PORT=$(python3 -I "$SHIM" --kit-port) || refuse "cannot read the kit port fr
 if ! [[ $KIT_ROOT =~ ^(/[A-Za-z0-9._-]+)+/wbb-rehearsal$ ]] || [[ $KIT_ROOT == *'/..'* ]] || [[ $KIT_ROOT == *'/./'* ]]; then
   refuse "the kit root from the shim is not an absolute path ending in /wbb-rehearsal: $KIT_ROOT"
 fi
-[[ $KIT_PORT =~ ^[1-9][0-9]{0,4}$ ]] || refuse "the kit port from the shim is not a port: $KIT_PORT"
+if ! [[ $KIT_PORT =~ ^[1-9][0-9]{0,4}$ ]] || [ "$KIT_PORT" -gt 65535 ]; then
+  refuse "the kit port from the shim is not a port: $KIT_PORT"
+fi
 
 if [ -e "$KIT_ROOT" ] || [ -L "$KIT_ROOT" ]; then
-  refuse "the kit root $KIT_ROOT exists — a previous rehearsal did not clean up; look at it and remove it by hand"
+  refuse "the kit root $KIT_ROOT exists — a previous rehearsal did not clean up. Look at it, then remove what it left:
+$(manual_recipe)"
 fi
 if [ -e "$PROD_QUADLET" ] || [ -L "$PROD_QUADLET" ]; then
   refuse "production's Quadlet file $PROD_QUADLET exists — the rehearsal is run before the switchover, never after"
@@ -127,13 +146,22 @@ unit_show=$("$SYSTEMCTL" show "$KIT_UNIT" -p LoadState,ActiveState 2>/dev/null) 
 if [ "$unit_show" != $'LoadState=not-found\nActiveState=inactive' ]; then
   refuse "systemd knows $KIT_UNIT (${unit_show//$'\n'/ }) — it must not exist before the rehearsal"
 fi
-"$SUDO" "$PODMAN" container exists "$KIT_CONTAINER" 2>/dev/null
+"$SUDO" -n "$PODMAN" container exists "$KIT_CONTAINER" 2>/dev/null
 rc=$?
 case "$rc" in
   1) ;;
   0) refuse "a container named $KIT_CONTAINER exists" ;;
   *) refuse "podman container exists $KIT_CONTAINER failed (exit $rc)" ;;
 esac
+# The deploy timer is stopped for the whole session (runbook step 2): a production tick must not run beside it.
+for u in wbb-autodeploy.timer wbb-autodeploy.service; do
+  st=$("$SYSTEMCTL" is-active "$u" 2>/dev/null)
+  case "$st" in
+    inactive|failed) ;;
+    '') refuse "systemctl is-active $u said nothing" ;;
+    *) refuse "$u is $st — stop it first: sudo systemctl disable --now wbb-autodeploy.timer, and wait for wbb-autodeploy.service" ;;
+  esac
+done
 if timeout 2 bash -c 'exec 3<>"/dev/tcp/127.0.0.1/$1"' _ "$KIT_PORT" 2>/dev/null; then
   refuse "the kit port $KIT_PORT is in use"
 fi
@@ -152,6 +180,29 @@ done
 [ "$S" != "$D" ] || refuse "S and D are the same commit"
 git_ merge-base --is-ancestor "$S" "$D" 2>/dev/null || refuse "S ${S:0:12} is not an ancestor of D ${D:0:12}"
 git_ merge-base --is-ancestor "$D" origin/main 2>/dev/null || refuse "D ${D:0:12} is not on origin/main (git fetch first)"
+
+# The PRs of S..D, read as the controller reads them (its _pr_labels_default: one line per PR, number<TAB>labels).
+# A contract label in the range makes the controller refuse both directions without --ack-incompatible, and with
+# it every window is manual — (б)–(ґ) would prove nothing of the automatic rollback.
+_pr_labels_default() {
+  timeout 60 gh api "repos/${GH_REPO}/commits/$1/pulls" --jq '.[] | "\(.number)\t\(.labels | map(.name) | join(","))"'
+}
+[ -n "$PR_LABELS_CMD" ] || PR_LABELS_CMD=_pr_labels_default
+commits=$(git_ rev-list "${S}..${D}") || refuse "git rev-list ${S:0:12}..${D:0:12} failed"
+contract=()
+while IFS= read -r c; do
+  [ -n "$c" ] || continue
+  out=$("$PR_LABELS_CMD" "$c" 2>/dev/null) || refuse "could not read the PR labels of ${c:0:12} (gh api)"
+  while IFS=$'\t' read -r pr labels; do
+    [ -n "$pr" ] || continue
+    for l in rollback:unsafe migration:contract; do
+      case ",$labels," in *",$l,"*) contract+=("#$pr $l") ;; esac
+    done
+  done <<< "$out"
+done <<< "$commits"
+if [ "${#contract[@]}" -gt 0 ]; then
+  refuse "the range ${S:0:12}..${D:0:12} holds $(printf '%s, ' "${contract[@]}" | sed 's/, $//') — the controller deploys it only with --ack-incompatible, in manual windows; pick S and D with no contract PR between them"
+fi
 
 # The tag <sha> → digest, as the controller resolves it, and the image's wbb.content from its config —
 # all anonymous registry reads; nothing is pulled. Prints "<digest> <content>"; 3 = no such tag.
@@ -197,8 +248,9 @@ fi
 # Production as `current` and systemd see it: the same text before and after, or the rehearsal FAILS.
 prod_fingerprint() {
   local cur unit
-  cur=$("$SUDO" python3 -I -c "$PROD_CURRENT_PY" "$HELPER_DIR" 2>&1) || return 1
-  unit=$("$SYSTEMCTL" show "$PROD_UNIT" -p LoadState,ActiveState,SubState,MainPID 2>&1) || return 1
+  cur=$("$SUDO" -n python3 -I -c "$PROD_CURRENT_PY" "$HELPER_DIR" 2>/dev/null) || return 1
+  unit=$("$SYSTEMCTL" show "$PROD_UNIT" -p LoadState,ActiveState,SubState,MainPID 2>/dev/null) || return 1
+  [ -n "$cur" ] && [ -n "$unit" ] || return 1
   printf '%s\n%s\n' "$cur" "$unit"
 }
 PROD_BEFORE=$(prod_fingerprint) || refuse "could not read what production runs (the helper's current, systemctl show $PROD_UNIT)"
@@ -207,7 +259,7 @@ PROD_BEFORE=$(prod_fingerprint) || refuse "could not read what production runs (
 SCENARIOS=(a b c d1 d2 d3 e)
 declare -A TITLE=(
   [a]="(а) bootstrap S"
-  [b]="(б) deploy D in an auto window"
+  [b]="(б) deploy D"
   [c]="(в) a sick candidate (S) is rolled back to D"
   [d1]="(г) killed before the activation: the next tick cancels the window"
   [d2]="(г) killed after the activation, before watching: the next tick watches a full window"
@@ -234,6 +286,8 @@ stop_controller() {
     wait "$pid" 2>/dev/null
     return 0
   fi
+  # A member stopped (SIGTTIN, SIGTSTP) takes its TERM only once it runs again.
+  kill -CONT -- "-$pid" 2>/dev/null
   # The leader is reaped here (a zombie would keep its group alive); a leader that ignores TERM gets the KILL.
   set -m
   ( sleep "$TERM_GRACE_S"; kill -KILL -- "-$pid" ) </dev/null >/dev/null 2>&1 &
@@ -250,7 +304,45 @@ stop_controller() {
   wait "$killer" 2>/dev/null
 }
 
+# The controller bounds its own calls with `timeout`, and timeout makes each one a process group of its own: the
+# group kill above misses them — the snapshot under `timeout sudo -u warsaw-beer-bot … db-snapshot.sh`, a git
+# clone into the work directory. Whatever still names the kit root or the work directory in its argv is the
+# kit's: TERM (and CONT), the same grace, then KILL — as root, since some of it runs as the bot.
+# A pkill -f regex for a path that never matches the argv of the pkill (or of its sudo) that carries it.
+argv_pattern() {
+  local p="$1"
+  printf '[%s]%s' "${p:0:1}" "$(printf '%s' "${p:1}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+}
+kill_strays() {
+  local pats=() p waited=0 left
+  if [ -n "$KIT_ROOT" ]; then pats+=("$(argv_pattern "$KIT_ROOT")"); fi
+  if [ -n "$WORK" ]; then pats+=("$(argv_pattern "$WORK")"); fi
+  for p in "${pats[@]}"; do
+    "$SUDO" -n pkill -TERM -f -- "$p" 2>/dev/null
+    "$SUDO" -n pkill -CONT -f -- "$p" 2>/dev/null
+  done
+  while :; do
+    left=0
+    for p in "${pats[@]}"; do
+      if "$SUDO" -n pgrep -f -- "$p" >/dev/null 2>&1; then left=1; fi
+    done
+    [ "$left" = 1 ] && [ "$waited" -lt "$TERM_GRACE_S" ] || break
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  [ "$left" = 1 ] || return 0
+  for p in "${pats[@]}"; do "$SUDO" -n pkill -KILL -f -- "$p" 2>/dev/null; done
+  sleep 1
+  for p in "${pats[@]}"; do
+    if "$SUDO" -n pgrep -f -- "$p" >/dev/null 2>&1; then return 1; fi
+  done
+}
+
 CLEANUP_PROBLEMS=()
+cleanup_failed() { # <what> <the command a human runs instead>
+  CLEANUP_PROBLEMS+=("$1")
+  echo "CLEANUP FAILED: $1 — $2"
+}
 cleanup() {
   local rc
   [ "$CLEANED" = 0 ] || return 0
@@ -260,24 +352,33 @@ cleanup() {
   P3_TEXT="$(p3_line pull; p3_line audit; p3_line trial)"$'\n'
   if [ -n "$KEEPALIVE_PID" ]; then kill -KILL -- "-$KEEPALIVE_PID" 2>/dev/null; wait "$KEEPALIVE_PID" 2>/dev/null; fi
   echo "==> cleanup"
-  "$SUDO" "$SYSTEMCTL" stop "$KIT_UNIT" 2>/dev/null
+  "$SUDO" -n "$SYSTEMCTL" stop "$KIT_UNIT" 2>/dev/null
   rc=$?
   # 5: the unit is not loaded — nothing to stop.
-  if [ "$rc" != 0 ] && [ "$rc" != 5 ]; then CLEANUP_PROBLEMS+=("systemctl stop $KIT_UNIT failed (exit $rc)"); fi
-  "$SUDO" rm -f "$QUADLET" "$UNIT_FILE" || CLEANUP_PROBLEMS+=("rm -f $QUADLET $UNIT_FILE failed")
-  "$SUDO" "$SYSTEMCTL" daemon-reload || CLEANUP_PROBLEMS+=("systemctl daemon-reload failed")
-  "$SUDO" "$SYSTEMCTL" reset-failed "$KIT_UNIT" 2>/dev/null || true
-  "$SUDO" "$PODMAN" rm -f --ignore "$KIT_CONTAINER" >/dev/null || CLEANUP_PROBLEMS+=("podman rm -f $KIT_CONTAINER failed")
-  "$SUDO" rm -rf "$KIT_ROOT" || CLEANUP_PROBLEMS+=("rm -rf $KIT_ROOT failed")
-  if [ -n "$WORK" ]; then rm -rf "$WORK" || CLEANUP_PROBLEMS+=("rm -rf $WORK failed"); fi
-  # What is left is checked, not assumed. The images of S and D stay: they are main's, prune removes them.
+  if [ "$rc" != 0 ] && [ "$rc" != 5 ]; then cleanup_failed "systemctl stop $KIT_UNIT (exit $rc)" "sudo systemctl stop $KIT_UNIT"; fi
+  kill_strays || cleanup_failed "processes naming $KIT_ROOT or $WORK survived the KILL" "sudo pgrep -af $KIT_ROOT; sudo pgrep -af $WORK"
+  "$SUDO" -n rm -f "$QUADLET" "$UNIT_FILE" || cleanup_failed "rm -f $QUADLET $UNIT_FILE" "sudo rm -f $QUADLET $UNIT_FILE"
+  "$SUDO" -n "$SYSTEMCTL" daemon-reload || cleanup_failed "systemctl daemon-reload" "sudo systemctl daemon-reload"
+  "$SUDO" -n "$SYSTEMCTL" reset-failed "$KIT_UNIT" 2>/dev/null
+  "$SUDO" -n "$PODMAN" rm -f --ignore "$KIT_CONTAINER" >/dev/null \
+    || cleanup_failed "podman rm -f $KIT_CONTAINER" "sudo podman rm -f --ignore $KIT_CONTAINER"
+  "$SUDO" -n rm -rf "$KIT_ROOT" || cleanup_failed "rm -rf $KIT_ROOT" "sudo rm -rf $KIT_ROOT"
+  if [ -n "$WORK" ]; then rm -rf "$WORK" || cleanup_failed "rm -rf $WORK" "rm -rf $WORK"; fi
+  # What is left is checked, not assumed. The images S and D are not the kit's: the settles' prune already
+  # removed all but the last settled one, and the next prune of production removes that.
   for f in "$QUADLET" "$UNIT_FILE" "$KIT_ROOT"; do
-    if [ -e "$f" ] || [ -L "$f" ]; then CLEANUP_PROBLEMS+=("$f is still there"); fi
+    if [ -e "$f" ] || [ -L "$f" ]; then cleanup_failed "$f is still there" "sudo rm -rf $f"; fi
   done
-  "$SUDO" "$PODMAN" container exists "$KIT_CONTAINER" 2>/dev/null
-  if [ "$?" != 1 ]; then CLEANUP_PROBLEMS+=("the container $KIT_CONTAINER is still there (or podman could not say)"); fi
+  "$SUDO" -n "$PODMAN" container exists "$KIT_CONTAINER" 2>/dev/null
+  if [ "$?" != 1 ]; then
+    cleanup_failed "the container $KIT_CONTAINER is still there (or podman could not say)" "sudo podman rm -f --ignore $KIT_CONTAINER"
+  fi
   if [ "$("$SYSTEMCTL" show "$KIT_UNIT" -p LoadState,ActiveState 2>/dev/null)" != $'LoadState=not-found\nActiveState=inactive' ]; then
-    CLEANUP_PROBLEMS+=("systemd still knows $KIT_UNIT")
+    cleanup_failed "systemd still knows $KIT_UNIT" "sudo systemctl stop $KIT_UNIT; sudo systemctl daemon-reload; sudo systemctl reset-failed $KIT_UNIT"
+  fi
+  if [ "${#CLEANUP_PROBLEMS[@]}" -gt 0 ]; then
+    echo "CLEANUP FAILED — what the cleanup does, to run by hand:"
+    manual_recipe
   fi
 }
 
@@ -297,7 +398,7 @@ summary() {
   if [ -n "$INTERRUPTED" ] && [ -n "$CURRENT_SC" ] && [ -z "${VERDICT[$CURRENT_SC]:-}" ]; then
     VERDICT[$CURRENT_SC]="FAIL — interrupted (SIG$INTERRUPTED)"
   fi
-  prod_after=$(prod_fingerprint) || prod_after="(could not be read)"
+  prod_after=$(prod_fingerprint) || prod_after=""
   echo "=== rehearsal summary ==="
   echo "S=$S D=$D"
   if [ -n "$SETUP_FAILED" ]; then
@@ -320,7 +421,13 @@ summary() {
     ok=0
     echo "FAIL  cleanup — $(IFS=';'; printf '%s' "${CLEANUP_PROBLEMS[*]}" | sed 's/;/; /g')"
   fi
-  if [ "$prod_after" = "$PROD_BEFORE" ]; then
+  if [ -z "$prod_after" ]; then
+    ok=0
+    echo "FAIL  production unchanged — could not read production after the rehearsal"
+    echo "!!! COULD NOT READ PRODUCTION AFTER THE REHEARSAL — look at $PROD_UNIT now !!!"
+    echo "before:"
+    sed 's/^/  /' <<< "$PROD_BEFORE"
+  elif [ "$prod_after" = "$PROD_BEFORE" ]; then
     pass=$(( pass + 1 ))
     echo "PASS  production unchanged"
   else
@@ -347,10 +454,10 @@ on_exit() {
   local code=1
   # A second Ctrl-C must not cut the cleanup short.
   trap - EXIT
-  trap '' INT TERM
+  trap '' INT TERM HUP
   cleanup
   if summary; then code=0; fi
-  case "$INTERRUPTED" in INT) code=130 ;; TERM) code=143 ;; esac
+  case "$INTERRUPTED" in HUP) code=129 ;; INT) code=130 ;; TERM) code=143 ;; esac
   exit "$code"
 }
 on_signal() {
@@ -358,10 +465,13 @@ on_signal() {
   exit 1
 }
 
+echo "==> the rehearsal takes about an hour: run it inside tmux or screen — a dropped SSH session hangs it up,"
+echo "    and it then only cleans up and fails"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/wbb-rehearsal.XXXXXX") || refuse "mktemp -d failed"
 trap on_exit EXIT
 trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
+trap 'on_signal HUP' HUP
 P3_EVENTS="$WORK/events-a"
 
 # One ticket-refreshing loop for the hour: the controller's sudo calls must never meet a password prompt.
@@ -386,12 +496,12 @@ set +m
 setup() {
   local bin="$WORK/bin" q
   echo "==> setup: $KIT_ROOT, a copy of $PROD_DB, the controller's state in $WORK"
-  "$SUDO" install -d -m 0755 -o root -g root "$KIT_ROOT" "$KIT_ROOT/bin" || return 1
-  "$SUDO" install -d -m 0700 -o root -g root "$KIT_ROOT/scratch" || return 1
-  "$SUDO" install -d -m 0750 -o "$BOT_USER" -g "$BOT_USER" "$KIT_ROOT/data" "$KIT_ROOT/data/deploy-snapshots" || return 1
+  "$SUDO" -n install -d -m 0755 -o root -g root "$KIT_ROOT" "$KIT_ROOT/bin" || return 1
+  "$SUDO" -n install -d -m 0700 -o root -g root "$KIT_ROOT/scratch" || return 1
+  "$SUDO" -n install -d -m 0750 -o "$BOT_USER" -g "$BOT_USER" "$KIT_ROOT/data" "$KIT_ROOT/data/deploy-snapshots" || return 1
   # The bot cannot read the operator's checkout: the snapshot script runs from a root-owned copy in the kit.
-  "$SUDO" install -m 0755 -o root -g root "$SNAPSHOT_SRC" "$KIT_ROOT/bin/db-snapshot.sh" || return 1
-  "$SUDO" -u "$BOT_USER" bash -lc '"$0" "$@"' "$KIT_ROOT/bin/db-snapshot.sh" snapshot "$PROD_DB" "$KIT_ROOT/data/bot.db" \
+  "$SUDO" -n install -m 0755 -o root -g root "$SNAPSHOT_SRC" "$KIT_ROOT/bin/db-snapshot.sh" || return 1
+  "$SUDO" -n -u "$BOT_USER" bash -lc '"$0" "$@"' "$KIT_ROOT/bin/db-snapshot.sh" snapshot "$PROD_DB" "$KIT_ROOT/data/bot.db" \
     >/dev/null || return 1
 
   mkdir -p "$bin" "$WORK/state/wbb-autodeploy" "$WORK/data" "$WORK/tmp" "$WORK/logs" || return 1
@@ -400,7 +510,8 @@ setup() {
   {
     echo '#!/usr/bin/env bash'
     echo '# The rehearsal kit'"'"'s WBB_IMAGE_CMD, written by scripts/ops/rehearsal/run.sh.'
-    printf 'SUDO=%q\nSHIM=%q\nCLOCK=%q\nPAUSED=%q\nOUT=%q\n' "$SUDO" "$SHIM" "$CLOCK" "$WORK/paused" "$WORK/tmp"
+    printf 'SUDO=%q\nSHIM=%q\nCLOCK=%q\nPAUSED=%q\nOUT=%q\nLAPSED=%q\n' "$SUDO" "$SHIM" "$CLOCK" "$WORK/paused" "$WORK/tmp" \
+      "$WORK/sudo-lapsed"
     cat <<'WRAPPER'
 set -u
 verb="${1:-}"
@@ -410,7 +521,7 @@ if [ "${REHEARSAL_PAUSE:-}" = "before-$verb" ]; then
   printf 'before-%s\n' "$verb" > "$PAUSED"
   exec sleep 86400
 fi
-cmd=("$SUDO")
+cmd=("$SUDO" -n)
 # sudo resets the environment: the sick digest goes on its command line, and only when a scenario set it.
 if [ -n "${REHEARSAL_SICK_DIGEST:-}" ]; then cmd+=("REHEARSAL_SICK_DIGEST=$REHEARSAL_SICK_DIGEST"); fi
 cmd+=(python3 -I "$SHIM" "$@")
@@ -421,6 +532,8 @@ err=$(mktemp "$OUT/helper.XXXXXX")
 "${cmd[@]}" > "$out" 2> "$err"
 rc=$?
 printf '%s end %s %s\n' "$(now)" "$verb" "$rc" >> "$REHEARSAL_EVENTS"
+# sudo -n refused for want of a ticket: the scenario FAILs with that reason, not as a verdict of the controller's.
+if [ "$rc" != 0 ] && grep -q 'a password is required' "$err"; then : > "$LAPSED"; fi
 if [ "${REHEARSAL_PAUSE:-}" = "after-$verb" ]; then
   printf 'after-%s\n' "$verb" > "$PAUSED"
   exec sleep 86400
@@ -509,7 +622,7 @@ check() { # <what> <actual> <expected>
 # What the kit's unit runs, as the helper and systemd say: "<quadlet> <container digest> <unit> <Active>/<Sub>".
 kit_facts() {
   local cur kind q i d u act sub line
-  cur=$("$SUDO" python3 -I "$SHIM" current 2>/dev/null) || { echo "current-failed"; return 0; }
+  cur=$("$SUDO" -n python3 -I "$SHIM" current 2>/dev/null) || { echo "current-failed"; return 0; }
   read -r kind q i d u <<< "$cur"
   while IFS= read -r line; do
     case "$line" in ActiveState=*) act="${line#*=}" ;; SubState=*) sub="${line#*=}" ;; esac
@@ -529,6 +642,9 @@ count() { # <file> <fixed text>: how many lines carry it
   grep -cF -- "$2" "$1" 2>/dev/null
 }
 verdict() {
+  if [ -e "$WORK/sudo-lapsed" ]; then
+    WHY+=("the sudo ticket lapsed (sudo -n refused a helper call) — run sudo -v and the rehearsal again")
+  fi
   if [ "${#WHY[@]}" = 0 ]; then
     VERDICT[$CURRENT_SC]=PASS
   else
@@ -550,7 +666,7 @@ sc_b() {
   ctl_wait
   check exit "$CTL_RC" 0
   settled_on "$D" "$DIG_D"
-  check "an auto window" "$(count "$WORK/notify-b" "is live and settled")" 1
+  check "the settled notice" "$(count "$WORK/notify-b" "is live and settled")" 1
 }
 sc_c() {
   ctl_start c "" "$DIG_S" --manual deploy --target "$S" --force
@@ -570,6 +686,8 @@ sc_d1() {
   fi
   check "WINDOW_PHASE at the kill" "$(state_get WINDOW_PHASE)" activating
   check "what runs at the kill" "$(kit_facts)" "$(runs "$DIG_D")"
+  # A run that was not where the scenario needs it proves nothing more: no tick on top of it.
+  [ "${#WHY[@]}" = 0 ] || return 0
   ctl_start d1-tick "" ""
   ctl_wait
   check "the tick's exit" "$CTL_RC" 0
@@ -585,6 +703,8 @@ sc_d2() {
   fi
   check "WINDOW_PHASE at the kill" "$(state_get WINDOW_PHASE)" activating
   check "what runs at the kill" "$(kit_facts)" "$(runs "$DIG_S")"
+  # A run that was not where the scenario needs it proves nothing more: no tick on top of it.
+  [ "${#WHY[@]}" = 0 ] || return 0
   t0=$(now)
   ctl_start d2-tick "" ""
   ctl_wait
@@ -612,6 +732,8 @@ sc_d3() {
   done
   ctl_kill
   check "what runs at the kill" "$(kit_facts)" "$(runs "$DIG_D")"
+  # A run that was not where the scenario needs it proves nothing more: no tick on top of it.
+  [ "${#WHY[@]}" = 0 ] || return 0
   t0=$(now)
   ctl_start d3-tick "" ""
   ctl_wait
@@ -630,18 +752,20 @@ sc_e() {
     return 0
   fi
   check "WINDOW_PHASE at the kill" "$(state_get WINDOW_PHASE)" activating
+  # A run that was not where the scenario needs it proves nothing more: no tick on top of it.
+  [ "${#WHY[@]}" = 0 ] || return 0
   # A unit file in /etc/systemd/system shadows the one Quadlet generates: not our unit any more.
   printf '[Unit]\nDescription=rehearsal (scenario ґ): a unit that is not the Quadlet one\n\n[Service]\nExecStart=/bin/sleep infinity\n' \
-    | "$SUDO" tee "$UNIT_FILE" >/dev/null
-  "$SUDO" "$SYSTEMCTL" daemon-reload
+    | "$SUDO" -n tee "$UNIT_FILE" >/dev/null
+  "$SUDO" -n "$SYSTEMCTL" daemon-reload
   check "what current says of the unit" "$(kit_facts | awk '{ print $3 }')" foreign
   ctl_start e-tick "" ""
   ctl_wait
   check "the tick's exit" "$CTL_RC" 3
   incident=$(state_get INCIDENT)
   check "INCIDENT" "$(case "$incident" in "$S $DIG_S "*"(unit=foreign)"*) echo "open, unit=foreign" ;; *) echo "$incident" ;; esac)" "open, unit=foreign"
-  "$SUDO" rm -f "$UNIT_FILE"
-  "$SUDO" "$SYSTEMCTL" daemon-reload
+  "$SUDO" -n rm -f "$UNIT_FILE"
+  "$SUDO" -n "$SYSTEMCTL" daemon-reload
 }
 
 if ! setup; then
