@@ -48,6 +48,7 @@ shift
 if [ "$1" = -u ]; then exit 0; fi
 if [ "$1" = python3 ] && [ "$3" = -c ]; then cat "$STUB_DIR/prod-current"; exit "$(cat "$STUB_DIR/prod-current-rc")"; fi
 if [ -e "$STUB_DIR/lapsed" ]; then echo 'sudo: a password is required' >&2; exit 1; fi
+if [ -e "$STUB_DIR/warns" ]; then echo 'sudo: unable to resolve host stub: Name or service not known' >&2; fi
 while [[ \${1:-} == *=* ]]; do export "$1"; shift; done
 if [ "$1" = install ]; then
   args=()
@@ -298,8 +299,8 @@ const CLEANUP = [
   'podman container exists wbb-rehearsal',
   'systemctl show wbb-rehearsal.service -p LoadState,ActiveState',
 ];
-// The stray-process sweep (pkill/pgrep by the kit's paths) is checked on its own, below.
-const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n p(kill|grep) /.test(l));
+// The stray-process sweep (pkill, and pgrep reporting its own exit, by the kit's paths) is checked on its own, below.
+const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n (pkill |sh -c pgrep )/.test(l));
 const PROD_READ = [
   `sudo -n python3 -I -c import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wbb_image; sys.exit(wbb_image.main(["current"])) <R>/deploy/image/helper`,
   'systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState',
@@ -630,6 +631,15 @@ ${expected(w)[2]}` });
       ['CLEANUP FAILED: processes naming <T>/kit/wbb-rehearsal or <W> survived the KILL — sudo pgrep -af <T>/kit/wbb-rehearsal; sudo pgrep -af <W>']]);
   });
 
+  // #911 AI review: a warning of sudo's on stderr is not a stray; only pgrep's own report counts.
+  it('sudo warns on stderr while pgrep finds nothing: the sweep passes, no CLEANUP FAILED', () => {
+    const w = world();
+    // From the last controller run on, the stub sudo says what a sudo on a host it cannot resolve says, then runs the command.
+    script(w, { ...expected(w), 11: `: > "$STUB_DIR/warns"\n${expected(w)[11]}` });
+    const r = run(w);
+    expect([r.code, r.out.split('\n').filter((l) => l.startsWith('CLEANUP FAILED'))]).toEqual([0, []]);
+  });
+
   it('a process the controller left in a group of its own (timeout …) and naming the kit is killed before the kit goes', () => {
     const w = world();
     // As the controller's `timeout … sudo -u warsaw-beer-bot … db-snapshot.sh` would leave it: timeout is a group leader.
@@ -644,7 +654,7 @@ ${expected(w)[1]}` });
       expect([r.code, alive(stray), log(w).filter((l) => l.includes(pattern)).map((l) => l.split(pattern).join('<P>'))]).toEqual([0, false, [
         'sudo -n pkill -TERM -f -- <P>',
         'sudo -n pkill -CONT -f -- <P>',
-        'sudo -n pgrep -f -- <P>',
+        'sudo -n sh -c pgrep -f -- "$1" >/dev/null; echo "pgrep exit $?" sh <P>',
       ]]);
     } finally {
       // timeout leads a process group of its own: the group goes, its sleeping python with it.

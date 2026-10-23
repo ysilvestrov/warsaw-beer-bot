@@ -357,14 +357,12 @@ argv_pattern() {
   local p="$1"
   printf '[%s]%s' "${p:0:1}" "$(printf '%s' "${p:1}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
 }
-# A pgrep that found nothing says 1 and nothing else. Any other answer — found (0), cut at its limit (124),
-# or sudo refusing this very call (it says 1 too, and says why on stderr: no ticket, or not allowed) — is
-# not proof that nothing is left, so the cleanup goes on as if something were (#911 AI review).
+# Only pgrep itself, run as root, can say that nothing is left: it reports its own exit on stdout, after
+# sudo let it run. "pgrep exit 1" is nothing found; anything else — found (0), cut at its limit, sudo
+# refusing the call (which exits 1 as well, with no report), a warning of sudo's on stderr notwithstanding —
+# is not proof, so the cleanup goes on as if something were (#911 AI review).
 stray_left() { # <pattern>
-  local err rc
-  err=$(bounded "$SUDO" -n pgrep -f -- "$1" 2>&1 >/dev/null)
-  rc=$?
-  [ "$rc" != 1 ] || [ -n "$err" ]
+  [ "$(bounded "$SUDO" -n sh -c 'pgrep -f -- "$1" >/dev/null; echo "pgrep exit $?"' sh "$1" 2>/dev/null)" != 'pgrep exit 1' ]
 }
 kill_strays() {
   local pats=() p waited=0 left
