@@ -83,7 +83,7 @@
    - `running_digest` з `podman container inspect warsaw-beer-bot`;
    - `deployed_digest` з `image-state.env` оператора: шлях задається аргументом збирача, а встановлювач збирача знає оператора.
 
-   Те, що не вдалося прочитати, записується як `null`, а не як помилка. Шлях `image-state.env` інсталятор пише drop-in-ом (`wbb-host-patch.service.d/image-state.conf`), тож встановлений юніт байт у байт той, що в репо. Бот читає `image.json` окремо й необов'язково (нема, застарів > 3 год, битий → рядка нема; на вердикт «Інфраструктури» не впливає) і пише футер: `unit=quadlet · образ <12 hex> (= задеплоєного | ≠ задеплоєного | задеплоєний невідомий)`, `unit=quadlet · образ ?`, `unit=flat (до перемикання)`, `unit=absent`, `unit=?`.
+   Те, що не вдалося прочитати, записується як `null`, а не як помилка. Шлях `image-state.env` інсталятор пише drop-in-ом (`wbb-host-patch.service.d/image-state.conf`), тож встановлений юніт байт у байт той, що в репо. Бот читає `image.json` окремо й необов'язково (нема, застарів > 3 год, битий → рядка нема; на вердикт «Інфраструктури» не впливає) і пише футер: `unit=quadlet · образ <12 hex> (= задеплоєного | ≠ задеплоєного | вікно деплою | задеплоєний невідомий)`, `unit=quadlet · образ ?`, `unit=absent`, `unit=?`. `foreign` без `DEPLOYED_DIGEST` — `unit=flat (до перемикання)`; з ним — `⚠️ unit=foreign · образ …` (після перемикання чужий юніт — стан інциденту, не «до перемикання»). `image.json` v2 несе ще `window_digest`/`window_prev_digest` з `WINDOW_DIGEST`/`WINDOW_PREV_DIGEST`: образ вікна показується як «вікно деплою», а не хибне `≠`; бот приймає v1 і v2.
 
    Зміна збирача — встановлена копія, тож hold. Його інсталятор (`install-host-patch-collector.sh`) — частина кроків PR.
 6. **Перевірка перед сеансом** `scripts/ops/switchover-preflight.sh`. Read-only, запускає оператор. Перевіряє:
@@ -99,7 +99,9 @@
    - вільно ≥ 5 GiB;
    - **старі копії репо без захисту `state.env`** (пошук §8 п.3).
 
-   Друкує PASS/FAIL по кожному пункту і вихід 0 лише тоді, коли все PASS.
+   - нічого не лишилось від репетиції (корінь набору, юніт, Quadlet-файл, контейнер `wbb-rehearsal`).
+
+   Друкує PASS / EXPECTED / FAIL по кожному пункту і вихід 0 лише тоді, коли FAIL нема. Як збудовано (Task 4): `HEAD` має **дорівнювати** голові `origin/main` (сеанс bootstrap-ить щойно змердженe), голова читається `git ls-remote`, без fetch; `state.env` перевіряється правилами й списками ключів самого `migrate-state-to-image.sh` (не `--check-state`, той валідує `image-state.env`); перевірка образу бере `_resolve_default`/`_attest_default` дослівно з контролера; preflight нічого не пише (тест порівнює дерево до/після).
 7. **Runbook у README** («Switchover session (stage «в»)»):
    1. мердж В1 на початку сеансу;
    2. `sudo systemctl disable --now wbb-autodeploy.timer`;
