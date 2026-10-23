@@ -183,24 +183,34 @@ def running_digest(run_command):
     return out
 
 
-def deployed_digest(path):
-    """DEPLOYED_DIGEST of the operator's image-state.env, parsed line by line and never sourced.
+# The digests of image-state.env the status reads (deploy/autodeploy.sh STATE_KEYS). WINDOW_DIGEST is the
+# candidate of an open deploy window, WINDOW_PREV_DIGEST what ran before it: inside a window DEPLOYED_DIGEST
+# names the candidate only once its activation is recorded, and the settled image again only once a rollback is.
+STATE_DIGESTS = ('DEPLOYED_DIGEST', 'WINDOW_DIGEST', 'WINDOW_PREV_DIGEST')
 
-    Root reads a file in the operator's home: a symlink, a FIFO or anything but a small regular file is not
-    followed or waited on. A key that is missing, repeated or not a digest is unreadable."""
+
+def read_image_state(path):
+    """The text of the operator's image-state.env, read but never sourced.
+
+    Root reads a file in the operator's home: a symlink, a FIFO, a tty or anything but a small regular file is not
+    followed, waited on or taken as a controlling terminal."""
     if not path:
         raise ValueError('no image-state.env path')
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
     with os.fdopen(fd, 'rb') as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError(f'{path} is not a regular file')
         data = stream.read(STATE_CAP + 1)
     if len(data) > STATE_CAP:
         raise ValueError(f'{path} is larger than {STATE_CAP} bytes')
-    values = [line[len('DEPLOYED_DIGEST='):] for line in data.decode('utf-8').split('\n')
-              if line.startswith('DEPLOYED_DIGEST=')]
+    return data.decode('utf-8')
+
+
+def state_digest(text, key):
+    """The value of `key`, parsed line by line; a key that is missing, repeated or not a digest is unreadable."""
+    values = [line[len(key) + 1:] for line in text.split('\n') if line.startswith(f'{key}=')]
     if len(values) != 1 or not DIGEST.fullmatch(values[0]):
-        raise ValueError(f'{path} names no single DEPLOYED_DIGEST')
+        raise ValueError(f'no single {key}')
     return values[0]
 
 
@@ -224,12 +234,17 @@ def collect(run_command, root, now, previous):
 
 def collect_image(run_command, now, image_state):
     """Spec 2026-10-11 §10: what runs, and under which unit, next to what the controller deployed."""
+    text = attempt(lambda: read_image_state(image_state))
+    digests = {key: None if text is None else attempt(lambda key=key: state_digest(text, key)) for key in STATE_DIGESTS}
     return {
-        'version': 1,
+        # 2: the window's digests (version 1 had none; the bot reads both).
+        'version': 2,
         'timestamp': now,
         'unit': attempt(lambda: unit_type(run_command)),
         'running_digest': attempt(lambda: running_digest(run_command)),
-        'deployed_digest': attempt(lambda: deployed_digest(image_state)),
+        'deployed_digest': digests['DEPLOYED_DIGEST'],
+        'window_digest': digests['WINDOW_DIGEST'],
+        'window_prev_digest': digests['WINDOW_PREV_DIGEST'],
     }
 
 

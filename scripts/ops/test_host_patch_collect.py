@@ -28,6 +28,8 @@ QUADLET_SHOW = ('FragmentPath=/run/systemd/generator/warsaw-beer-bot.service\nLo
                 'SourcePath=/etc/containers/systemd/warsaw-beer-bot.container\n')
 FLAT_SHOW = 'FragmentPath=/etc/systemd/system/warsaw-beer-bot.service\nLoadState=loaded\nSourcePath=\n'
 ABSENT_SHOW = 'FragmentPath=\nLoadState=not-found\nSourcePath=\n'
+NO_WINDOW = {'window_digest': None, 'window_prev_digest': None}
+FIXTURE_STATE = f'DEPLOYED_DIGEST={D1}\nWINDOW_DIGEST={D2}\nWINDOW_PREV_DIGEST={D1}\nWINDOW_PHASE=activating\n'
 
 
 def fixture(name):
@@ -263,21 +265,35 @@ class TestImage(Host):
 
     def image(self, overrides=None, image_state=None):
         image = hp.collect_image(runner(overrides), NOW, image_state)
-        self.assertEqual((image.pop('version'), image.pop('timestamp')), (1, NOW))
+        self.assertEqual((image.pop('version'), image.pop('timestamp')), (2, NOW))
         return image
 
     def test_after_the_switchover_quadlet_with_both_digests(self):
         state = self.state(f'DEPLOYED_SHA={"a" * 40}\nDEPLOYED_DIGEST={D1}\nDEPLOYED_ID={"b" * 64}\nSETTLED_DIGEST={D2}\n')
         self.assertEqual(self.image({SHOW: QUADLET_SHOW, INSPECT: f'{D2}\n'}, state),
-                         {'unit': 'quadlet', 'running_digest': D2, 'deployed_digest': D1})
+                         {'unit': 'quadlet', 'running_digest': D2, 'deployed_digest': D1, **NO_WINDOW})
+
+    def test_inside_a_deploy_window_the_window_s_digests_are_reported(self):
+        # Activating: the candidate D2 may already run while DEPLOYED_DIGEST still names the settled D1.
+        state = self.state(f'DEPLOYED_DIGEST={D1}\nDEPLOYED_ID={"b" * 64}\nWINDOW_SHA={"a" * 40}\n'
+                           f'WINDOW_DIGEST={D2}\nWINDOW_PREV_DIGEST={D1}\nWINDOW_PHASE=activating\n')
+        self.assertEqual(self.image({SHOW: QUADLET_SHOW, INSPECT: D2}, state),
+                         {'unit': 'quadlet', 'running_digest': D2, 'deployed_digest': D1,
+                          'window_digest': D2, 'window_prev_digest': D1})
+
+    def test_each_digest_of_the_state_is_judged_on_its_own(self):
+        state = self.state(f'DEPLOYED_DIGEST={D1}\nWINDOW_DIGEST={D2[:-1]}\nWINDOW_PREV_DIGEST={D1}\nWINDOW_PREV_DIGEST={D2}\n')
+        self.assertEqual(self.image(image_state=state),
+                         {'unit': 'foreign', 'running_digest': None, 'deployed_digest': D1,
+                          'window_digest': None, 'window_prev_digest': None})
 
     def test_before_the_switchover_the_flat_unit_is_foreign_and_no_container_runs(self):
         self.assertEqual(self.image({SHOW: FLAT_SHOW, INSPECT: RuntimeError('podman exited 125')}),
-                         {'unit': 'foreign', 'running_digest': None, 'deployed_digest': None})
+                         {'unit': 'foreign', 'running_digest': None, 'deployed_digest': None, **NO_WINDOW})
 
     def test_no_unit_at_all_is_absent(self):
         self.assertEqual(self.image({SHOW: ABSENT_SHOW}),
-                         {'unit': 'absent', 'running_digest': None, 'deployed_digest': None})
+                         {'unit': 'absent', 'running_digest': None, 'deployed_digest': None, **NO_WINDOW})
 
     def test_the_inspect_and_show_argv(self):
         asked = []
@@ -291,7 +307,7 @@ class TestImage(Host):
 
     def test_unreadable_podman_and_systemctl_are_null(self):
         self.assertEqual(self.image({SHOW: RuntimeError('systemctl exited 1'), INSPECT: FileNotFoundError('podman')}),
-                         {'unit': None, 'running_digest': None, 'deployed_digest': None})
+                         {'unit': None, 'running_digest': None, 'deployed_digest': None, **NO_WINDOW})
 
     def test_systemctl_output_without_a_load_state_is_null(self):
         self.assertEqual(self.image({SHOW: 'SourcePath=\n'})['unit'], None)
@@ -324,8 +340,9 @@ class TestImage(Host):
         self.assertEqual(self.image(image_state=self.state(f'DEPLOYED_DIGEST={D1}'))['deployed_digest'], D1)
 
     def test_an_image_state_is_never_sourced(self):
+        # Sourced, this line would run touch; parsed, it is a value that is not a digest.
         marker = Path(self.tmp.name) / 'ran'
-        state = self.state(f'DEPLOYED_DIGEST=$(touch {marker})\nDEPLOYED_DIGEST={D1}\n')
+        state = self.state(f'DEPLOYED_DIGEST=$(touch {marker})\n')
         self.assertEqual((self.image(image_state=state)['deployed_digest'], marker.exists()), (None, False))
 
     def test_a_symlinked_image_state_is_not_followed(self):
@@ -358,8 +375,8 @@ class TestImage(Host):
     def test_main_writes_image_json_next_to_the_summary_with_the_image_state_argument(self):
         state = self.state(f'DEPLOYED_DIGEST={D1}\n')
         _summary, image = self.main(f'--image-state={state}')
-        self.assertEqual(image, {'version': 1, 'timestamp': NOW, 'unit': 'foreign', 'running_digest': None,
-                                 'deployed_digest': D1})
+        self.assertEqual(image, {'version': 2, 'timestamp': NOW, 'unit': 'foreign', 'running_digest': None,
+                                 'deployed_digest': D1, **NO_WINDOW})
 
     def test_image_json_is_written_like_the_summary_0644_into_the_0755_directory(self):
         self.main()
@@ -381,8 +398,9 @@ class TestImage(Host):
     def test_the_written_files_are_the_fixtures_the_bot_s_readers_are_tested_on(self):
         # src/jobs/host-patch.test.ts reads these two fixtures with the bot's readers (the summary one with the
         # reader every release since #469 has): byte equality ties what the collector writes to what they accept.
-        state = self.state(f'DEPLOYED_DIGEST={D1}\n')
-        self.main(f'--image-state={state}', overrides={SHOW: QUADLET_SHOW, INSPECT: D1})
+        # A deploy window activating D2 (FIXTURE_STATE): every image.json field is set.
+        state = self.state(FIXTURE_STATE)
+        self.main(f'--image-state={state}', overrides={SHOW: QUADLET_SHOW, INSPECT: D2})
         self.assertEqual([(self.out / name).read_text() for name in ('summary.json', 'image.json')],
                          [fixture('collector-summary.json'), fixture('collector-image.json')])
 

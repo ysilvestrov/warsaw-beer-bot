@@ -12,4 +12,4 @@ Composed by hand (no live example existed on the capture day):
 Written by the collector itself (`test_the_written_files_are_the_fixtures_the_bot_s_readers_are_tested_on` keeps
 them byte-equal to its output; `src/jobs/host-patch.test.ts` reads them with the bot's readers):
 - `collector-summary.json` — `summary.json` of the 2026-10-08 fixtures above; the shape every bot release reads.
-- `collector-image.json` — `image.json` (spec 2026-10-11 §10) for a Quadlet unit running the deployed digest.
+- `collector-image.json` — `image.json` (spec 2026-10-11 §10, version 2) for a Quadlet unit inside a deploy window activating D2.

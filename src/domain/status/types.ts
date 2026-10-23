@@ -44,6 +44,9 @@ export interface ImageFacts {
   unit: 'quadlet' | 'foreign' | 'absent' | null;
   runningDigest: string | null;  // sha256:<64 hex>
   deployedDigest: string | null; // sha256:<64 hex>, the operator's image-state.env DEPLOYED_DIGEST
+  /** An open deploy window's candidate and what ran before it (WINDOW_DIGEST, WINDOW_PREV_DIGEST); null outside one. */
+  windowDigest: string | null;
+  windowPrevDigest: string | null;
 }
 
 export type HostPatchRead = { kind: 'ok'; facts: HostPatchFacts } | { kind: 'stale' } | { kind: 'unavailable' };

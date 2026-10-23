@@ -37,7 +37,7 @@ Spec-review: failed (reviewer did not run to completion: ENOENT) — попра�
 
    Production-юніт, хелпер і sudoers набір не чіпає.
 2. **Перенесення стану — одноразовий скрипт.** Він копіює дозволені гейтові ключі зі `state.env` в `image-state.env`, а потім перейменовує `state.env` на `state.env.flat` і створює на його місці каталог з `README` (§8 п.3). Якщо `image-state.env` уже існує, скрипт відмовляє.
-3. **`unit=quadlet|foreign` у статусі бере хостовий збирач.** `host_patch_collect.py` працює від root і може читати `systemctl` і `podman`. Він додає юніт, digest запущеного образу та `DEPLOYED_DIGEST` контролера у свій `summary.json`, а бот читає цей файл, як і тепер. Відкинуто варіант, де бот сам кличе podman: з контейнера в нього немає доступу.
+3. **`unit=quadlet|foreign` у статусі бере хостовий збирач.** `host_patch_collect.py` працює від root і може читати `systemctl` і `podman`. Він пише юніт, digest запущеного образу та `DEPLOYED_DIGEST` контролера (з `WINDOW_DIGEST`/`WINDOW_PREV_DIGEST` відкритого вікна) в окремий `image.json` поруч зі своїм `summary.json`, а бот читає його необов'язково (поправка 23.10, план «в»-обв'язки, Task 3): читач `summary.json` строгий і відкидає невідомий ключ, тож нове поле в підсумку зламало б host-patch статус будь-якого старішого релізу після відкату коду. `foreign` без `DEPLOYED_DIGEST` — flat-юніт до перемикання; `foreign` з ним — юніт не наш, `⚠️`. Відкинуто варіант, де бот сам кличе podman: з контейнера в нього немає доступу.
 4. **Прибирання — окремий PR (В2) після першого settled і кількох автоматичних деплоїв.** Відкинуто варіант «прибрати в тому ж PR»: тоді зник би шлях назад.
 
 **Що стане гірше.**
@@ -440,7 +440,7 @@ Python stdlib, root-owned `/usr/local/libexec/wbb-image`. Таймер клич�
 
 - **Node.** `host-upstream`/статус оцінює security-версію Node за `packages.nodejs` із хостового звіту (`scripts/ops/host_patch_collect.py`). Після переходу хостовий Node до бота стосунку не має. Версію бере сам бот: `process.versions.node` процесу в контейнері — її й порівнює статус із безпековими релізами Node.
 - **Хост.** Збирач лишає Ubuntu, cloudflared, Litestream і додає `podman` (оновлюється unattended-upgrades). needrestart не перезапускає контейнер через хостові бібліотеки — бібліотеки образу оновлюються лише перезбіркою (§9).
-- **Юніт.** Статус показує `unit=quadlet|foreign` (§3.2) і образ запущеного контейнера проти `DEPLOYED_DIGEST`. Джерело (поправка 4) — хостовий збирач `host_patch_collect.py` (root): `systemctl show`, `podman container inspect` і `DEPLOYED_DIGEST` з `image-state.env` оператора записуються в `summary.json`, який бот уже читає.
+- **Юніт.** Статус показує `unit=quadlet|foreign` (§3.2) і образ запущеного контейнера проти `DEPLOYED_DIGEST`. Джерело (поправка 4) — хостовий збирач `host_patch_collect.py` (root): `systemctl show`, `podman container inspect` і `DEPLOYED_DIGEST` (плюс digest-и вікна) з `image-state.env` оператора записуються в окремий `image.json` поруч із `summary.json` — не в сам підсумок, бо його строгий читач відкидає невідомий ключ (відкат коду, рішення 3). Рядок: `unit=quadlet · образ <12 hex> (= задеплоєного | ≠ задеплоєного | вікно деплою | задеплоєний невідомий)`; `foreign` без `DEPLOYED_DIGEST` — `unit=flat (до перемикання)`, з ним — `⚠️ unit=foreign · образ …` з тим самим порівнянням.
 
 ## 11. Що з чинного коду переходить
 

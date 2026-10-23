@@ -50,6 +50,14 @@ if [ -n "$op_home" ]; then
   fi
 fi
 DROPIN=/etc/systemd/system/wbb-host-patch.service.d
+# The controller writes the image-state.env of the user its unit runs as. Another operator here names a
+# file nothing updates: warned, not refused — the installer cannot tell which of the two is wrong.
+if [ -n "$image_state" ]; then
+  autodeploy_user=$(systemctl show -p User --value wbb-autodeploy.service 2>/dev/null || true)
+  if [ -n "$autodeploy_user" ] && [ "$autodeploy_user" != "$SUDO_USER" ]; then
+    echo "WARNING: wbb-autodeploy.service runs as $autodeploy_user, but this install names the image-state.env of $SUDO_USER ($image_state): the status will show the deployed image of a state nobody writes. Re-run as $autodeploy_user (sudo from that account) if that is the operator." >&2
+  fi
+fi
 
 install -d "$R/usr/local/libexec" "$R/etc/systemd/system"
 install -m 0755 scripts/ops/host_patch_collect.py "$R/usr/local/libexec/wbb-host-patch-collect"

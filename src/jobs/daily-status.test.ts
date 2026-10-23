@@ -442,8 +442,11 @@ test('dailyStatus: testDiagnosticsUid reaches the monitor reader — disk is rea
 describe('buildImageLine', () => {
   const D1 = `sha256:0123456789ab${'c'.repeat(52)}`;
   const D2 = `sha256:0123456789ab${'d'.repeat(52)}`; // the same first 12 hex: = / ≠ compares the whole digest
+  const D3 = `sha256:fedcba987654${'e'.repeat(52)}`;
   const line = (unit: 'quadlet' | 'foreign' | 'absent' | null, runningDigest: string | null, deployedDigest: string | null) =>
-    buildImageLine({ unit, runningDigest, deployedDigest });
+    buildImageLine({ unit, runningDigest, deployedDigest, windowDigest: null, windowPrevDigest: null });
+  const inWindow = (runningDigest: string, deployedDigest: string, windowDigest: string, windowPrevDigest: string | null) =>
+    buildImageLine({ unit: 'quadlet', runningDigest, deployedDigest, windowDigest, windowPrevDigest });
 
   it('quadlet running the deployed digest', () => {
     expect(line('quadlet', D1, D1)).toBe('unit=quadlet · образ 0123456789ab (= задеплоєного)');
@@ -461,8 +464,32 @@ describe('buildImageLine', () => {
     expect(line('quadlet', null, D1)).toBe('unit=quadlet · образ ?');
   });
 
-  it('the flat unit before the switchover', () => {
+  it('the flat unit before the switchover: foreign with nothing deployed as an image yet', () => {
     expect(line('foreign', null, null)).toBe('unit=flat (до перемикання)');
+  });
+
+  it('foreign once an image is deployed: the unit is not ours, with the same comparison as quadlet', () => {
+    expect([line('foreign', D1, D1), line('foreign', D1, D2), line('foreign', null, D1)]).toEqual([
+      '⚠️ unit=foreign · образ 0123456789ab (= задеплоєного)',
+      '⚠️ unit=foreign · образ 0123456789ab (≠ задеплоєного)',
+      '⚠️ unit=foreign · образ ?',
+    ]);
+  });
+
+  it('inside a deploy window, the candidate running before its activation is recorded is the window, not ≠', () => {
+    expect(inWindow(D3, D1, D3, D1)).toBe('unit=quadlet · образ fedcba987654 (вікно деплою)');
+  });
+
+  it('inside a rollback, the settled predecessor running before the rollback is recorded is the window, not ≠', () => {
+    expect(inWindow(D1, D3, D3, D1)).toBe('unit=quadlet · образ 0123456789ab (вікно деплою)');
+  });
+
+  it('inside a window, an image that is neither the window\'s candidate nor its predecessor is still ≠', () => {
+    expect(inWindow(D2, D1, D3, D1)).toBe('unit=quadlet · образ 0123456789ab (≠ задеплоєного)');
+  });
+
+  it('inside a window, the deployed image running is =', () => {
+    expect(inWindow(D3, D3, D3, D1)).toBe('unit=quadlet · образ fedcba987654 (= задеплоєного)');
   });
 
   it('no unit at all', () => {
@@ -496,19 +523,23 @@ describe('the image line in the daily report', () => {
     chmodSync(file, 0o644);
     return file;
   };
-  /** The report over a readable summary, with image.json as given (undefined: no such file). */
-  const report = (image?: unknown): string => {
-    const hostPatchPath = put('summary.json', base);
-    if (image !== undefined) put('image.json', image);
-    return buildDailyReport(emptyDb(), now, '2026-10-06', {
-      ...missingMonitor, hostPatchPath, hostImagePath: join(dir, 'image.json'), hostPatchUid: process.getuid!(),
-    });
+  const build = (): string => buildDailyReport(emptyDb(), now, '2026-10-06', {
+    ...missingMonitor, hostPatchPath: join(dir, 'summary.json'), hostImagePath: join(dir, 'image.json'),
+    hostPatchUid: process.getuid!(),
+  });
+  /** The report over a readable summary and no image.json at all. */
+  const reportWithout = (): string => {
+    put('summary.json', base);
+    rmSync(join(dir, 'image.json'), { force: true });
+    return build();
   };
+  /** The report over a readable summary and this image.json. */
+  const reportWith = (image: unknown): string => { put('summary.json', base); put('image.json', image); return build(); };
   const footers = (text: string): string[] => text.split('\n').filter((l) => l.startsWith('ℹ️'));
   const image = { version: 1, timestamp: now.getTime() / 1000 - 60, unit: 'quadlet', running_digest: D, deployed_digest: D };
 
   it('image.json puts the line among the footers, before the events footer', () => {
-    expect(footers(report(image))).toEqual([
+    expect(footers(reportWith(image))).toEqual([
       'ℹ️ історія: 0/7 днів — порівняльні правила без потрібних днів ще не діють',
       'ℹ️ unit=quadlet · образ abcdef012345 (= задеплоєного)',
       `ℹ️ ${EVENTS_FOOTER}`,
@@ -517,7 +548,7 @@ describe('the image line in the daily report', () => {
   });
 
   it('without image.json (a collector from before it) there is no line', () => {
-    expect(footers(report())).toEqual([
+    expect(footers(reportWithout())).toEqual([
       'ℹ️ історія: 0/7 днів — порівняльні правила без потрібних днів ще не діють',
       `ℹ️ ${EVENTS_FOOTER}`,
       'ℹ️ не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)',
@@ -525,12 +556,12 @@ describe('the image line in the daily report', () => {
   });
 
   it('a malformed image.json changes nothing in the report: no line, the same verdicts and colours', () => {
-    expect(report({ ...image, unit: 'flat' })).toBe(report());
+    expect(reportWith({ ...image, unit: 'flat' })).toBe(reportWithout());
   });
 
   it('image.json never touches the host-patch verdict: the report differs from one without it by the line alone', () => {
-    const without = report().split('\n');
-    const withImage = report(image).split('\n');
+    const without = reportWithout().split('\n');
+    const withImage = reportWith(image).split('\n');
     expect(withImage.filter((l) => !without.includes(l))).toEqual(['ℹ️ unit=quadlet · образ abcdef012345 (= задеплоєного)']);
     expect(withImage.length).toBe(without.length + 1);
   });

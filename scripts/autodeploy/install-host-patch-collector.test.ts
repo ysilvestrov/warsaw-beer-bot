@@ -24,16 +24,18 @@ function host(opts: { uid?: string } = {}): Host {
     chmodSync(join(bin, name), 0o755);
   };
   stub('id', `echo ${opts.uid ?? '0'}`);
-  stub('systemctl', `echo "systemctl $*" >> "${log}"`);
+  // `show -p User` answers as wbb-autodeploy.service would: STUB_AUTODEPLOY_USER (empty: no such unit).
+  stub('systemctl', `echo "systemctl $*" >> "${log}"; if [ "$1" = show ]; then echo "\${STUB_AUTODEPLOY_USER:-}"; fi`);
   return { root, bin, log };
 }
 
 /** SUDO_USER is the user running the test by default, so its real home names the image-state.env. */
 const OPERATOR = userInfo();
 
-function run(h: Host, opts: { hostRoot?: boolean; cwd?: string; sudoUser?: string } = {}) {
+function run(h: Host, opts: { hostRoot?: boolean; cwd?: string; sudoUser?: string; autodeployUser?: string } = {}) {
   const env: NodeJS.ProcessEnv = {
     ...process.env, PATH: `${h.bin}:${process.env.PATH}`, WBB_HOST_ROOT: h.root, SUDO_USER: opts.sudoUser ?? OPERATOR.username,
+    STUB_AUTODEPLOY_USER: opts.autodeployUser ?? '',
   };
   if (opts.hostRoot === false) delete env.WBB_HOST_ROOT;
   const r = spawnSync('bash', [SCRIPT], { encoding: 'utf8', env, cwd: opts.cwd ?? REPO });
@@ -70,6 +72,7 @@ describe('install-host-patch-collector — a clean host', () => {
     const h = host();
     run(h);
     expect(calls(h)).toEqual([
+      'systemctl show -p User --value wbb-autodeploy.service',
       'systemctl daemon-reload',
       'systemctl enable --now wbb-host-patch.timer',
       'systemctl restart wbb-host-patch.timer',
@@ -106,7 +109,7 @@ describe('install-host-patch-collector — a clean host', () => {
     const h = host();
     writeFileSync(join(h.bin, 'systemctl'), `#!/usr/bin/env bash\necho "systemctl $* $(test -e '${at(h, DROPIN)}' && echo dropin)" >> "${h.log}"\n`);
     run(h);
-    expect(calls(h)[0]).toBe('systemctl daemon-reload dropin');
+    expect(calls(h).slice(0, 2)).toEqual(['systemctl show -p User --value wbb-autodeploy.service ', 'systemctl daemon-reload dropin']);
   });
 
   it.each([['SUDO_USER unset', ''], ['SUDO_USER root', 'root']])('%s: installs without a drop-in and says the deployed image is unknown', (_n, user) => {
@@ -114,6 +117,21 @@ describe('install-host-patch-collector — a clean host', () => {
     const r = run(h, { sudoUser: user });
     expect([r.code, existsSync(at(h, DROPIN)), existsSync(at(h, COLLECTOR))]).toEqual([0, false, true]);
     expect(r.out).toContain('the operator cannot be told (SUDO_USER is not set, or has no home): no image-state.env, the status shows the deployed image as unknown');
+  });
+
+  it('warns, and still installs, when wbb-autodeploy.service runs as another user than SUDO_USER', () => {
+    const h = host();
+    const r = run(h, { autodeployUser: 'someone-else' });
+    expect([r.code, existsSync(at(h, DROPIN))]).toEqual([0, true]);
+    expect(r.err).toBe(`WARNING: wbb-autodeploy.service runs as someone-else, but this install names the image-state.env of ${OPERATOR.username} `
+      + `(${OPERATOR.homedir}/.local/state/wbb-autodeploy/image-state.env): the status will show the deployed image of a state nobody writes. `
+      + 'Re-run as someone-else (sudo from that account) if that is the operator.\n');
+  });
+
+  it.each([['runs as the operator', OPERATOR.username], ['does not exist', '']])('says nothing when wbb-autodeploy.service %s', (_n, user) => {
+    const h = host();
+    const r = run(h, { autodeployUser: user });
+    expect([r.code, r.err]).toEqual([0, '']);
   });
 
   it('without an operator keeps the drop-in an earlier install wrote', () => {

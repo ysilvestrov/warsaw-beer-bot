@@ -93,14 +93,20 @@ const DAILY_STATUS_KEY = 'daily_status_last_sent';
 // Null when there is no fresh readable image.json (a collector installed before it, or one that stopped): no
 // line, and nothing else changes. Before the switchover the flat unit is `foreign`, and that is expected.
 const short = (digest: string): string => digest.slice('sha256:'.length, 'sha256:'.length + 12);
+// A foreign unit with no DEPLOYED_DIGEST is the flat unit before the switchover; with one, the image era has
+// begun and the unit is not ours — an incident. Inside a deploy window DEPLOYED_DIGEST moves only once the
+// activation (or the rollback) is recorded, so the window's own candidate or predecessor running is not «≠».
 export function buildImageLine(image: ImageFacts | null): string | null {
   if (image === null) return null;
-  if (image.unit === 'foreign') return 'unit=flat (до перемикання)';
-  if (image.unit === 'absent') return 'unit=absent';
-  const unit = `unit=${image.unit ?? '?'}`;
   const { runningDigest: running, deployedDigest: deployed } = image;
+  if (image.unit === 'foreign' && deployed === null) return 'unit=flat (до перемикання)';
+  if (image.unit === 'absent') return 'unit=absent';
+  const unit = image.unit === 'foreign' ? '⚠️ unit=foreign' : `unit=${image.unit ?? '?'}`;
   if (running === null) return `${unit} · образ ?`;
-  const against = deployed === null ? 'задеплоєний невідомий' : deployed === running ? '= задеплоєного' : '≠ задеплоєного';
+  const inWindow = running === image.windowDigest || running === image.windowPrevDigest;
+  const against = deployed === null ? 'задеплоєний невідомий'
+    : deployed === running ? '= задеплоєного'
+      : inWindow ? 'вікно деплою' : '≠ задеплоєного';
   return `${unit} · образ ${short(running)} (${against})`;
 }
 
