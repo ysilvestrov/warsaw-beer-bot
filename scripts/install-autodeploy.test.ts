@@ -164,7 +164,7 @@ describe('install-autodeploy.sh', () => {
     expect(r.stderr).toBe(
       `ERROR: the timer is active and there is no ${STATE} — the first tick of the new controller would write its own image-state.env, `
       + 'and the migration would then refuse for good. Nothing was installed.\n'
-      + 'Stop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), then run this again.\n');
+      + 'Stop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), install the helper (sudo bash deploy/install-image.sh), then run this again (deploy/README.md → Switchover session, steps 2–7).\n');
   });
 
   test('an active timer and an operator it cannot tell: refused, nothing installed', () => {

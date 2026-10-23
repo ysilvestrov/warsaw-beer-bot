@@ -82,7 +82,7 @@ fi
 timer=$("$SYSTEMCTL" is-active wbb-autodeploy.timer 2>/dev/null || true)
 case "$timer" in
   inactive|failed) ;;
-  *) refuse "the timer is not stopped (systemctl is-active wbb-autodeploy.timer: '${timer}') — sudo systemctl stop wbb-autodeploy.timer first" ;;
+  *) refuse "the timer is not stopped (systemctl is-active wbb-autodeploy.timer: '${timer}') — sudo systemctl disable --now wbb-autodeploy.timer first" ;;
 esac
 if [ ! -d "$STATE_DIR" ]; then
   refuse "$STATE_DIR does not exist — there is no flat state to carry"
@@ -194,4 +194,4 @@ echo "Carried into $IMAGE:"
 printf '  %s\n' "${carried[@]}"
 echo "$verdict"
 echo "Old state: $FLAT.flat (state.env is now a directory with a README)."
-echo "Next: sudo bash deploy/install-autodeploy.sh, then bash deploy/deploy.sh --bootstrap (deploy/README.md → Switchover session)."
+echo "Next: step 7 of deploy/README.md → Switchover session — sudo bash deploy/install-image.sh, sudo bash deploy/install-image.sh --check, sudo bash deploy/install-autodeploy.sh, sudo bash deploy/install-host-patch-collector.sh; then step 8, the bootstrap."

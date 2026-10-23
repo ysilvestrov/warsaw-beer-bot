@@ -94,5 +94,5 @@ else
 fi
 echo "  $OUT"
 echo
-echo "Check the first summary before deploying the wiring (livepatch must not be null):"
+echo "Check the first summary (livepatch must not be null):"
 echo "  python3 -m json.tool $OUT/summary.json"

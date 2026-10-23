@@ -19,8 +19,8 @@
 # then the summary `RESULT: PASS|FAIL (<n> PASS, <n> EXPECTED, <n> FAIL)`.
 #
 # What it reuses rather than repeats: the migration's key lists (deploy/migrate-state-to-image.sh) for the flat
-# state.env; the controller's own resolve and attestation calls (deploy/autodeploy.sh, _resolve_default and
-# _attest_default, taken from the file as they are); install-image.sh --check as it is; the kit root from the
+# state.env; the controller's own CI read and verdict (deploy/autodeploy.sh, _checks_default and ci_verdict) and
+# its resolve and attestation calls (_resolve_default and _attest_default), taken from the file as they are; install-image.sh --check as it is; the kit root from the
 # rehearsal shim; the rehearsal's names and its precondition texts.
 #
 # Seams (tests only; each defaults to the real thing): PREFLIGHT_SUDO, PREFLIGHT_SYSTEMCTL, PREFLIGHT_DF,
@@ -151,6 +151,13 @@ state_check() {
   if [ -L "$FLAT" ] || [ ! -f "$FLAT" ]; then
     echo "$FLAT is not a regular file (a directory there means the migration ran already)"; return 1
   fi
+  # The migration's own refusals of what its renames would meet (deploy/migrate-state-to-image.sh, preconditions).
+  if [ -e "$FLAT.flat" ] || [ -L "$FLAT.flat" ]; then
+    echo "$FLAT.flat already exists — the migration would overwrite it; find out who left it"; return 1
+  fi
+  if [ -L "$FLAT.new" ] || { [ -e "$FLAT.new" ] && [ ! -d "$FLAT.new" ]; }; then
+    echo "$FLAT.new exists and is not the directory the migration prepares"; return 1
+  fi
   content=$(cat "$FLAT" && printf x) || { echo "$FLAT cannot be read"; return 1; }
   content="${content%x}"
   [ -n "$content" ] || { echo "$FLAT is empty"; return 1; }
@@ -250,7 +257,28 @@ else
   pass checkout "clean, HEAD = origin/main ${main:0:12}"
 fi
 
-# --- 10. HEAD has a published image that passes the controller's own attestation --------------------------------
+# --- 10. CI concluded green on HEAD: the controller's own check-run read and verdict ------------------------------
+# The bootstrap's manual_ci_gate refuses anything but PASS; asked here with the same two functions, as they are.
+ci_check() {
+  local GH_REPO STEP_TIMEOUT_GH_S CHECKS_CMD=_checks_default verdict
+  GH_REPO=$(read_const GH_REPO)
+  STEP_TIMEOUT_GH_S=$(read_const STEP_TIMEOUT_GH_S)
+  if [ -z "$GH_REPO" ] || [ -z "$STEP_TIMEOUT_GH_S" ] \
+    || ! read_function "$CONTROLLER_SRC" _checks_default || ! read_function "$CONTROLLER_SRC" ci_verdict; then
+    echo "cannot read the CI check of $CONTROLLER_SRC"; return 1
+  fi
+  [ -n "$head" ] || { echo "no HEAD in $GIT_DIR_"; return 1; }
+  verdict=$(ci_verdict "$head" 2>/dev/null) || { echo "cannot read CI status for HEAD ${head:0:12} (gh api failed)"; return 1; }
+  case "$verdict" in
+    PASS) echo "HEAD ${head:0:12}: 'ci' and 'image' succeeded in one check suite (the controller's CI verdict)" ;;
+    WAIT) echo "CI has not concluded on HEAD ${head:0:12} — the required 'ci' and 'image' checks of one run are pending or absent; wait for CI"; return 1 ;;
+    FAIL*) echo "CI failed on HEAD ${head:0:12}: ${verdict#FAIL } — the bootstrap would refuse it"; return 1 ;;
+    *) echo "the controller's CI verdict for HEAD ${head:0:12} is '$verdict'"; return 1 ;;
+  esac
+}
+why=$(ci_check) && pass ci "$why" || fail ci "$why"
+
+# --- 11. HEAD has a published image that passes the controller's own attestation --------------------------------
 image_check() {
   local GH_REPO IMAGE_REPOSITORY STEP_TIMEOUT_RESOLVE_S STEP_TIMEOUT_ATTEST_S d rc out
   GH_REPO=$(read_const GH_REPO)
@@ -278,14 +306,14 @@ image_check() {
 }
 why=$(image_check) && pass image "$why" || fail image "$why"
 
-# --- 11. production's Quadlet file does not exist: activate writes it at the bootstrap --------------------------
+# --- 12. production's Quadlet file does not exist: activate writes it at the bootstrap --------------------------
 if [ -e "$PROD_QUADLET" ] || [ -L "$PROD_QUADLET" ]; then
   fail quadlet "$PROD_QUADLET exists — the bootstrap requires that it does not (deploy/README.md → The first image release)"
 else
   pass quadlet "no $PROD_QUADLET"
 fi
 
-# --- 12. free space where the images and the rehearsal kit go -----------------------------------------------------
+# --- 13. free space where the images and the rehearsal kit go -----------------------------------------------------
 KIT_ROOT=$(python3 -I -B "$SHIM" --kit-root 2>/dev/null) || KIT_ROOT=""
 if ! [[ $KIT_ROOT =~ ^(/[A-Za-z0-9._-]+)+/wbb-rehearsal$ ]] || [[ $KIT_ROOT == *'/..'* ]] || [[ $KIT_ROOT == *'/./'* ]]; then
   KIT_ROOT=""
@@ -309,7 +337,7 @@ else
   fail space "$(printf '%s, ' "${space[@]}" | sed 's/, $//')"
 fi
 
-# --- 13. no old checkout whose flat deploy.sh lacks the state.env guard (spec §8 п.3, V15) ----------------------
+# --- 14. no old checkout whose flat deploy.sh lacks the state.env guard (spec §8 п.3, V15) ----------------------
 # A flat deploy.sh rsyncs the tree to /opt and reinstalls the old unit over the Quadlet one. Versions from #767 on
 # read state.env with `[ ! -f "$STATE" ]` and refuse once the migration made it a directory; older ones do not.
 # Searched as root (copies live in /root too); node_modules and caches skipped.
@@ -332,7 +360,7 @@ else
   pass old-checkouts "none unprotected in ${CHECKOUT_ROOTS[*]}${protected:+ (with the guard: $(tr '\n' ' ' <<< "$protected" | sed 's/ $//'))}"
 fi
 
-# --- 14. nothing of a rehearsal is left (scripts/ops/rehearsal/run.sh, its preconditions) ------------------------
+# --- 15. nothing of a rehearsal is left (scripts/ops/rehearsal/run.sh, its preconditions) ------------------------
 left=()
 if [ -z "$KIT_ROOT" ]; then
   left+=("cannot read the kit root from $SHIM")

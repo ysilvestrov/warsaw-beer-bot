@@ -82,7 +82,7 @@ if [ "$have_state" = 0 ] && [ "$active" = active ]; then
   else
     why="the operator cannot be told (SUDO_USER), so its image-state.env cannot be checked"
   fi
-  printf 'ERROR: the timer is active and %s — the first tick of the new controller would write its own image-state.env, and the migration would then refuse for good. Nothing was installed.\nStop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), then run this again.\n' \
+  printf 'ERROR: the timer is active and %s — the first tick of the new controller would write its own image-state.env, and the migration would then refuse for good. Nothing was installed.\nStop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), install the helper (sudo bash deploy/install-image.sh), then run this again (deploy/README.md → Switchover session, steps 2–7).\n' \
     "$why" >&2
   exit 1
 fi

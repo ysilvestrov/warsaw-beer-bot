@@ -14,6 +14,8 @@ vi.setConfig({ testTimeout: 60_000 });
  */
 const PREFLIGHT = resolve(__dirname, 'switchover-preflight.sh');
 const DIGEST = `sha256:${'1'.repeat(64)}`;
+/** ci and image green in one check suite: what the controller's ci_verdict calls PASS. */
+const GREEN = 'ci\tcompleted\tsuccess\t7\nimage\tcompleted\tsuccess\t7\nlint\tcompleted\tskipped\t7\n';
 const GIB = 1024 * 1024;
 
 function file(path: string, text: string, mode = 0o644): void {
@@ -49,9 +51,16 @@ const SHIM = `import os, sys
 assert sys.argv[1:] == ['--kit-root'], sys.argv
 print(open(os.path.join(os.environ['STUB_DIR'], 'kit-root')).read().strip())`;
 
-// gh: the help text from a file; a verify is logged and exits as told.
+// gh: the help text from a file; the check runs of a commit from checks/<sha> (as the controller's --jq prints
+// them), or checks-rc; a verify is logged and exits as told.
 const GH = `if [ "$*" = "attestation verify --help" ]; then cat "$STUB_DIR/gh-help"; exit 0; fi
 printf 'gh %s\\n' "$*" >> "$STUB_DIR/log"
+if [ "$1" = api ]; then
+  [ -e "$STUB_DIR/checks-rc" ] && exit "$(cat "$STUB_DIR/checks-rc")"
+  sha="\${2%/check-runs}"
+  cat "$STUB_DIR/checks/\${sha##*/}"
+  exit 0
+fi
 echo 'verification output'
 exit "$(cat "$STUB_DIR/attest-rc")"`;
 
@@ -110,7 +119,7 @@ function world(): World {
   const homes = join(root, 'homes');
   const containers = join(root, 'containers');
   const kit = join(root, 'var', 'wbb-rehearsal');
-  for (const d of [stub, join(stub, 'reg'), state, join(etc, 'containers/systemd'), join(etc, 'systemd/system'), containers,
+  for (const d of [stub, join(stub, 'reg'), join(stub, 'checks'), state, join(etc, 'containers/systemd'), join(etc, 'systemd/system'), containers,
     join(root, 'var'), join(homes, 'guarded/deploy'), join(homes, 'new/deploy'), join(homes, 'tool/node_modules/x/deploy')]) {
     mkdirSync(d, { recursive: true });
   }
@@ -142,6 +151,7 @@ function world(): World {
   };
   for (const [k, v] of Object.entries(stubs)) file(join(stub, k), v);
   file(join(stub, 'reg', head), `${DIGEST}\n`);
+  file(join(stub, 'checks', head), GREEN);
 
   file(join(state, 'state.env'), `DEPLOYED_SHA=${deployed}\nPREVIOUS_SHA=\nLAST_SEEN_DEPLOYED_SHA=${deployed}\nMAIN_SEEN_S=1761177600\nLAST_HOLD_NOTICE=2026-10-22\n`);
   file(join(state, 'lock'), '');
@@ -180,6 +190,7 @@ function passLines(w: World): Record<string, string> {
     helper: 'PASS      helper — wbb-image: every installed copy matches HEAD abc1234',
     gh: 'PASS      gh — gh attestation verify knows --source-digest and --deny-self-hosted-runners',
     checkout: `PASS      checkout — clean, HEAD = origin/main ${s12(w.head)}`,
+    ci: `PASS      ci — HEAD ${s12(w.head)}: 'ci' and 'image' succeeded in one check suite (the controller's CI verdict)`,
     image: `PASS      image — HEAD ${s12(w.head)} → ${DIGEST}, attested (the controller's gh attestation verify)`,
     quadlet: `PASS      quadlet — no ${w.etc}/containers/systemd/warsaw-beer-bot.container`,
     space: `PASS      space — ${w.containers}: 6 GiB, ${w.root}/var: 6 GiB`,
@@ -215,14 +226,16 @@ describe('switchover-preflight.sh: all PASS', () => {
   it('prints PASS for each check and RESULT: PASS, exit 0', () => {
     const w = world();
     const r = run(w);
-    expect([r.code, r.out, r.err]).toEqual([0, output(w, {}, 'RESULT: PASS (14 PASS, 0 EXPECTED, 0 FAIL)'), '']);
+    expect([r.code, r.out, r.err]).toEqual([0, output(w, {}, 'RESULT: PASS (15 PASS, 0 EXPECTED, 0 FAIL)'), '']);
   });
 
-  it("asks the image through the controller's own calls: the tag of HEAD, then gh attestation verify of its digest", () => {
+  it("asks CI and the image through the controller's own calls: HEAD's check runs, its tag, then gh attestation verify of its digest", () => {
     const w = world();
     run(w);
     const lines = readFileSync(join(w.stub, 'log'), 'utf8').split('\n');
     expect(lines.filter((l) => l.startsWith('curl ') || l.startsWith('gh '))).toEqual([
+      `gh api repos/ysilvestrov/warsaw-beer-bot/commits/${w.head}/check-runs --paginate --jq `
+        + '.check_runs[] | [.name, .status, (.conclusion // ""), (.check_suite.id | tostring)] | @tsv',
       'curl https://ghcr.io/token?scope=repository:ysilvestrov/warsaw-beer-bot:pull',
       `curl https://ghcr.io/v2/ysilvestrov/warsaw-beer-bot/manifests/${w.head}`,
       `gh attestation verify oci://ghcr.io/ysilvestrov/warsaw-beer-bot@${DIGEST} --repo ysilvestrov/warsaw-beer-bot `
@@ -264,7 +277,7 @@ describe('switchover-preflight.sh: the one EXPECTED state', () => {
     const r = run(w);
     expect([r.code, r.out]).toEqual([0, output(w, {
       helper: ["EXPECTED  helper — the installed wbb_image.py predates this checkout's; step 7 reinstalls it (sudo bash deploy/install-image.sh)"],
-    }, 'RESULT: PASS (13 PASS, 1 EXPECTED, 0 FAIL)')]);
+    }, 'RESULT: PASS (14 PASS, 1 EXPECTED, 0 FAIL)')]);
   });
 });
 
@@ -314,6 +327,22 @@ const CASES: Case[] = [
     setup: (w) => { rmSync(join(w.state, 'state.env')); mkdirSync(join(w.state, 'state.env')); },
     lines: (w) => ({
       state: [`FAIL      state — ${w.state}/state.env is not a regular file (a directory there means the migration ran already) — the migration (step 6) would refuse`],
+      deployed: ['FAIL      deployed — no DEPLOYED_SHA read: the state check failed'],
+    }),
+  },
+  {
+    name: 'state.env.flat already there (the migration would overwrite it)', fails: 2,
+    setup: (w) => file(join(w.state, 'state.env.flat'), 'DEPLOYED_SHA=\n'),
+    lines: (w) => ({
+      state: [`FAIL      state — ${w.state}/state.env.flat already exists — the migration would overwrite it; find out who left it — the migration (step 6) would refuse`],
+      deployed: ['FAIL      deployed — no DEPLOYED_SHA read: the state check failed'],
+    }),
+  },
+  {
+    name: 'state.env.new a file, not the directory the migration prepares', fails: 2,
+    setup: (w) => file(join(w.state, 'state.env.new'), ''),
+    lines: (w) => ({
+      state: [`FAIL      state — ${w.state}/state.env.new exists and is not the directory the migration prepares — the migration (step 6) would refuse`],
       deployed: ['FAIL      deployed — no DEPLOYED_SHA read: the state check failed'],
     }),
   },
@@ -403,6 +432,34 @@ const CASES: Case[] = [
     },
   },
   {
+    name: 'CI still running on HEAD', fails: 1,
+    setup: (w) => file(join(w.stub, 'checks', w.head), 'ci\tcompleted\tsuccess\t7\nimage\tin_progress\t\t7\n'),
+    lines: (w) => ({
+      ci: [`FAIL      ci — CI has not concluded on HEAD ${s12(w.head)} — the required 'ci' and 'image' checks of one run are pending or absent; wait for CI`],
+    }),
+  },
+  {
+    name: "CI green, but 'ci' and 'image' only in different check suites", fails: 1,
+    setup: (w) => file(join(w.stub, 'checks', w.head), 'ci\tcompleted\tsuccess\t7\nimage\tcompleted\tsuccess\t8\n'),
+    lines: (w) => ({
+      ci: [`FAIL      ci — CI has not concluded on HEAD ${s12(w.head)} — the required 'ci' and 'image' checks of one run are pending or absent; wait for CI`],
+    }),
+  },
+  {
+    name: 'CI failed on HEAD', fails: 1,
+    setup: (w) => file(join(w.stub, 'checks', w.head), 'ci\tcompleted\tfailure\t7\nimage\tcompleted\tsuccess\t7\n'),
+    lines: (w) => ({
+      ci: [`FAIL      ci — CI failed on HEAD ${s12(w.head)}: ci=failure — the bootstrap would refuse it`],
+    }),
+  },
+  {
+    name: 'CI status cannot be read (gh api fails)', fails: 1,
+    setup: (w) => put(w, 'checks-rc', '1'),
+    lines: (w) => ({
+      ci: [`FAIL      ci — cannot read CI status for HEAD ${s12(w.head)} (gh api failed)`],
+    }),
+  },
+  {
     name: 'no image published for HEAD', fails: 1,
     setup: (w) => rmSync(join(w.stub, 'reg', w.head)),
     lines: (w) => ({
@@ -471,7 +528,7 @@ describe('switchover-preflight.sh: each check FAILs on its own fact', () => {
     const w = world();
     setup(w);
     const r = run(w);
-    const passes = 14 - fails;
+    const passes = 15 - fails;
     expect([r.code, r.out]).toEqual([1, output(w, lines(w), `RESULT: FAIL (${passes} PASS, 0 EXPECTED, ${fails} FAIL)`)]);
   });
 
@@ -488,7 +545,7 @@ describe('switchover-preflight.sh: each check FAILs on its own fact', () => {
     holder.kill('SIGKILL');
     expect([r.code, r.out]).toEqual([1, output(w, {
       lock: [`FAIL      lock — ${w.state}/lock is held (a tick or a deploy.sh) — fuser -v ${w.state}/lock; wait until it is free`],
-    }, 'RESULT: FAIL (13 PASS, 0 EXPECTED, 1 FAIL)')]);
+    }, 'RESULT: FAIL (14 PASS, 0 EXPECTED, 1 FAIL)')]);
   });
 
   it('no lock file at all is a free lock, and it is not created', () => {

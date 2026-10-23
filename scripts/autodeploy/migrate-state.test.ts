@@ -162,7 +162,7 @@ describe('deploy/migrate-state-to-image.sh', () => {
       `  MAIN_SEEN_SHA=${M}`, '  MAIN_SEEN_S=1792653900', `  LAST_CI_NOTICE_SHA=${F}`,
       `STATE OK — ${h.image}`,
       `Old state: ${h.flat}.flat (state.env is now a directory with a README).`,
-      'Next: sudo bash deploy/install-autodeploy.sh, then bash deploy/deploy.sh --bootstrap (deploy/README.md → Switchover session).',
+      'Next: step 7 of deploy/README.md → Switchover session — sudo bash deploy/install-image.sh, sudo bash deploy/install-image.sh --check, sudo bash deploy/install-autodeploy.sh, sudo bash deploy/install-host-patch-collector.sh; then step 8, the bootstrap.',
       '',
     ].join('\n'));
   });
@@ -228,8 +228,8 @@ describe('deploy/migrate-state-to-image.sh', () => {
 
   describe('refuses, changing nothing', () => {
     it.each<[string, Record<string, string>, string]>([
-      ['the timer is active', { systemctl: 'echo active' }, "the timer is not stopped (systemctl is-active wbb-autodeploy.timer: 'active') — sudo systemctl stop wbb-autodeploy.timer first"],
-      ['the timer\'s state cannot be read', { systemctl: 'exit 1' }, "the timer is not stopped (systemctl is-active wbb-autodeploy.timer: '') — sudo systemctl stop wbb-autodeploy.timer first"],
+      ['the timer is active', { systemctl: 'echo active' }, "the timer is not stopped (systemctl is-active wbb-autodeploy.timer: 'active') — sudo systemctl disable --now wbb-autodeploy.timer first"],
+      ['the timer\'s state cannot be read', { systemctl: 'exit 1' }, "the timer is not stopped (systemctl is-active wbb-autodeploy.timer: '') — sudo systemctl disable --now wbb-autodeploy.timer first"],
       ['run as root', { uid: 'echo 0' }, 'run this as the operator, not as root: the state is the operator\'s (~/.local/state/wbb-autodeploy)'],
     ])('%s', (_name, stubs, reason) => {
       const h = host();

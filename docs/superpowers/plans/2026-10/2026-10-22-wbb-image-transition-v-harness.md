@@ -62,7 +62,7 @@
    - видалити тимчасові каталоги й копію БД;
    - образи S і D можуть бути прибрані `prune` уже по дорозі (settle);
    - кожен провалений крок — `CLEANUP FAILED: <крок> — <команда>` і повний ручний рецепт;
-   - перевірити production: `current` хелпера з checkout-а (read-only) плюс `systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState,MainPID` до і після; розбіжність чи нечитаність наприкінці — FAIL і гучний `!!!`.
+   - перевірити production: `current` хелпера з checkout-а (read-only) плюс `systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState` до і після; розбіжність чи нечитаність наприкінці — FAIL і гучний `!!!`. Без `MainPID` (наскрізне рев'ю 23.10): природний перезапуск flat-бота за цю годину — не справа репетиції, а з ним вона б зупинила сеанс.
 4. **Набір не стосується production.** Перед стартом (лише читання; trap ставиться після всіх перевірок) він відмовляє, коли:
    - запущено від root;
    - `sudo -n true` відмовляє;
@@ -74,6 +74,8 @@
    - `wbb-autodeploy.timer` чи `wbb-autodeploy.service` активні;
    - вільного місця менше за 5 GiB (батьківський каталог кореня і `/var/lib/containers`);
    - S/D: не існують, однакові, S не предок D, D не на `origin/main`, нема образу в GHCR (анонімне читання маніфесту й конфіга, без pull), однаковий `wbb.content` (деплой був би noop);
+   - S не нащадок e480463 (`start-check --leave-running`: хелпер відмовляє старішому образу як COMPAT-цілі);
+   - на S чи D немає зеленого CI (`ci` і `image` в одному check suite) — `_checks_default` і `ci_verdict` дослівно з контролера, з seam для тестів: інакше `manual_ci_gate` контролера відмовив би вже посеред години;
    - у S..D є PR з `migration:contract` чи `rollback:unsafe` (те саме читання міток через `gh`, що в контролері), або мітки нечитані;
    - стан production не читається.
 
@@ -89,11 +91,13 @@
 6. **Перевірка перед сеансом** `scripts/ops/switchover-preflight.sh`. Read-only, запускає оператор. Перевіряє:
    - таймер `disabled` і неактивний, `wbb-autodeploy.service` неактивний, lock вільний;
    - `state.env` звичайний файл без `WINDOW_*`/`ROLLBACK_STARTED`;
+   - ні `state.env.flat`, ні `state.env.new`, що не є каталогом (відмови самої міграції);
    - `DEPLOYED_SHA` є і є предком `origin/main`;
    - `image-state.env` нема;
    - `install-image.sh --check` чистий — з одним очікуваним винятком: до кроку 7 runbook-у встановлений хелпер старший за checkout (рішення 15 ядра). `--check` тоді виходить з 1 і друкує `DIFFERS: /usr/local/lib/wbb-image/wbb_image.py (content)` і `1 difference(s): sudo bash deploy/install-image.sh`. Preflight такий результат — коли єдина розбіжність — це `(content)` саме `wbb_image.py` — показує як «очікується перевстановлення (крок 7)», не FAIL. Будь-яка інша розбіжність (`not installed`, `mode`, `owner`, інший файл, каталог) — FAIL;
    - `gh attestation verify --help` має `--source-digest` і `--deny-self-hosted-runners`;
    - checkout чистий на `origin/main`;
+   - CI на HEAD зелений (`_checks_default` і `ci_verdict` дослівно з контролера — той самий гейт, що в bootstrap);
    - у HEAD є опублікований атестований образ (резолв і verify);
    - Quadlet-файлу нема;
    - вільно ≥ 5 GiB;
@@ -110,11 +114,11 @@
    5. репетиція (`run.sh`) і прочитати підсумок + P3;
    6. `migrate-state-to-image.sh`;
    7. `sudo bash deploy/install-image.sh` (перевстановлює хелпер з рішенням 15 ядра), потім `sudo bash deploy/install-image.sh --check` — чистий, потім `install-autodeploy.sh`, потім `install-host-patch-collector.sh`;
-   8. `bash deploy/deploy.sh --bootstrap` двічі, з кроками root між ними;
+   8. `bash deploy/deploy.sh --bootstrap` двічі, з кроками root між ними (у tmux; обрив другого запуску після відкриття вікна — одразу крок 9: вікно bootstrap дозавершує чи скасовує перший tick, §7.2, бо ручний запуск при відкритому вікні відмовляє);
    9. `sudo systemctl enable --now wbb-autodeploy.timer`;
    10. перевірити перший tick і статус.
 
-   До кожного кроку — що робити, якщо крок відмовив. До кроку 5: бот набору робить справжні вихідні запити (крони) і пише лише в копію БД; у Telegram нічого не йде.
+   До кожного кроку — що робити, якщо крок відмовив. До кроку 5: бот набору робить справжні вихідні запити (крони) і пише лише в копію БД; у Telegram нічого не йде. Перед кроком 1 (production ще не заморожено): почистити копії репо без захисту (V15), `gh` з потрібними прапорцями, ≥ 5 GiB, tmux, вибрати S і D, `sudo -v`. Ціна повного відкату після кроку 6 — названа явно (заморожено до успішного bootstrap; повернення до flat-автодеплою — лише revert PR плюс ручне скасування міграції). `XDG_STATE_HOME` не задавати: юніт та інсталятори знають лише `~/.local/state`.
 
 ## Таблиця «заявка → доказ»
 

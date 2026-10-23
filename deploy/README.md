@@ -45,8 +45,11 @@ no local cache to fall back on:
 the new ABI in the same sitting: stop `warsaw-beer-bot` (and `48-hours-trip`, which shares
 `/usr/bin/node`), install the new major, then run `deploy/deploy.sh`, whose `npm ci` does the rebuild.
 A restart in between comes up on the new interpreter with the old `.node` and fails to start.
-(Flat, until the switchover session: after it the bot runs from its image, whose Node and native addons
-come from CI, and the host's Node no longer runs the bot.)
+This is the flat tree's procedure, and it no longer has a `deploy.sh` to finish it: from the stage «в»
+merge on, `deploy/deploy.sh` is the image wrapper — it refuses until the switchover session installs the
+image controller (step 7), and never runs `npm ci`. So do not move the Node major between the merge and
+the session. After the session the bot runs from its image, whose Node and native addons come from CI,
+and the host's Node no longer runs the bot.
 
 `build-essential` + `python3` are needed for the `better-sqlite3` native build.
 
@@ -236,6 +239,25 @@ deployer is out of date" once a day — ignore it until the session, and do not 
 The wrapper `bash deploy/deploy.sh` refuses (the installed copy is not this checkout's controller).
 Production is frozen from the merge until the bootstrap, so merge at the start of the session.
 
+**Before step 1 (production not yet frozen).** Whatever can be prepared without the merge is done first,
+so the frozen stretch is only the session itself:
+
+- the old copies of the repo whose flat `deploy/deploy.sh` lacks the `state.env` guard (spec §8 п.3; the
+  V15 list of 21.10: the worktree `cluster-triage` in `~/warsaw-agy-bb`, `~/wbb-sol-default` and five copies
+  in `/root`) — `git pull` each to a version with the guard, or remove it (preflight `old-checkouts`
+  names what is left);
+- `gh attestation verify --help` knows `--source-digest` and `--deny-self-hosted-runners` (upgrade `gh`
+  otherwise), and `gh` is logged in as the operator;
+- ≥ 5 GiB free in `/var/lib/containers` and in `/var/lib` (the images and the rehearsal kit);
+- `tmux` (or `screen`) is installed;
+- pick **S** (step 5's definition) and know that **D** will be the merge commit, the HEAD of step 1 (if
+  D's `wbb.content` turns out equal to S's, the rehearsal refuses and the next older candidate is S);
+- `sudo -v` in the tmux session the whole sitting runs in.
+
+Do not set `XDG_STATE_HOME` in that shell: the migration, the preflight and the controller honour it,
+but `wbb-autodeploy.service` and the installers use `~/.local/state` as is — a set variable would
+migrate and check a directory the timer never reads.
+
 The session is one sitting, in this order; each step says what to do when it refuses. Plan:
 `docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-harness.md` ("Рішення" п.6–7). Work
 in **one checkout of `main` on the host** (the one you run `deploy.sh` from), as the operator, inside
@@ -247,7 +269,14 @@ do not see the ticket at all.
 is back where it was before the session (the old timer, frozen production, nothing migrated). From
 step 6 on the old timer must not run again (its `state.env` is a directory now): if you must stop
 between step 6 and step 8, leave the timer **disabled** — the flat bot keeps running untouched — and
-resume at the step you stopped on.
+resume at the step you stopped on. One exception: when the **second** `--bootstrap` run of step 8 was
+interrupted after its window opened (a manual run then refuses with `a window of … is open … — the timer
+finishes it`), do step 9 at once — see step 8.
+
+What a full abort after step 6 costs: production stays frozen until a successful bootstrap. There is no
+way back to unattended flat deploys from the host alone — only a revert PR of stage «в» on `main`, plus
+undoing the migration by hand (`state.env/` aside, `state.env.flat` → `state.env`, `image-state.env`
+removed) and, after step 7, reinstalling the flat deployer from the reverted checkout.
 
 1. **Merge the stage «в» PR** (`[deploy:hold]`) at the start of the session, and wait for CI on the
    merge commit: the `image` job must have published and attested its image (step 4 checks it). Then
@@ -266,12 +295,13 @@ resume at the step you stopped on.
    |---|---|
    | `timer`, `service` | `wbb-autodeploy.timer` disabled and inactive, `wbb-autodeploy.service` inactive |
    | `lock` | the deploy lock is free (opened read-only; a missing file is free) |
-   | `state` | `state.env` is a regular file the migration (step 6) accepts — its own key lists and rules — with no `WINDOW_*`/`ROLLBACK_STARTED` |
+   | `state` | `state.env` is a regular file the migration (step 6) accepts — its own key lists and rules — with no `WINDOW_*`/`ROLLBACK_STARTED`, no `state.env.flat` and no `state.env.new` that is not a directory |
    | `deployed` | `DEPLOYED_SHA` is there and an ancestor of `origin/main` |
    | `image-state` | no `image-state.env` yet |
    | `helper` | `sudo bash deploy/install-image.sh --check` is clean. **`EXPECTED`** when its only difference is exactly `DIFFERS: /usr/local/lib/wbb-image/wbb_image.py (content)` + `1 difference(s): …` — the installed helper predates this checkout's (`reset-failed` in `activate`), step 7 reinstalls it. Any other difference is a `FAIL` |
    | `gh` | `gh attestation verify --help` knows `--source-digest` and `--deny-self-hosted-runners` |
    | `checkout` | clean (`git status --porcelain` empty) and HEAD = `origin/main`'s head |
+   | `ci` | CI concluded on HEAD with `ci` and `image` green in one check suite — the controller's own `_checks_default` and `ci_verdict`, read from `deploy/autodeploy.sh` (the bootstrap's CI gate) |
    | `image` | HEAD's tag resolves to a digest that passes `gh attestation verify` — the controller's own two calls, read from `deploy/autodeploy.sh` |
    | `quadlet` | no `/etc/containers/systemd/warsaw-beer-bot.container` |
    | `space` | ≥ 5 GiB free in `/var/lib/containers` and `/var/lib` |
@@ -284,11 +314,14 @@ resume at the step you stopped on.
    again. Fix every `FAIL` and run it again until `RESULT: PASS`.
 5. **Rehearsal** (spec поправка 4; `scripts/ops/rehearsal/`): the checkout's controller and the
    checkout's helper go through the scenarios on a test unit `wbb-rehearsal`, against the real
-   podman, systemd, GHCR and attestation, on a copy of the production database. Pick **S** and
-   **D**, two commits of `main` with published images, S an ancestor of D, with different
-   `wbb.content` and no `migration:contract`/`rollback:unsafe` PR between them (D = the head of
-   `main` is a good choice; `git log --first-parent --format='%H %ad %s' --date=short origin/main`
-   for S). Then, in tmux/screen:
+   podman, systemd, GHCR and attestation, on a copy of the production database. **D** is HEAD (the
+   merge commit of step 1). **S** is the nearest earlier first-parent commit of `main` with green
+   `ci`+`image` and a `wbb.content` different from D's, at or after `e480463` (from there on
+   `start-check` knows `--leave-running`; the helper refuses an older image as a COMPAT target), with
+   no `migration:contract`/`rollback:unsafe` PR between S and D
+   (`git log --first-parent --format='%H %ad %s' --date=short origin/main`). S is **re-audited now**:
+   scenario (а) runs `npm audit` in S's image today, so an advisory published since S was built fails
+   it — pick a newer S. Then, in tmux/screen:
 
    ```bash
    sudo -v
@@ -300,15 +333,16 @@ resume at the step you stopped on.
      failure, never a password prompt.
    - Before it creates anything it refuses (`REFUSED: …`, nothing created) when a precondition does
      not hold: the timer or its service active, a leftover kit, production's Quadlet file present,
-     the port in use, < 5 GiB, S/D not as above (no image, same `wbb.content`, a contract PR in the
-     range). Pick other S/D or fix the cause, then run it again.
+     the port in use, < 5 GiB, S/D not as above (no image, CI on S or D not green — read with the
+     controller's own `ci_verdict`, which its manual runs would refuse later —, S older than `e480463`,
+     same `wbb.content`, a contract PR in the range). Pick other S/D or fix the cause, then run it again.
    - **The kit bot is a real bot on a copy:** its crons make real outbound requests (the same sites
      as production) and it writes only into the copy `/var/lib/wbb-rehearsal/data/bot.db`. Telegram is
      unreachable for it (`api.telegram.org` → 127.0.0.1, a fake token, no `.env`), and the
      controller's messages go to a file of the kit — nothing reaches Telegram.
-   - **Firewall:** during the rehearsal the kit listens on **port 3917 on the host network**
-     (`Network=host`, its `/health`). If the host firewall lets that port in from outside, close it
-     for the hour.
+   - **Port:** the kit's bot runs with `Network=host` and its API on **port 3917**, but the API binds
+     `127.0.0.1` only (`src/api/index.ts`), so nothing is reachable from outside and the firewall needs no
+     change; the port must only be free on the host (a precondition).
    - **The summary** comes after the cleanup:
      `=== rehearsal summary ===`, `S=… D=…`, then `PASS|FAIL|SKIP` for each scenario —
      (а) bootstrap S, (б) deploy D, (в) a sick candidate rolled back, three (г) interruptions, (ґ) a
@@ -342,11 +376,28 @@ resume at the step you stopped on.
    frozen flat bot: `summary.json` keeps its shape, the unit and the image go into a separate
    `image.json`; before the bootstrap `python3 -m json.tool /var/tmp/wbb-host-patch/image.json`
    shows `"unit": "foreign"` and `"deployed_digest": null`.
-8. **Bootstrap:** `bash deploy/deploy.sh --bootstrap`, the printed root steps, then
-   `bash deploy/deploy.sh --bootstrap` again — The first image release (bootstrap), below, with the
-   way back on every refusal; a failed window is After a failed bootstrap, below.
+8. **Bootstrap**, inside the same tmux/screen session (the second run watches a 10-min window in the
+   foreground; a dropped SSH session interrupts it): `bash deploy/deploy.sh --bootstrap`, the printed
+   root steps, then `bash deploy/deploy.sh --bootstrap` again — The first image release (bootstrap),
+   below, with the way back on every refusal; a failed window is After a failed bootstrap, below.
+
+   **If the second run is interrupted** (Ctrl-C, a dropped session, a kill), run it again. When it
+   refuses with `a window of <sha> is open (<phase>) — the timer finishes it`, the window was already
+   written and only a tick may finish it — so do **step 9 now** (and `sudo systemctl start
+   wbb-autodeploy.service` for a tick at once, instead of in ~6 min). The new controller's first tick takes
+   the window before anything else (spec §7.2, the bootstrap rows): still `activating` with no Quadlet
+   file and no unit → the window is cancelled and Telegram says `the first image release <sha> was
+   interrupted before its activation … run bash deploy/deploy.sh --bootstrap again` — do that, with the
+   timer left running; the Quadlet file names the image but it does not run → `activate` again (up to
+   three attempts, then an incident; a refused one that changed nothing cancels the window, and its
+   message too says to run `--bootstrap` again); the image already runs, or
+   the window was `watching` → it is watched to its end: settled (the first image release is done), or
+   failed → an incident (After a failed bootstrap). The root steps must stay done: the window exists
+   only after the second run found the old unit moved aside and stopped, and a tick that finds the old
+   unit back (`unit=foreign`) opens an incident instead of finishing the window.
 9. **Start the timer:** `sudo systemctl enable --now wbb-autodeploy.timer`.
-10. **Check the first tick and the status.** Within 5 min:
+10. **Check the first tick and the status.** About 6 min after step 9 (`OnActiveSec=5min` plus up to
+    `RandomizedDelaySec=60`), or at once with `sudo systemctl start wbb-autodeploy.service`:
     `journalctl -u wbb-autodeploy.service -n 30` shows a tick that exited 0 (nothing to deploy: the
     bootstrapped HEAD is `main`); `wbb-autodeploy --check-state` → `STATE OK`;
     `sudo -n /usr/local/libexec/wbb-image current` → `unit=quadlet` and the bootstrapped digest. The
@@ -382,11 +433,13 @@ a human: `bash deploy/deploy.sh --ack-incompatible`).
 
 A deploy that needs a human on the host is **held**, never attempted:
 
-- the range changes a path that needs root or an install step: `deploy/sudoers.d/**`,
-  `deploy/*.service` / `*.timer` (except `warsaw-beer-bot.service`), `deploy/litestream.*`,
-  `deploy/install-*.sh`, `deploy/rsync-filter`, an installed copy (`deploy/autodeploy.sh`,
-  `read-env.sh`, `db-snapshot.sh`, `installed-current.sh`), the helper `deploy/image/helper/**` or the
-  Quadlet template;
+- the range changes a path that needs root or an install step (`path_is_held` in
+  `deploy/autodeploy.sh`): `deploy/sudoers.d/**`, `deploy/*.service` / `*.timer` / `*.path` (except
+  `warsaw-beer-bot.service`), `deploy/litestream.*`, `deploy/install-*.sh`, `deploy/rsync-filter`, an
+  installed copy (`deploy/autodeploy.sh`, `ships.sh`, `read-env.sh`, `installed-current.sh`,
+  `db-snapshot.sh`, `trial-migrate.cjs`), the helper `deploy/image/helper/**`, the Quadlet template
+  `deploy/image/warsaw-beer-bot.container`, or the root-run ops scripts
+  `scripts/ops/host_patch_collect.py` and `scripts/ops/reboot_request.py`;
 - or a PR in the range carries `deploy:hold` (title starts with `[deploy:hold]`; the `deploy-hold` CI
   check flags a mismatch; the body lists the steps);
 - or a PR carries `rollback:unsafe` / `migration:contract`: a code-only rollback is not proven safe,
@@ -507,7 +560,9 @@ If a run is interrupted, what it leaves and what to do:
 | `state.env.flat` and `state.env.new/`, no `state.env` (killed between the two renames) | `mv ~/.local/state/wbb-autodeploy/state.env.new ~/.local/state/wbb-autodeploy/state.env` |
 | `state.env/` (a directory), `state.env.flat`, `image-state.env` | done |
 
-Then `sudo bash deploy/install-autodeploy.sh` and the first image release (bootstrap, below).
+Then step 7 of the Switchover session (above): `sudo bash deploy/install-image.sh`, its `--check`,
+`sudo bash deploy/install-autodeploy.sh`, `sudo bash deploy/install-host-patch-collector.sh`; then the
+first image release (bootstrap, below).
 
 ### Emergency stop — no password required
 

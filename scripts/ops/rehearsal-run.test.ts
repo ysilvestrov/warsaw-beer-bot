@@ -153,8 +153,11 @@ stop_here() { echo "$$" > "$STUB_DIR/blocked"; exec sleep 1000; }
 
 interface World {
   root: string; stub: string; kit: string; etc: string; tmp: string; git: string;
-  S: string; D: string; env: Record<string, string>;
+  base: string; S: string; D: string; env: Record<string, string>;
 }
+
+/** ci and image green in one check suite, as gh prints them for the controller's ci_verdict: PASS. */
+const GREEN = 'ci\tcompleted\tsuccess\t7\nimage\tcompleted\tsuccess\t7\n';
 
 function git(dir: string, ...args: string[]): string {
   const r = spawnSync('git', ['-C', dir, ...args], {
@@ -180,6 +183,7 @@ function world(): World {
   }
   git(repo, 'init', '-q');
   git(repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+  const base = git(repo, 'rev-parse', 'HEAD');
   git(repo, 'commit', '-q', '--allow-empty', '-m', 'S');
   const S = git(repo, 'rev-parse', 'HEAD');
   git(repo, 'commit', '-q', '--allow-empty', '-m', 'D');
@@ -197,6 +201,10 @@ function world(): World {
   // The PRs of a commit, as gh prints them for the controller: prs/<sha> holds number<TAB>label,label.
   sh('labels', '[ -e "$STUB_DIR/labels-rc" ] && exit "$(cat "$STUB_DIR/labels-rc")"; cat "$STUB_DIR/prs/$1" 2>/dev/null; exit 0');
   mkdirSync(join(stub, 'prs'));
+  // The check runs of a commit, as the controller's _checks_default prints them: ci/<sha>; each read logged
+  // apart (the main log holds only what a refused run must not have written).
+  sh('checks', 'echo "$1" >> "$STUB_DIR/checks-log"; [ -e "$STUB_DIR/checks-rc" ] && exit "$(cat "$STUB_DIR/checks-rc")"; cat "$STUB_DIR/ci/$1"');
+  mkdirSync(join(stub, 'ci'));
   file(join(stub, 'shim.py'), SHIM);
   const kit = join(root, 'kit', 'wbb-rehearsal');
   const state: Record<string, string> = {
@@ -209,6 +217,8 @@ function world(): World {
   for (const [k, v] of Object.entries(state)) file(join(stub, k), v);
   file(join(stub, 'reg', S), `${DS} ${CS}\n`);
   file(join(stub, 'reg', D), `${DD} ${CD}\n`);
+  file(join(stub, 'ci', S), GREEN);
+  file(join(stub, 'ci', D), GREEN);
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TMPDIR: tmp, STUB_DIR: stub,
     REHEARSAL_SUDO: join(stub, 'sudo'), REHEARSAL_SYSTEMCTL: join(stub, 'systemctl'), REHEARSAL_PODMAN: join(stub, 'podman'),
@@ -216,9 +226,9 @@ function world(): World {
     REHEARSAL_CONTROLLER: join(stub, 'controller'), REHEARSAL_SHIM: join(stub, 'shim.py'), REHEARSAL_GIT_DIR: repo,
     REHEARSAL_ETC: etc, REHEARSAL_PROD_DB: join(root, 'prod', 'bot.db'), REHEARSAL_CONTAINERS_ROOT: join(root, 'containers'),
     REHEARSAL_EUID: '1000', REHEARSAL_POLL_S: '0.05', REHEARSAL_KEEPALIVE_S: '3600', REHEARSAL_TERM_GRACE_S: '2',
-    REHEARSAL_PR_LABELS_CMD: join(stub, 'labels'),
+    REHEARSAL_PR_LABELS_CMD: join(stub, 'labels'), REHEARSAL_CHECKS_CMD: join(stub, 'checks'), REHEARSAL_COMPAT_BASE: base,
   };
-  return { root, stub, kit, etc, tmp, git: repo, S, D, env };
+  return { root, stub, kit, etc, tmp, git: repo, base, S, D, env };
 }
 
 const settled = (w: World, sha: string, digest: string) => `put DEPLOYED_SHA=${sha} SETTLED_SHA=${sha} SETTLED_DIGEST=${digest}`;
@@ -291,7 +301,7 @@ const CLEANUP = [
 const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n p(kill|grep) /.test(l));
 const PROD_READ = [
   `sudo -n python3 -I -c import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wbb_image; sys.exit(wbb_image.main(["current"])) <R>/deploy/image/helper`,
-  'systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState,MainPID',
+  'systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState',
 ];
 
 describe('run.sh: the scenarios as the plan expects them', () => {
@@ -449,14 +459,31 @@ ${expected(w)[2]}` });
       '!!! PRODUCTION CHANGED DURING THE REHEARSAL — look at warsaw-beer-bot.service now !!!',
       'before:',
       `  ${PROD_CURRENT}`,
-      '  LoadState=loaded', '  ActiveState=active', '  SubState=running', '  MainPID=4242',
+      '  LoadState=loaded', '  ActiveState=active', '  SubState=running',
       'after:',
       `  CURRENT quadlet=${DD} container-image=${ID} container-digest=${DD} unit=quadlet`,
-      '  LoadState=loaded', '  ActiveState=active', '  SubState=running', '  MainPID=4242',
+      '  LoadState=loaded', '  ActiveState=active', '  SubState=running',
       ...P3,
       'RESULT: FAIL (8/9)',
       '',
     ].join('\n')]);
+  });
+
+  it('the flat bot restarted on its own meanwhile (a new MainPID, the same unit state): production unchanged', () => {
+    const w = world();
+    script(w, { ...expected(w), 2: `sed -i 's/^MainPID=4242$/MainPID=5151/' "$STUB_DIR/props-warsaw-beer-bot.service"
+${expected(w)[2]}` });
+    const r = run(w);
+    expect([r.code, summary(r.out).split('\n')[10], readFileSync(join(w.stub, 'props-warsaw-beer-bot.service'), 'utf8')]).toEqual([0,
+      'PASS  production unchanged', PROD_SHOW.replace('4242', '5151')]);
+  });
+
+  it('the flat bot stopped meanwhile (ActiveState differs): FAIL production unchanged', () => {
+    const w = world();
+    script(w, { ...expected(w), 2: `sed -i 's/^ActiveState=active$/ActiveState=inactive/' "$STUB_DIR/props-warsaw-beer-bot.service"
+${expected(w)[2]}` });
+    const r = run(w);
+    expect([r.code, summary(r.out).split('\n')[10]]).toEqual([1, 'FAIL  production unchanged — PRODUCTION CHANGED']);
   });
 
   it('a cleanup that leaves the container: FAIL cleanup', () => {
@@ -727,6 +754,18 @@ const PRECONDITIONS: [string, (w: World) => void, (w: World) => string][] = [
     (w) => `S ${w.S.slice(0, 12)} has no published image (no tag ${w.S} in ghcr.io/ysilvestrov/warsaw-beer-bot)`],
   ['S and D have one content', (w) => file(join(w.stub, 'reg', w.D), `${DD} ${CS}\n`),
     () => `S and D have the same wbb.content (${CS}): deploying one over the other is a noop and proves nothing`],
+  ['S older than the start-check --leave-running commit', (w) => { w.env.REHEARSAL_COMPAT_BASE = w.D; },
+    (w) => `S ${w.S.slice(0, 12)} is older than ${w.D.slice(0, 12)}: its start-check predates --leave-running, and the helper refuses its image as a COMPAT target — pick S at or after ${w.D.slice(0, 12)}`],
+  ['the start-check --leave-running commit is not in the checkout', (w) => { w.env.REHEARSAL_COMPAT_BASE = 'e'.repeat(40); },
+    (w) => `${'e'.repeat(12)} (start-check --leave-running) is not a commit of ${w.git} (git fetch first)`],
+  ['CI still running on D', (w) => file(join(w.stub, 'ci', w.D), 'ci\tcompleted\tsuccess\t7\nimage\tqueued\t\t7\n'),
+    (w) => `CI has not concluded on D ${w.D.slice(0, 12)} — the required 'ci' and 'image' checks of one run are pending or absent; the controller would refuse to deploy it`],
+  ["S's ci and image only in different check suites", (w) => file(join(w.stub, 'ci', w.S), 'ci\tcompleted\tsuccess\t7\nimage\tcompleted\tsuccess\t9\n'),
+    (w) => `CI has not concluded on S ${w.S.slice(0, 12)} — the required 'ci' and 'image' checks of one run are pending or absent; the controller would refuse to deploy it`],
+  ['CI failed on S', (w) => file(join(w.stub, 'ci', w.S), 'ci\tcompleted\tsuccess\t7\nimage\tcompleted\tfailure\t7\n'),
+    (w) => `CI failed on S ${w.S.slice(0, 12)}: image=failure — the controller would refuse to deploy it; pick another S`],
+  ['CI status cannot be read', (w) => file(join(w.stub, 'checks-rc'), '1'),
+    (w) => `cannot read CI status for S ${w.S.slice(0, 12)} (gh api failed)`],
 ];
 
 describe('run.sh: each precondition refuses, and nothing is created', () => {
@@ -738,6 +777,14 @@ describe('run.sh: each precondition refuses, and nothing is created', () => {
     const r = run(w, [w.S, w.D]);
     expect([r.code, r.err, r.out]).toEqual([1, `REFUSED: ${reason(w)}\nNothing was created.\n`, '']);
     expect([writes(w), readdirSync(w.tmp), existsSync(w.kit)]).toEqual([[], [], kitBefore]);
+  });
+
+  it('S at the start-check --leave-running commit itself is accepted, and CI is read for S, then D', () => {
+    const w = world();
+    script(w, expected(w));
+    w.env.REHEARSAL_COMPAT_BASE = w.S;
+    const r = run(w);
+    expect([r.code, readFileSync(join(w.stub, 'checks-log'), 'utf8')]).toEqual([0, `${w.S}\n${w.D}\n`]);
   });
 
   it('D on main but past origin/main as this checkout knows it: refused', () => {

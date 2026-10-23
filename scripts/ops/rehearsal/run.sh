@@ -11,9 +11,12 @@
 #   sudo -v && bash scripts/ops/rehearsal/run.sh <S-sha> <D-sha>
 #
 # Run as the operator (not root), from a checkout of origin/main, with the deploy timer stopped. S and D are
-# commits of main with published images, S an ancestor of D, with different wbb.content; the range S..D must
-# hold no migration:contract / rollback:unsafe PR (the controller would refuse both directions without
-# --ack-incompatible, and a manual window never rolls back). About an hour: four 600 s windows.
+# commits of main with published images and green CI (`ci` and `image` in one check suite, as the controller's
+# own ci_verdict judges it: its manual runs refuse anything else), S an ancestor of D and at or after e480463
+# (start-check --leave-running: the helper refuses an older image as a COMPAT target), with different
+# wbb.content; the range S..D must hold no migration:contract / rollback:unsafe PR (the controller would refuse
+# both directions without --ack-incompatible, and a manual window never rolls back). About an hour: four 600 s
+# windows.
 #
 # The scenarios, in this order (each one stands on the state the previous one left):
 #   (а)  --manual bootstrap --target S                          → exit 0, S settled and running
@@ -33,7 +36,8 @@
 # Seams (tests only; each defaults to the real thing): REHEARSAL_SUDO, REHEARSAL_SYSTEMCTL, REHEARSAL_PODMAN,
 # REHEARSAL_CURL, REHEARSAL_DF, REHEARSAL_CLOCK, REHEARSAL_CONTROLLER, REHEARSAL_SHIM, REHEARSAL_GIT_DIR,
 # REHEARSAL_ETC, REHEARSAL_PROD_DB, REHEARSAL_CONTAINERS_ROOT, REHEARSAL_EUID, REHEARSAL_POLL_S,
-# REHEARSAL_KEEPALIVE_S, REHEARSAL_TERM_GRACE_S, REHEARSAL_PR_LABELS_CMD.
+# REHEARSAL_KEEPALIVE_S, REHEARSAL_TERM_GRACE_S, REHEARSAL_PR_LABELS_CMD, REHEARSAL_CHECKS_CMD,
+# REHEARSAL_COMPAT_BASE.
 #
 # Every sudo is `sudo -n`: a ticket that lapsed is a loud failure, never a password prompt from a background
 # process group (which would stop it on SIGTTIN and hang the hour).
@@ -61,12 +65,17 @@ KEEPALIVE_S="${REHEARSAL_KEEPALIVE_S:-60}"
 # How long a TERMed controller gets to go (its helper call ends with it) before the KILL.
 TERM_GRACE_S="${REHEARSAL_TERM_GRACE_S:-30}"
 PR_LABELS_CMD="${REHEARSAL_PR_LABELS_CMD:-}"
+CHECKS_SEAM="${REHEARSAL_CHECKS_CMD:-}"
+# The first commit whose start-check knows --leave-running (README → Root helper `wbb-image`): S's image is the
+# COMPAT target of (б), and the helper refuses one that predates the flag.
+COMPAT_BASE="${REHEARSAL_COMPAT_BASE:-e480463f7437ea538009e30d0fb65e3571cf6889}"
 # The operator's own values must not steer a scenario: these are set per scenario, nowhere else.
 unset REHEARSAL_SICK_DIGEST REHEARSAL_PAUSE REHEARSAL_EVENTS REHEARSAL_NOTIFY_FILE
 
 # The checkout's controller is the source of its constants, whatever runs as REHEARSAL_CONTROLLER.
 CONTROLLER_SRC="$ROOT/deploy/autodeploy.sh"
 GH_REPO=$(sed -n 's/^GH_REPO=\([A-Za-z0-9._/-]*\)$/\1/p' "$CONTROLLER_SRC")
+STEP_TIMEOUT_GH_S=$(sed -n 's/^STEP_TIMEOUT_GH_S=\([0-9][0-9]*\)\( .*\)\{0,1\}$/\1/p' "$CONTROLLER_SRC")
 WINDOW_S=$(sed -n 's/^WINDOW_S=\([0-9][0-9]*\)$/\1/p' "$CONTROLLER_SRC")
 HELPER_DIR="$ROOT/deploy/image/helper"
 SNAPSHOT_SRC="$ROOT/deploy/db-snapshot.sh"
@@ -116,7 +125,20 @@ usage() {
 S="$1"
 D="$2"
 [[ $S =~ ^[0-9a-f]{40}$ && $D =~ ^[0-9a-f]{40}$ ]] || usage
-[ -n "$GH_REPO" ] && [ -n "$WINDOW_S" ] || refuse "cannot read GH_REPO and WINDOW_S from $CONTROLLER_SRC"
+[ -n "$GH_REPO" ] && [ -n "$WINDOW_S" ] && [ -n "$STEP_TIMEOUT_GH_S" ] \
+  || refuse "cannot read GH_REPO, WINDOW_S and STEP_TIMEOUT_GH_S from $CONTROLLER_SRC"
+# One function of the controller, verbatim: from `name() {` to the first `}` alone on a line (as
+# scripts/ops/switchover-preflight.sh reads it).
+read_function() { # <file> <name>
+  local text
+  text=$(awk -v n="$2" '$0 == n "() {" { on = 1 } on { print } on && $0 == "}" { exit }' "$1") || return 1
+  case "$text" in *$'\n}') ;; *) return 1 ;; esac
+  eval "$text"
+}
+# The controller's CI read and verdict, as its manual_ci_gate uses them.
+read_function "$CONTROLLER_SRC" _checks_default && read_function "$CONTROLLER_SRC" ci_verdict \
+  || refuse "cannot read _checks_default and ci_verdict from $CONTROLLER_SRC"
+CHECKS_CMD="${CHECKS_SEAM:-_checks_default}"
 
 [ "$RUN_EUID" != 0 ] || refuse "run as the operator, not as root (the controller runs as the operator; sudo is asked for each root step)"
 "$SUDO" -n true 2>/dev/null || refuse "no sudo credentials are cached — run sudo -v first"
@@ -180,6 +202,10 @@ done
 [ "$S" != "$D" ] || refuse "S and D are the same commit"
 git_ merge-base --is-ancestor "$S" "$D" 2>/dev/null || refuse "S ${S:0:12} is not an ancestor of D ${D:0:12}"
 git_ merge-base --is-ancestor "$D" origin/main 2>/dev/null || refuse "D ${D:0:12} is not on origin/main (git fetch first)"
+git_ cat-file -e "${COMPAT_BASE}^{commit}" 2>/dev/null \
+  || refuse "${COMPAT_BASE:0:12} (start-check --leave-running) is not a commit of $GIT_DIR_ (git fetch first)"
+git_ merge-base --is-ancestor "$COMPAT_BASE" "$S" 2>/dev/null \
+  || refuse "S ${S:0:12} is older than ${COMPAT_BASE:0:12}: its start-check predates --leave-running, and the helper refuses its image as a COMPAT target — pick S at or after ${COMPAT_BASE:0:12}"
 
 # The PRs of S..D, read as the controller reads them (its _pr_labels_default: one line per PR, number<TAB>labels).
 # A contract label in the range makes the controller refuse both directions without --ack-incompatible, and with
@@ -203,6 +229,18 @@ done <<< "$commits"
 if [ "${#contract[@]}" -gt 0 ]; then
   refuse "the range ${S:0:12}..${D:0:12} holds $(printf '%s, ' "${contract[@]}" | sed 's/, $//') — the controller deploys it only with --ack-incompatible, in manual windows; pick S and D with no contract PR between them"
 fi
+
+# CI on S and D, read and judged by the controller's own functions: every manual run of it (bootstrap S, deploy D,
+# deploy S --force) passes manual_ci_gate first, which refuses anything but PASS — an hour into the session.
+for c in S D; do
+  verdict=$(ci_verdict "${!c}" 2>/dev/null) || refuse "cannot read CI status for $c ${!c:0:12} (gh api failed)"
+  case "$verdict" in
+    PASS) ;;
+    WAIT) refuse "CI has not concluded on $c ${!c:0:12} — the required 'ci' and 'image' checks of one run are pending or absent; the controller would refuse to deploy it" ;;
+    FAIL*) refuse "CI failed on $c ${!c:0:12}: ${verdict#FAIL } — the controller would refuse to deploy it; pick another $c" ;;
+    *) refuse "the controller's CI verdict for $c ${!c:0:12} is '$verdict'" ;;
+  esac
+done
 
 # The tag <sha> → digest, as the controller resolves it, and the image's wbb.content from its config —
 # all anonymous registry reads; nothing is pulled. Prints "<digest> <content>"; 3 = no such tag.
@@ -245,11 +283,12 @@ if [ "$CONTENT_S" = "$CONTENT_D" ]; then
   refuse "S and D have the same wbb.content ($CONTENT_S): deploying one over the other is a noop and proves nothing"
 fi
 
-# Production as `current` and systemd see it: the same text before and after, or the rehearsal FAILS.
+# Production as `current` and systemd see it: the same text before and after, or the rehearsal FAILS. No MainPID:
+# the flat bot restarting on its own during the hour (Restart=, a crash) is not the rehearsal's doing.
 prod_fingerprint() {
   local cur unit
   cur=$("$SUDO" -n python3 -I -c "$PROD_CURRENT_PY" "$HELPER_DIR" 2>/dev/null) || return 1
-  unit=$("$SYSTEMCTL" show "$PROD_UNIT" -p LoadState,ActiveState,SubState,MainPID 2>/dev/null) || return 1
+  unit=$("$SYSTEMCTL" show "$PROD_UNIT" -p LoadState,ActiveState,SubState 2>/dev/null) || return 1
   [ -n "$cur" ] && [ -n "$unit" ] || return 1
   printf '%s\n%s\n' "$cur" "$unit"
 }
