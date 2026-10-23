@@ -19,6 +19,8 @@
     // Artifact deployment Ядро-1: the workflow contract of the runtime artifact.
     "scripts/release.test.ts",
     "scripts/ops.test.ts",
+    // Stage «в» harness: the rehearsal kit's run.sh, driven through its seams.
+    "scripts/ops/rehearsal-run.test.ts",
     "scripts/autodeploy/**/*",
     // Migration contract lint (spec 2026-10-11 §6.5).
     "scripts/migrations/**/*",

@@ -8,3 +8,8 @@ Captured on the production host 2026-10-08 (`tmp/capture-469-s2.sh`, read-only):
 Composed by hand (no live example existed on the capture day):
 - `needrestart-b-stale.txt` — a newer installed kernel and a stale `litestream.service`.
 - `apt-list-upgradable-security.txt` — two `-security` candidates (spec claim C17, medium).
+
+Written by the collector itself (`test_the_written_files_are_the_fixtures_the_bot_s_readers_are_tested_on` keeps
+them byte-equal to its output; `src/jobs/host-patch.test.ts` reads them with the bot's readers):
+- `collector-summary.json` — `summary.json` of the 2026-10-08 fixtures above; the shape every bot release reads.
+- `collector-image.json` — `image.json` (spec 2026-10-11 §10, version 2) for a Quadlet unit inside a deploy window activating D2.

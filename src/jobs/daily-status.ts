@@ -3,6 +3,7 @@ import type { DB } from '../storage/db';
 import type { Env } from '../config/env';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import type { StatusMetrics } from '../storage/stats';
+import type { ImageFacts } from '../domain/status/types';
 import { getJobState, setJobState } from '../storage/job_state';
 import { saveStatusSnapshot, pruneStatusSnapshots } from '../storage/status_snapshots';
 import { pruneHandlerFailures } from '../storage/handler_failures';
@@ -70,6 +71,7 @@ export interface DailyStatusDeps {
   testDiagnosticsUid?: number;
   hostPatchPath?: string;
   hostPatchUid?: number;
+  hostImagePath?: string;
   /** Which fest eyes are configured, for the status to tell a dead eye from a switched-off one (#885). */
   festEyes?: { mcp: boolean; server: boolean };
 }
@@ -86,6 +88,27 @@ export function dailyStatusEnvDeps(
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
+
+// Spec 2026-10-11 §10: which unit runs the bot and from which image, next to what the controller deployed.
+// Null when there is no fresh readable image.json (a collector installed before it, or one that stopped): no
+// line, and nothing else changes. Before the switchover the flat unit is `foreign`, and that is expected.
+const short = (digest: string): string => digest.slice('sha256:'.length, 'sha256:'.length + 12);
+// A foreign unit with no DEPLOYED_DIGEST is the flat unit before the switchover; with one, the image era has
+// begun and the unit is not ours — an incident. Inside a deploy window DEPLOYED_DIGEST moves only once the
+// activation (or the rollback) is recorded, so the window's own candidate or predecessor running is not «≠».
+export function buildImageLine(image: ImageFacts | null): string | null {
+  if (image === null) return null;
+  const { runningDigest: running, deployedDigest: deployed } = image;
+  if (image.unit === 'foreign' && deployed === null) return 'unit=flat (до перемикання)';
+  if (image.unit === 'absent') return 'unit=absent';
+  const unit = image.unit === 'foreign' ? '⚠️ unit=foreign' : `unit=${image.unit ?? '?'}`;
+  if (running === null) return `${unit} · образ ?`;
+  const inWindow = running === image.windowDigest || running === image.windowPrevDigest;
+  const against = deployed === null ? 'задеплоєний невідомий'
+    : deployed === running ? '= задеплоєного'
+      : inWindow ? 'вікно деплою' : '≠ задеплоєного';
+  return `${unit} · образ ${short(running)} (${against})`;
+}
 
 // Stage 1 of the traffic light reads no event log yet, so an incident that ended before 09:00 is
 // invisible; the report says so instead of letting 🟢 claim it (spec, "Claims and evidence").
@@ -125,6 +148,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
     pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
   } catch { /* see above */ }
   // The pause is a channel-health fact (🔴 Канали), so the users section shows activity only.
+  const imageLine = buildImageLine(inputs.hostImage);
   const bugReportLine = opts.repo && inputs.bugReports
     ? buildBugReportLine(inputs.bugReports.summary, null, opts.repo)
     : null;
@@ -132,7 +156,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
     stamp: warsawStamp(now),
     overall: evaluation.overall,
     subsystems: evaluation.subsystems,
-    footers: [...evaluation.footers, EVENTS_FOOTER, NOT_MEASURED_FOOTER],
+    footers: [...evaluation.footers, ...(imageLine === null ? [] : [imageLine]), EVENTS_FOOTER, NOT_MEASURED_FOOTER],
     events: inputs.triage.line ? [inputs.triage.line] : [],
     users: buildUserLines(inputs.metrics, bugReportLine),
     trends: computeTrends(dateKey, inputs.metrics, inputs.history),
@@ -168,7 +192,8 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     if (!markerReadable) throw new Error('daily-status: last-sent marker unreadable');
     text = buildDailyReport(db, now, dateKey, {
       repo: deps.repo, testDiagnosticsPath: deps.testDiagnosticsPath, testDiagnosticsUid: deps.testDiagnosticsUid,
-      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid, festEyes: deps.festEyes,
+      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid, hostImagePath: deps.hostImagePath,
+      festEyes: deps.festEyes,
     });
   } catch (e) {
     // The report itself broke. Say so once per Warsaw day instead of going silent; the delivery
