@@ -1,0 +1,597 @@
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:net';
+import { join, resolve } from 'node:path';
+import { makeTempDirectory } from '../test-temp';
+
+vi.setConfig({ testTimeout: 60_000 });
+
+/**
+ * Stage «в» harness, Task 2 (docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-harness.md,
+ * "Рішення" п.1–4): scripts/ops/rehearsal/run.sh with every outside contact a stub that logs its call — sudo,
+ * systemctl, podman, the registry (curl), df, the clock, the shim and the controller. The stub shim keeps the
+ * kit unit's "what runs" in files (activate writes it, current reads it); the stub controller runs, per
+ * invocation, a snippet the test wrote: it calls the kit's generated WBB_IMAGE_CMD and notifier, writes the
+ * state, advances the clock and exits with the code a real run would. Expected texts are literals.
+ */
+const RUN = resolve(__dirname, 'rehearsal/run.sh');
+const ROOT = resolve(__dirname, '../..');
+
+const ID = 'a'.repeat(64);
+const DS = `sha256:${'1'.repeat(64)}`;
+const DD = `sha256:${'2'.repeat(64)}`;
+const CS = 'c'.repeat(64);
+const CD = 'd'.repeat(64);
+const PROD_CURRENT = 'CURRENT quadlet=none container-image=none container-digest=none unit=foreign';
+const PROD_SHOW = 'LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=4242\n';
+
+let FREE_PORT = 0;
+beforeAll(async () => {
+  const s = createServer();
+  await new Promise<void>((done) => s.listen(0, '127.0.0.1', done));
+  FREE_PORT = (s.address() as { port: number }).port;
+  await new Promise<void>((done) => s.close(() => done()));
+});
+
+function file(path: string, text: string, mode = 0o644): void {
+  writeFileSync(path, text);
+  chmodSync(path, mode);
+}
+
+const SUDO = `printf 'sudo %s\\n' "$*" >> "$STUB_DIR/log"
+if [ "$*" = "-n true" ]; then exit "$(cat "$STUB_DIR/sudo-rc")"; fi
+if [ "$*" = "-n -v" ]; then exit 0; fi
+if [ "$1" = -u ]; then exit 0; fi
+if [ "$1" = python3 ] && [ "$3" = -c ]; then cat "$STUB_DIR/prod-current"; exit 0; fi
+while [[ \${1:-} == *=* ]]; do export "$1"; shift; done
+if [ "$1" = install ]; then
+  args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in -o|-g) shift 2 ;; *) args+=("$1"); shift ;; esac
+  done
+  exec "\${args[@]}"
+fi
+exec "$@"`;
+
+// show <unit> -p A,B [--value] | show -p A --value <unit>: the unit's properties from a file, in the order asked.
+const SYSTEMCTL = `printf 'systemctl %s\\n' "$*" >> "$STUB_DIR/log"
+case "$1" in
+  show)
+    shift
+    unit="" props="" value=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in -p) props="$2"; shift 2 ;; --value) value=1; shift ;; *) unit="$1"; shift ;; esac
+    done
+    src="$STUB_DIR/props-$unit"
+    if [ "$unit" = wbb-rehearsal.service ] && [ -e "$STUB_DIR/kit-active" ]; then src="$STUB_DIR/props-kit-active"; fi
+    IFS=, read -r -a want <<< "$props"
+    for p in "\${want[@]}"; do
+      v=$(sed -n "s/^$p=//p" "$src")
+      if [ "$value" = 1 ]; then echo "$v"; else echo "$p=$v"; fi
+    done ;;
+  stop) if [ "$2" = wbb-rehearsal.service ]; then rm -f "$STUB_DIR/kit-active"; fi ;;
+esac
+exit 0`;
+
+const PODMAN = `printf 'podman %s\\n' "$*" >> "$STUB_DIR/log"
+if [ "$1 $2" = "container exists" ]; then exit "$(cat "$STUB_DIR/podman-exists-rc")"; fi
+exit 0`;
+
+// GHCR as the kit reads it: reg/<sha> holds "<digest> <content>"; the config blob of a digest is named after
+// its content, and carries it as wbb.content.
+const CURL = `url="\${*: -1}"
+case "$url" in
+  *'/token?'*) echo '{"token":"tok"}' ;;
+  */manifests/sha256:*)
+    d="\${url##*/manifests/}"
+    c=$(cat "$STUB_DIR"/reg/* | awk -v d="$d" '$1 == d { print $2 }')
+    echo "{\\"config\\": {\\"digest\\": \\"sha256:$c\\"}}" ;;
+  */manifests/*)
+    sha="\${url##*/}"
+    if [ -f "$STUB_DIR/reg/$sha" ]; then
+      printf 'HTTP/2 200\\r\\ndocker-content-digest: %s\\r\\n\\r\\n' "$(awk '{ print $1 }' "$STUB_DIR/reg/$sha")"
+    else
+      printf 'HTTP/2 404\\r\\n\\r\\n'
+    fi ;;
+  */blobs/sha256:*) echo "{\\"config\\": {\\"Labels\\": {\\"wbb.content\\": \\"\${url##*/blobs/sha256:}\\"}}}" ;;
+  *) exit 22 ;;
+esac`;
+
+const DF = `printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/x 1 1 %s 1%% /\\n' "$(cat "$STUB_DIR/df-avail")"`;
+
+const SHIM = `import os, sys
+st = os.environ['STUB_DIR']
+def rd(name, default=''):
+    p = os.path.join(st, name)
+    return open(p).read().strip() if os.path.exists(p) else default
+args = sys.argv[1:]
+if args == ['--kit-root']:
+    print(rd('kit-root')); sys.exit(0)
+if args == ['--kit-port']:
+    print(rd('kit-port')); sys.exit(0)
+sick = os.environ.get('REHEARSAL_SICK_DIGEST', '')
+with open(os.path.join(st, 'log'), 'a') as f:
+    f.write('shim ' + ' '.join(args) + (' sick=' + sick if sick else '') + '\\n')
+step = {'pull': 40, 'audit': 12, 'trial': 95}.get(args[0])
+if step:
+    t = int(rd('clock')) + step
+    with open(os.path.join(st, 'clock'), 'w') as f:
+        f.write(str(t))
+if args[0] == 'current':
+    q = rd('kit-quadlet', 'none')
+    foreign = os.path.exists(os.path.join(os.environ['REHEARSAL_ETC'], 'systemd/system/wbb-rehearsal.service'))
+    unit = 'foreign' if foreign else ('quadlet' if q != 'none' else 'absent')
+    print(f'CURRENT quadlet={q} container-image={"${ID}" if q != "none" else "none"} container-digest={q} unit={unit}')
+elif args[0] == 'activate':
+    with open(os.path.join(st, 'kit-quadlet'), 'w') as f:
+        f.write(args[2])
+    open(os.path.join(st, 'kit-active'), 'w').close()
+    print('ACTIVATED ' + args[2])
+`;
+
+const CONTROLLER = `STATE="$XDG_STATE_HOME/wbb-autodeploy/image-state.env"
+if [ "$*" = --check-state ]; then echo "STATE OK — $STATE"; exit 0; fi
+n=$(( $(cat "$STUB_DIR/ctl-count") + 1 ))
+echo "$n" > "$STUB_DIR/ctl-count"
+printf 'controller %s\\n' "$*" >> "$STUB_DIR/log"
+put() { printf '%s\\n' "$@" > "$STATE"; }
+img() { "$WBB_IMAGE_CMD" "$@" > /dev/null; }
+say() { "$WBB_NOTIFY_CMD" "$1"; }
+adv() { echo $(( $(cat "$STUB_DIR/clock") + $1 )) > "$STUB_DIR/clock"; }
+hang() { exec sleep 1000; }
+stop_here() { echo "$$" > "$STUB_DIR/blocked"; exec sleep 1000; }
+. "$STUB_DIR/ctl/$n.sh"`;
+
+interface World {
+  root: string; stub: string; kit: string; etc: string; tmp: string; git: string;
+  S: string; D: string; env: Record<string, string>;
+}
+
+function git(dir: string, ...args: string[]): string {
+  const r = spawnSync('git', ['-C', dir, ...args], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t',
+      GIT_AUTHOR_DATE: '2026-10-23T00:00:00Z', GIT_COMMITTER_DATE: '2026-10-23T00:00:00Z',
+    },
+  });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+/** A host where every precondition holds: main …→S→D, both published with different content, all free. */
+function world(): World {
+  const root = makeTempDirectory('wbb-rehearsal-run-');
+  const stub = join(root, 'stub');
+  const etc = join(root, 'etc');
+  const tmp = join(root, 'tmp');
+  const repo = join(root, 'git');
+  for (const d of [stub, join(stub, 'ctl'), join(stub, 'reg'), join(etc, 'containers/systemd'), join(etc, 'systemd/system'), tmp, repo, join(root, 'kit')]) {
+    mkdirSync(d, { recursive: true });
+  }
+  git(repo, 'init', '-q');
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'base');
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'S');
+  const S = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'D');
+  const D = git(repo, 'rev-parse', 'HEAD');
+  git(repo, 'update-ref', 'refs/remotes/origin/main', D);
+
+  const sh = (name: string, body: string) => file(join(stub, name), `#!/usr/bin/env bash\n${body}\n`, 0o755);
+  sh('sudo', SUDO);
+  sh('systemctl', SYSTEMCTL);
+  sh('podman', PODMAN);
+  sh('curl', CURL);
+  sh('df', DF);
+  sh('now', 'cat "$STUB_DIR/clock"');
+  sh('controller', CONTROLLER);
+  file(join(stub, 'shim.py'), SHIM);
+  const kit = join(root, 'kit', 'wbb-rehearsal');
+  const state: Record<string, string> = {
+    'sudo-rc': '0', 'podman-exists-rc': '1', 'df-avail': String(5 * 1024 * 1024), clock: '1000', 'ctl-count': '0',
+    'kit-root': kit, 'kit-port': String(FREE_PORT), 'prod-current': `${PROD_CURRENT}\n`,
+    'props-wbb-rehearsal.service': 'LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nNRestarts=0\n',
+    'props-kit-active': 'LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=77\nNRestarts=0\n',
+    'props-warsaw-beer-bot.service': PROD_SHOW, log: '',
+  };
+  for (const [k, v] of Object.entries(state)) file(join(stub, k), v);
+  file(join(stub, 'reg', S), `${DS} ${CS}\n`);
+  file(join(stub, 'reg', D), `${DD} ${CD}\n`);
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root, TMPDIR: tmp, STUB_DIR: stub,
+    REHEARSAL_SUDO: join(stub, 'sudo'), REHEARSAL_SYSTEMCTL: join(stub, 'systemctl'), REHEARSAL_PODMAN: join(stub, 'podman'),
+    REHEARSAL_CURL: join(stub, 'curl'), REHEARSAL_DF: join(stub, 'df'), REHEARSAL_CLOCK: join(stub, 'now'),
+    REHEARSAL_CONTROLLER: join(stub, 'controller'), REHEARSAL_SHIM: join(stub, 'shim.py'), REHEARSAL_GIT_DIR: repo,
+    REHEARSAL_ETC: etc, REHEARSAL_PROD_DB: join(root, 'prod', 'bot.db'), REHEARSAL_CONTAINERS_ROOT: join(root, 'containers'),
+    REHEARSAL_EUID: '1000', REHEARSAL_POLL_S: '0.05', REHEARSAL_KEEPALIVE_S: '3600',
+  };
+  return { root, stub, kit, etc, tmp, git: repo, S, D, env };
+}
+
+const settled = (w: World, sha: string, digest: string) => `put DEPLOYED_SHA=${sha} SETTLED_SHA=${sha} SETTLED_DIGEST=${digest}`;
+const activating = (w: World, base: string) => `${base} WINDOW_PHASE=activating`;
+
+/** The controller's runs when everything behaves as the plan expects, numbered as run.sh makes them. */
+function expected(w: World): Record<number, string> {
+  const s7 = w.S.slice(0, 7);
+  const d7 = w.D.slice(0, 7);
+  return {
+    1: `img current; img pull --sha ${w.S} --digest ${DS}; img audit --digest ${DS}; img trial --digest ${DS} --previous ${DS} --snapshot p
+img activate --digest ${DS}; ${settled(w, w.S, DS)}; say "✅ merge-deploy: the first image release ${s7} is live and settled"; exit 0`,
+    2: `img activate --digest ${DD}; ${settled(w, w.D, DD)}; say "✅ merge-deploy ${d7} is live and settled."; exit 0`,
+    3: `img activate --digest ${DS}; img activate --digest ${DD}; ${settled(w, w.D, DD)}
+say "🔥 merge-deploy ROLLED BACK ${s7} → ${d7} (code only, DB untouched): x."; exit 2`,
+    4: `${activating(w, settled(w, w.D, DD))}; img activate --digest ${DS}; exit 0`,
+    5: `${settled(w, w.D, DD)}; exit 0`,
+    6: `${activating(w, settled(w, w.D, DD))}; img activate --digest ${DS}; exit 0`,
+    7: `adv 600; ${settled(w, w.S, DS)}; say "✅ merge-deploy ${s7} is live and settled."; exit 0`,
+    8: `img activate --digest ${DD}; ${settled(w, w.S, DS)} WINDOW_PHASE=watching WINDOW_START=$(cat "$STUB_DIR/clock"); adv 60; hang`,
+    9: `adv 300; ${settled(w, w.D, DD)}; say "✅ merge-deploy ${d7} is live and settled."; exit 0`,
+    10: `${activating(w, settled(w, w.D, DD))}; img activate --digest ${DS}; exit 0`,
+    11: `${settled(w, w.D, DD)} "INCIDENT=${w.S} ${DS} the unit is not our Quadlet (unit=foreign) in the activating window"; exit 3`,
+  };
+}
+function script(w: World, runs: Record<number, string>): void {
+  for (const [n, body] of Object.entries(runs)) file(join(w.stub, 'ctl', `${n}.sh`), `${body}\n`);
+}
+
+interface Result { code: number | null; signal: string | null; out: string; err: string }
+function run(w: World, args: string[] = [w.S, w.D]): Result {
+  const r = spawnSync('bash', [RUN, ...args], { encoding: 'utf8', env: w.env, timeout: 50_000 });
+  return { code: r.status, signal: r.signal, out: r.stdout, err: r.stderr };
+}
+
+/** The stub log with its paths named: <R> the checkout, <T> the world, <W> run.sh's work dir, <K> the kit root. */
+function log(w: World): string[] {
+  return readFileSync(join(w.stub, 'log'), 'utf8').split('\n').filter((l) => l !== '')
+    .map((l) => l.split(ROOT).join('<R>').split(w.kit).join('<K>').split(w.root).join('<T>').replace(/<T>\/tmp\/wbb-rehearsal\.[A-Za-z0-9]{6}/g, '<W>'));
+}
+const summary = (out: string) => out.slice(out.indexOf('=== rehearsal summary ==='));
+
+const TITLES = [
+  '(а) bootstrap S',
+  '(б) deploy D in an auto window',
+  '(в) a sick candidate (S) is rolled back to D',
+  '(г) killed before the activation: the next tick cancels the window',
+  '(г) killed after the activation, before watching: the next tick watches a full window',
+  '(г) killed while watching: the next tick goes on with the window',
+  '(ґ) a unit that is not ours: the next tick opens an incident',
+];
+const P3 = ['P3 pull: 40s', 'P3 audit: 12s', 'P3 trial: 95s'];
+
+const CLEANUP = [
+  'sudo <T>/stub/systemctl stop wbb-rehearsal.service',
+  'systemctl stop wbb-rehearsal.service',
+  'sudo rm -f <T>/etc/containers/systemd/wbb-rehearsal.container <T>/etc/systemd/system/wbb-rehearsal.service',
+  'sudo <T>/stub/systemctl daemon-reload',
+  'systemctl daemon-reload',
+  'sudo <T>/stub/systemctl reset-failed wbb-rehearsal.service',
+  'systemctl reset-failed wbb-rehearsal.service',
+  'sudo <T>/stub/podman rm -f --ignore wbb-rehearsal',
+  'podman rm -f --ignore wbb-rehearsal',
+  'sudo rm -rf <K>',
+  'sudo <T>/stub/podman container exists wbb-rehearsal',
+  'podman container exists wbb-rehearsal',
+  'systemctl show wbb-rehearsal.service -p LoadState,ActiveState',
+];
+const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0]));
+const PROD_READ = [
+  `sudo python3 -I -c import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wbb_image; sys.exit(wbb_image.main(["current"])) <R>/deploy/image/helper`,
+  'systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState,MainPID',
+];
+
+describe('run.sh: the scenarios as the plan expects them', () => {
+  it('runs (а)–(ґ) in order, passes each, cleans up, and reports P3 from (а)', () => {
+    const w = world();
+    script(w, expected(w));
+    const r = run(w);
+    expect([r.code, summary(r.out)]).toEqual([0, [
+      '=== rehearsal summary ===',
+      `S=${w.S} D=${w.D}`,
+      ...TITLES.map((t) => `PASS  ${t}`),
+      'PASS  cleanup',
+      'PASS  production unchanged',
+      ...P3,
+      'RESULT: PASS (9/9)',
+      '',
+    ].join('\n')]);
+    const lines = log(w);
+    expect(lines.filter((l) => l.startsWith('controller '))).toEqual([
+      `controller --manual bootstrap --target ${w.S}`,
+      `controller --manual deploy --target ${w.D}`,
+      `controller --manual deploy --target ${w.S} --force`,
+      `controller --manual deploy --target ${w.S} --force`,
+      'controller ',
+      `controller --manual deploy --target ${w.S} --force`,
+      'controller ',
+      `controller --manual deploy --target ${w.D}`,
+      'controller ',
+      `controller --manual deploy --target ${w.S} --force`,
+      'controller ',
+    ]);
+    // The cleanup, the checks of what it left, and production read again are the last calls.
+    expect(fromCleanup(lines)).toEqual([...CLEANUP, ...PROD_READ]);
+    expect([existsSync(w.kit), readdirSync(w.tmp)]).toEqual([false, []]);
+  });
+
+  it('sends the sick digest to the shim only in (в), on the sudo command line', () => {
+    const w = world();
+    script(w, expected(w));
+    run(w);
+    expect(log(w).filter((l) => l.includes('REHEARSAL_SICK_DIGEST') || l.includes(' sick='))).toEqual([
+      `sudo REHEARSAL_SICK_DIGEST=${DS} python3 -I <T>/stub/shim.py activate --digest ${DS}`,
+      `shim activate --digest ${DS} sick=${DS}`,
+      `sudo REHEARSAL_SICK_DIGEST=${DS} python3 -I <T>/stub/shim.py activate --digest ${DD}`,
+      `shim activate --digest ${DD} sick=${DS}`,
+    ]);
+  });
+
+  it('touches production only by reading it: every call that names it', () => {
+    const w = world();
+    script(w, expected(w));
+    run(w);
+    expect(log(w).filter((l) => l.includes('warsaw-beer-bot') || l.includes('sys.exit(wbb_image.main'))).toEqual([
+      ...PROD_READ,
+      'sudo install -d -m 0750 -o warsaw-beer-bot -g warsaw-beer-bot <K>/data <K>/data/deploy-snapshots',
+      'sudo -u warsaw-beer-bot bash -lc "$0" "$@" <K>/bin/db-snapshot.sh snapshot <T>/prod/bot.db <K>/data/bot.db',
+      ...PROD_READ,
+    ]);
+  });
+
+  it('builds the kit as п.1 says: the directories, the snapshot script copy, the seeded state the controller checked', () => {
+    const w = world();
+    // (а) looks at the kit while it exists.
+    script(w, { ...expected(w), 1: `cp "$XDG_STATE_HOME/wbb-autodeploy/image-state.env" "$STUB_DIR/seed"; ls -R "${w.kit}" > "$STUB_DIR/tree"
+printf '%s\\n' "$WBB_INSTALLED_CHECK" "\${WBB_INSTALLED_CHECK+set}" "$WBB_DB_PATH" "$WBB_SNAPSHOT_DIR" "$WBB_SNAPSHOT_BIN" "$("$WBB_API_PORT_CMD")" > "$STUB_DIR/seams"
+"$WBB_READ_ENV_CMD" TELEGRAM_BOT_TOKEN; echo "read-env $?" >> "$STUB_DIR/seams"
+${expected(w)[1]}` });
+    run(w);
+    expect(readFileSync(join(w.stub, 'seed'), 'utf8')).toBe(`DEPLOYED_SHA=${w.S}\nLAST_SEEN_DEPLOYED_SHA=${w.S}\n`);
+    expect(readFileSync(join(w.stub, 'tree'), 'utf8')).toBe(
+      `${w.kit}:\nbin\ndata\nscratch\n\n${w.kit}/bin:\ndb-snapshot.sh\n\n${w.kit}/data:\ndeploy-snapshots\n\n${w.kit}/data/deploy-snapshots:\n\n${w.kit}/scratch:\n`);
+    expect(readFileSync(join(w.stub, 'seams'), 'utf8')).toBe(
+      ['', 'set', `${w.kit}/data/bot.db`, `${w.kit}/data/deploy-snapshots`, `${w.kit}/bin/db-snapshot.sh`, String(FREE_PORT), 'read-env 1', ''].join('\n'));
+    expect(log(w).filter((l) => l.startsWith('sudo install'))).toEqual([
+      'sudo install -d -m 0755 -o root -g root <K> <K>/bin',
+      'sudo install -d -m 0700 -o root -g root <K>/scratch',
+      'sudo install -d -m 0750 -o warsaw-beer-bot -g warsaw-beer-bot <K>/data <K>/data/deploy-snapshots',
+      'sudo install -m 0755 -o root -g root <R>/deploy/db-snapshot.sh <K>/bin/db-snapshot.sh',
+    ]);
+  });
+
+  it('P3: the durations between the start and the end of the first pull, audit and trial of (а)', () => {
+    const w = world();
+    script(w, { ...expected(w), 1: `img current; img pull --sha ${w.S} --digest ${DS}; adv 7; img audit --digest ${DS}; img trial --digest ${DS}; img trial --digest ${DS}
+img activate --digest ${DS}; ${settled(w, w.S, DS)}; exit 0` });
+    const r = run(w);
+    expect(summary(r.out).split('\n').filter((l) => l.startsWith('P3 '))).toEqual(P3);
+  });
+
+  it('P3 of a (а) that never pulled: not measured', () => {
+    const w = world();
+    script(w, { ...expected(w), 1: `${settled(w, w.S, DS)}; exit 1` });
+    const r = run(w);
+    expect(summary(r.out).split('\n').filter((l) => l.startsWith('P3 '))).toEqual(
+      ['P3 pull: not measured', 'P3 audit: not measured', 'P3 trial: not measured']);
+  });
+});
+
+describe('run.sh: a scenario that ends otherwise', () => {
+  it('(в) exits 1 instead of rolling back: FAIL with the reason, the rest not run, cleaned up, exit 1', () => {
+    const w = world();
+    script(w, { ...expected(w), 3: expected(w)[3].replace('exit 2', 'exit 1') });
+    const r = run(w);
+    expect([r.code, summary(r.out)]).toEqual([1, [
+      '=== rehearsal summary ===',
+      `S=${w.S} D=${w.D}`,
+      `PASS  ${TITLES[0]}`,
+      `PASS  ${TITLES[1]}`,
+      `FAIL  ${TITLES[2]} — exit: expected 2, got 1`,
+      ...TITLES.slice(3).map((t) => `SKIP  ${t} — not run`),
+      'PASS  cleanup',
+      'PASS  production unchanged',
+      ...P3,
+      'RESULT: FAIL (4/9)',
+      '',
+    ].join('\n')]);
+    expect(fromCleanup(log(w))).toEqual([...CLEANUP, ...PROD_READ]);
+  });
+
+  it('(г) killed after the activation, but the tick finished a window it had not watched in full: FAIL', () => {
+    const w = world();
+    script(w, { ...expected(w), 7: expected(w)[7].replace('adv 600', 'adv 599') });
+    const r = run(w);
+    expect([r.code, summary(r.out).split('\n')[6]]).toEqual([1,
+      `FAIL  ${TITLES[4]} — a full window from now (the tick took >= 600s): expected yes, got no: 599s`]);
+  });
+
+  it('(г) killed while watching, but the tick took a full window: FAIL', () => {
+    const w = world();
+    script(w, { ...expected(w), 9: expected(w)[9].replace('adv 300', 'adv 600') });
+    const r = run(w);
+    expect([r.code, summary(r.out).split('\n')[7]]).toEqual([1,
+      `FAIL  ${TITLES[5]} — the window went on (the tick took < 600s): expected yes, got no: 600s`]);
+  });
+
+  it('(ґ) the tick does not open the incident: FAIL', () => {
+    const w = world();
+    script(w, { ...expected(w), 11: `${settled(w, w.D, DD)}; exit 0` });
+    const r = run(w);
+    expect([r.code, summary(r.out).split('\n')[8]]).toEqual([1,
+      `FAIL  ${TITLES[6]} — the tick's exit: expected 3, got 0; INCIDENT: expected open, unit=foreign, got (empty)`]);
+  });
+
+  it('production changed meanwhile: FAIL, loud, with what it was and what it is', () => {
+    const w = world();
+    script(w, { ...expected(w), 2: `echo 'CURRENT quadlet=${DD} container-image=${ID} container-digest=${DD} unit=quadlet' > "$STUB_DIR/prod-current"
+${expected(w)[2]}` });
+    const r = run(w);
+    expect([r.code, summary(r.out)]).toEqual([1, [
+      '=== rehearsal summary ===',
+      `S=${w.S} D=${w.D}`,
+      ...TITLES.map((t) => `PASS  ${t}`),
+      'PASS  cleanup',
+      'FAIL  production unchanged — PRODUCTION CHANGED',
+      '!!! PRODUCTION CHANGED DURING THE REHEARSAL — look at warsaw-beer-bot.service now !!!',
+      'before:',
+      `  ${PROD_CURRENT}`,
+      '  LoadState=loaded', '  ActiveState=active', '  SubState=running', '  MainPID=4242',
+      'after:',
+      `  CURRENT quadlet=${DD} container-image=${ID} container-digest=${DD} unit=quadlet`,
+      '  LoadState=loaded', '  ActiveState=active', '  SubState=running', '  MainPID=4242',
+      ...P3,
+      'RESULT: FAIL (8/9)',
+      '',
+    ].join('\n')]);
+  });
+
+  it('a cleanup that leaves the container: FAIL cleanup', () => {
+    const w = world();
+    script(w, { ...expected(w), 11: `echo 0 > "$STUB_DIR/podman-exists-rc"\n${expected(w)[11]}` });
+    const r = run(w);
+    expect([r.code, summary(r.out).split('\n')[9]]).toEqual([1,
+      'FAIL  cleanup — the container wbb-rehearsal is still there (or podman could not say)']);
+  });
+});
+
+// The first controller run of each scenario: there the stub blocks, and the test interrupts run.sh.
+const FIRST_RUN: [string, number, number][] = [['а', 1, 0], ['б', 2, 1], ['в', 3, 2], ['г1', 4, 3], ['г2', 6, 4], ['г3', 8, 5], ['ґ', 10, 6]];
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function interrupted(w: World): Promise<Result & { blocked: number }> {
+  const p = spawn('bash', [RUN, w.S, w.D], { env: w.env });
+  let out = '';
+  let err = '';
+  p.stdout.on('data', (d) => { out += d; });
+  p.stderr.on('data', (d) => { err += d; });
+  const closed = new Promise<[number | null, string | null]>((done) => p.on('close', (c, s) => done([c, s])));
+  const blockedFile = join(w.stub, 'blocked');
+  for (let i = 0; i < 400 && !existsSync(blockedFile); i++) await new Promise((t) => setTimeout(t, 50));
+  const blocked = Number(readFileSync(blockedFile, 'utf8'));
+  p.kill('SIGINT');
+  // A run.sh that does not answer SIGINT is killed here, with its blocked controller: the test then fails.
+  const guard = setTimeout(() => {
+    p.kill('SIGKILL');
+    try { process.kill(-blocked, 'SIGKILL'); } catch { /* gone */ }
+  }, 15_000);
+  const [code, signal] = await closed;
+  clearTimeout(guard);
+  for (let i = 0; i < 40 && alive(blocked); i++) await new Promise((t) => setTimeout(t, 50));
+  return { code, signal, out, err, blocked };
+}
+
+describe('run.sh: interrupted (SIGINT) in the middle of each scenario', () => {
+  it.each(FIRST_RUN)('(%s): the controller run is killed, the kit removed, the summary says so, exit 130', async (_name, n, at) => {
+    const w = world();
+    script(w, { ...expected(w), [n]: 'stop_here' });
+    const r = await interrupted(w);
+    expect([r.code, r.signal, alive(r.blocked)]).toEqual([130, null, false]);
+    expect(summary(r.out)).toBe([
+      '=== rehearsal summary ===',
+      `S=${w.S} D=${w.D}`,
+      ...TITLES.slice(0, at).map((t) => `PASS  ${t}`),
+      `FAIL  ${TITLES[at]} — interrupted (SIGINT)`,
+      ...TITLES.slice(at + 1).map((t) => `SKIP  ${t} — not run`),
+      'PASS  cleanup',
+      'PASS  production unchanged',
+      ...(at === 0 ? ['P3 pull: not measured', 'P3 audit: not measured', 'P3 trial: not measured'] : P3),
+      `RESULT: FAIL — interrupted by SIGINT (${at + 2}/9)`,
+      '',
+    ].join('\n'));
+    expect(fromCleanup(log(w))).toEqual([...CLEANUP, ...PROD_READ]);
+    expect([existsSync(w.kit), readdirSync(w.tmp)]).toEqual([false, []]);
+  });
+});
+
+// --- the preconditions (п.4) -----------------------------------------------------------------------------------
+
+/** Every call a refused run made that is not a read. */
+const READS = [/^sudo -n true$/, /^sudo <T>\/stub\/podman container exists wbb-rehearsal$/, /^podman container exists wbb-rehearsal$/,
+  /^systemctl show /, /^sudo python3 -I -c /];
+const writes = (w: World) => log(w).filter((l) => !READS.some((re) => re.test(l)));
+
+const PRECONDITIONS: [string, (w: World) => void, (w: World) => string][] = [
+  ['root', (w) => { w.env.REHEARSAL_EUID = '0'; },
+    () => 'run as the operator, not as root (the controller runs as the operator; sudo is asked for each root step)'],
+  ['no sudo ticket', (w) => file(join(w.stub, 'sudo-rc'), '1'), () => 'no sudo credentials are cached — run sudo -v first'],
+  ['the kit root exists', (w) => mkdirSync(w.kit),
+    (w) => `the kit root ${w.kit} exists — a previous rehearsal did not clean up; look at it and remove it by hand`],
+  ["production's Quadlet file exists", (w) => file(join(w.etc, 'containers/systemd/warsaw-beer-bot.container'), ''),
+    (w) => `production's Quadlet file ${w.etc}/containers/systemd/warsaw-beer-bot.container exists — the rehearsal is run before the switchover, never after`],
+  ["the kit's Quadlet file exists", (w) => file(join(w.etc, 'containers/systemd/wbb-rehearsal.container'), ''),
+    (w) => `${w.etc}/containers/systemd/wbb-rehearsal.container exists — the rehearsal unit is not ours to replace`],
+  ["the kit's unit file exists", (w) => file(join(w.etc, 'systemd/system/wbb-rehearsal.service'), ''),
+    (w) => `${w.etc}/systemd/system/wbb-rehearsal.service exists — the rehearsal unit is not ours to replace`],
+  ['systemd knows the unit', (w) => file(join(w.stub, 'props-wbb-rehearsal.service'), 'LoadState=loaded\nActiveState=failed\n'),
+    () => 'systemd knows wbb-rehearsal.service (LoadState=loaded ActiveState=failed) — it must not exist before the rehearsal'],
+  ['the container exists', (w) => file(join(w.stub, 'podman-exists-rc'), '0'), () => 'a container named wbb-rehearsal exists'],
+  ['podman cannot say', (w) => file(join(w.stub, 'podman-exists-rc'), '125'), () => 'podman container exists wbb-rehearsal failed (exit 125)'],
+  ['less than 5 GiB free', (w) => file(join(w.stub, 'df-avail'), String(5 * 1024 * 1024 - 1)),
+    (w) => `5119 MiB free on ${w.root}/kit, the rehearsal needs 5 GiB`],
+  ['S is not a commit', (w) => { w.S = 'f'.repeat(40); }, (w) => `${'f'.repeat(12)} is not a commit of ${w.git} (git fetch first)`],
+  ['S and D are one commit', (w) => { w.S = w.D; }, () => 'S and D are the same commit'],
+  ['S is not an ancestor of D', (w) => { [w.S, w.D] = [w.D, w.S]; },
+    (w) => `S ${w.S.slice(0, 12)} is not an ancestor of D ${w.D.slice(0, 12)}`],
+  ['the registry answers garbage', (w) => file(join(w.stub, 'reg', w.S), 'bad x\n'),
+    (w) => `could not read the image of S ${w.S.slice(0, 12)} from ghcr.io (exit 1)`],
+  ['S is not published', (w) => rmSync(join(w.stub, 'reg', w.S)),
+    (w) => `S ${w.S.slice(0, 12)} has no published image (no tag ${w.S} in ghcr.io/ysilvestrov/warsaw-beer-bot)`],
+  ['S and D have one content', (w) => file(join(w.stub, 'reg', w.D), `${DD} ${CS}\n`),
+    () => `S and D have the same wbb.content (${CS}): deploying one over the other is a noop and proves nothing`],
+];
+
+describe('run.sh: each precondition refuses, and nothing is created', () => {
+  it.each(PRECONDITIONS)('%s', (_name, arrange, reason) => {
+    const w = world();
+    script(w, expected(w));
+    arrange(w);
+    const kitBefore = existsSync(w.kit);
+    const r = run(w, [w.S, w.D]);
+    expect([r.code, r.err, r.out]).toEqual([1, `REFUSED: ${reason(w)}\nNothing was created.\n`, '']);
+    expect([writes(w), readdirSync(w.tmp), existsSync(w.kit)]).toEqual([[], [], kitBefore]);
+  });
+
+  it('D on main but past origin/main as this checkout knows it: refused', () => {
+    const w = world();
+    script(w, expected(w));
+    git(w.git, 'update-ref', 'refs/remotes/origin/main', w.S);
+    const r = run(w);
+    expect([r.code, r.err, writes(w)]).toEqual([1,
+      `REFUSED: D ${w.D.slice(0, 12)} is not on origin/main (git fetch first)\nNothing was created.\n`, []]);
+  });
+
+  it('the kit port is in use: refused', async () => {
+    const w = world();
+    script(w, expected(w));
+    const busy: Server = createServer();
+    await new Promise<void>((done) => busy.listen(0, '127.0.0.1', done));
+    const port = (busy.address() as { port: number }).port;
+    file(join(w.stub, 'kit-port'), String(port));
+    try {
+      // Asynchronously: the event loop must stay free for the connection the check makes.
+      const p = spawn('bash', [RUN, w.S, w.D], { env: w.env });
+      let err = '';
+      p.stderr.on('data', (d) => { err += d; });
+      const code = await new Promise<number | null>((done) => p.on('close', (c) => done(c)));
+      expect([code, err, writes(w), readdirSync(w.tmp)]).toEqual([1, `REFUSED: the kit port ${port} is in use\nNothing was created.\n`, [], []]);
+    } finally {
+      busy.close();
+    }
+  });
+
+  it.each([['one argument', ['x']], ['not 40 hex', ['A'.repeat(40), 'b'.repeat(40)]]])('usage: %s → 64, nothing run', (_name, args) => {
+    const w = world();
+    const r = run(w, args);
+    expect([r.code, r.err, log(w)]).toEqual([64,
+      'usage: bash scripts/ops/rehearsal/run.sh <S-sha> <D-sha>   (40 hex each; S an ancestor of D on main)\n', []]);
+  });
+});
