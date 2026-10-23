@@ -2,17 +2,32 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import host_patch_collect as hp
 
+# The image helper, only to run its unit_type over the same cases as the collector's (they are installed apart).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'deploy/image/helper'))
+import wbb_image as wi  # noqa: E402
+
 FIX = Path(__file__).parent / 'fixtures' / 'host-patch'
 NOW = 1_791_440_000
 STAMP = 1_791_439_429
 BTIME = 1_789_000_000
 DPKG = ('dpkg-query', '-W', '-f=${db:Status-Abbrev}\t${Version}')
+SHOW = ('systemctl', 'show', 'warsaw-beer-bot.service', '-p', 'LoadState,SourcePath,FragmentPath')
+INSPECT = ('podman', 'container', 'inspect', 'warsaw-beer-bot', '--format', '{{.ImageDigest}}')
+D1 = 'sha256:' + '1' * 64
+D2 = 'sha256:' + '2' * 64
+# systemctl prints the properties in its own order, not the one asked for.
+QUADLET_SHOW = ('FragmentPath=/run/systemd/generator/warsaw-beer-bot.service\nLoadState=loaded\n'
+                'SourcePath=/etc/containers/systemd/warsaw-beer-bot.container\n')
+FLAT_SHOW = 'FragmentPath=/etc/systemd/system/warsaw-beer-bot.service\nLoadState=loaded\nSourcePath=\n'
+ABSENT_SHOW = 'FragmentPath=\nLoadState=not-found\nSourcePath=\n'
 
 
 def fixture(name):
@@ -28,6 +43,8 @@ def runner(overrides=None):
         (*DPKG, 'nodejs'): 'ii \t24.21.0-1nodesource1',
         (*DPKG, 'cloudflared'): 'ii \t2026.10.0',
         (*DPKG, 'litestream'): 'ii \t0.5.11',
+        SHOW: FLAT_SHOW,
+        INSPECT: RuntimeError('podman exited 125'),
     }
     table.update(overrides or {})
 
@@ -56,8 +73,8 @@ class Host(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def collect(self, overrides=None, previous=None, now=NOW):
-        return hp.collect(runner(overrides), self.root, now, previous)
+    def collect(self, overrides=None, previous=None, now=NOW, image_state=None):
+        return hp.collect(runner(overrides), self.root, now, previous, image_state)
 
 
 class TestCollect(Host):
@@ -71,6 +88,7 @@ class TestCollect(Host):
             'stale_services': [{'unit': 'code-server@ysi.service', 'since': NOW}],
             'unattended': {'last_run': STAMP, 'security_pending': 0},
             'packages': {'nodejs': '24.21.0-1nodesource1', 'cloudflared': '2026.10.0', 'litestream': '0.5.11'},
+            'image': {'unit': 'foreign', 'running_digest': None, 'deployed_digest': None},
         })
 
     def test_reboot_required_carries_its_mtime_and_unique_packages_in_order(self):
@@ -234,6 +252,156 @@ class TestStaleSince(Host):
         previous = {'stale_services': [{'unit': 'litestream.service', 'since': BTIME + 100}]}
         self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'][1],
                          {'unit': 'litestream.service', 'since': BTIME + 500})
+
+
+class TestImage(Host):
+    """Spec 2026-10-11 §10: the unit, the running image and the deployed one; what cannot be read is null."""
+
+    def state(self, text):
+        path = Path(self.tmp.name) / 'image-state.env'
+        path.write_text(text)
+        return str(path)
+
+    def image(self, overrides=None, image_state=None):
+        return self.collect(overrides, image_state=image_state)['image']
+
+    def test_after_the_switchover_quadlet_with_both_digests(self):
+        state = self.state(f'DEPLOYED_SHA={"a" * 40}\nDEPLOYED_DIGEST={D1}\nDEPLOYED_ID={"b" * 64}\nSETTLED_DIGEST={D2}\n')
+        self.assertEqual(self.image({SHOW: QUADLET_SHOW, INSPECT: f'{D2}\n'}, state),
+                         {'unit': 'quadlet', 'running_digest': D2, 'deployed_digest': D1})
+
+    def test_before_the_switchover_the_flat_unit_is_foreign_and_no_container_runs(self):
+        self.assertEqual(self.image({SHOW: FLAT_SHOW, INSPECT: RuntimeError('podman exited 125')}),
+                         {'unit': 'foreign', 'running_digest': None, 'deployed_digest': None})
+
+    def test_no_unit_at_all_is_absent(self):
+        self.assertEqual(self.image({SHOW: ABSENT_SHOW}),
+                         {'unit': 'absent', 'running_digest': None, 'deployed_digest': None})
+
+    def test_the_inspect_and_show_argv(self):
+        asked = []
+        table = runner({SHOW: QUADLET_SHOW, INSPECT: D1})
+
+        def run(argv):
+            asked.append(tuple(argv))
+            return table(argv)
+        hp.collect(run, self.root, NOW, None, None)
+        self.assertEqual([a for a in asked if a[0] in ('systemctl', 'podman')], [SHOW, INSPECT])
+
+    def test_unreadable_podman_and_systemctl_are_null_and_the_rest_of_the_summary_stands(self):
+        s = self.collect({SHOW: RuntimeError('systemctl exited 1'), INSPECT: FileNotFoundError('podman')})
+        self.assertEqual((s['image'], s['livepatch']['state']),
+                         ({'unit': None, 'running_digest': None, 'deployed_digest': None}, 'nothing-to-apply'))
+
+    def test_systemctl_output_without_a_load_state_is_null(self):
+        self.assertEqual(self.image({SHOW: 'SourcePath=\n'})['unit'], None)
+
+    def test_an_inspect_that_is_not_a_digest_is_null(self):
+        for out in ('', '<no value>\n', D1[:-1], f'{D1} {D2}', 'a' * 64):
+            with self.subTest(out=out):
+                self.assertEqual(self.image({SHOW: QUADLET_SHOW, INSPECT: out})['running_digest'], None)
+
+    def test_a_missing_image_state_is_a_null_deployed_digest(self):
+        self.assertEqual(self.image(image_state=str(Path(self.tmp.name) / 'nowhere.env'))['deployed_digest'], None)
+
+    def test_no_image_state_path_is_a_null_deployed_digest(self):
+        self.assertEqual(self.image(image_state='')['deployed_digest'], None)
+
+    def test_an_image_state_without_a_single_valid_deployed_digest_is_null(self):
+        for text in (
+            f'DEPLOYED_SHA={"a" * 40}\n',                       # migrated, not yet bootstrapped
+            f'DEPLOYED_DIGEST={D1}\nDEPLOYED_DIGEST={D2}\n',     # ambiguous
+            f'DEPLOYED_DIGEST={D1[:-1]}\n',
+            f'DEPLOYED_DIGEST="{D1}"\n',                        # never unquoted: not the writer's format
+            f'export DEPLOYED_DIGEST={D1}\n',
+            f' DEPLOYED_DIGEST={D1}\n',
+            f'DEPLOYED_DIGEST={D1} \n',
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(self.image(image_state=self.state(text))['deployed_digest'], None)
+
+    def test_an_image_state_without_a_final_newline_still_names_its_digest(self):
+        self.assertEqual(self.image(image_state=self.state(f'DEPLOYED_DIGEST={D1}'))['deployed_digest'], D1)
+
+    def test_an_image_state_is_never_sourced(self):
+        marker = Path(self.tmp.name) / 'ran'
+        state = self.state(f'DEPLOYED_DIGEST=$(touch {marker})\nDEPLOYED_DIGEST={D1}\n')
+        self.assertEqual((self.image(image_state=state)['deployed_digest'], marker.exists()), (None, False))
+
+    def test_a_symlinked_image_state_is_not_followed(self):
+        target = self.state(f'DEPLOYED_DIGEST={D1}\n')
+        link = Path(self.tmp.name) / 'link.env'
+        link.symlink_to(target)
+        self.assertEqual(self.image(image_state=str(link))['deployed_digest'], None)
+
+    def test_a_fifo_image_state_is_neither_read_nor_waited_on(self):
+        fifo = Path(self.tmp.name) / 'fifo.env'
+        os.mkfifo(fifo)
+        self.assertEqual(self.image(image_state=str(fifo))['deployed_digest'], None)
+
+    def test_a_directory_image_state_is_null(self):
+        self.assertEqual(self.image(image_state=self.tmp.name)['deployed_digest'], None)
+
+    def test_an_image_state_over_the_cap_is_null_and_at_the_cap_is_read(self):
+        line = f'DEPLOYED_DIGEST={D1}\n'
+        at_cap = line + 'X' * (hp.STATE_CAP - len(line) - 1) + '\n'
+        self.assertEqual(len(at_cap), hp.STATE_CAP)
+        self.assertEqual((self.image(image_state=self.state(at_cap))['deployed_digest'],
+                          self.image(image_state=self.state(at_cap + 'Y'))['deployed_digest']), (D1, None))
+
+    def test_main_passes_the_image_state_argument(self):
+        state = self.state(f'DEPLOYED_DIGEST={D1}\n')
+        argv = ['--out-dir', str(self.out), '--root', str(self.root), f'--image-state={state}']
+        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=NOW):
+            self.assertEqual(hp.main(argv), 0)
+        self.assertEqual(json.loads((self.out / 'summary.json').read_text())['image'],
+                         {'unit': 'foreign', 'running_digest': None, 'deployed_digest': D1})
+
+    def test_main_with_the_unit_s_empty_default_reports_deployed_as_null(self):
+        argv = ['--out-dir', str(self.out), '--root', str(self.root), '--image-state=']
+        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=NOW):
+            self.assertEqual(hp.main(argv), 0)
+        self.assertEqual(json.loads((self.out / 'summary.json').read_text())['image']['deployed_digest'], None)
+
+
+class TestUnitRuleIsTheHelpers(unittest.TestCase):
+    """The collector reimplements the helper's unit_type (it is installed without it): the same names, and the
+    same answer on every case — each case's answer is written out, so neither side is the other's oracle."""
+
+    CASES = (
+        ('generated from our Quadlet file', QUADLET_SHOW, 'quadlet'),
+        ('the flat unit in /etc', FLAT_SHOW, 'foreign'),
+        ('no such unit', ABSENT_SHOW, 'absent'),
+        ('a unit in /etc shadows the generated one',
+         'FragmentPath=/etc/systemd/system/x.service\nLoadState=loaded\n'
+         'SourcePath=/etc/containers/systemd/warsaw-beer-bot.container\n', 'foreign'),
+        ('generated from another file',
+         'FragmentPath=/run/systemd/generator/warsaw-beer-bot.service\nLoadState=loaded\n'
+         'SourcePath=/etc/containers/systemd/other.container\n', 'foreign'),
+        ('the generator path only as a prefix of a name',
+         'FragmentPath=/run/systemd/generator.x/w\nLoadState=loaded\n'
+         'SourcePath=/etc/containers/systemd/warsaw-beer-bot.container\n', 'foreign'),
+        ('masked', 'FragmentPath=/dev/null\nLoadState=masked\nSourcePath=\n', 'foreign'),
+    )
+
+    def helper(self, stdout):
+        def run(argv, *, timeout, text=False):
+            return subprocess.CompletedProcess(argv, 0, stdout, '')
+        host = wi.Host(podman='/unused', systemctl='/usr/bin/systemctl', run=run,
+                       quadlet_path=wi.PRODUCTION.quadlet_path, template_path='/unused', snapshot_root='/unused',
+                       scratch_root='/unused', containers_root='/unused', free_bytes=None, bot_ids=None,
+                       fchown=None, scratch_owner=0, pid=None)
+        return wi.unit_type(host)
+
+    def test_the_same_unit_quadlet_file_and_generator_directory(self):
+        self.assertEqual((hp.UNIT, hp.CONTAINER, hp.QUADLET_PATH, hp.GENERATOR_DIR),
+                         (wi.UNIT, wi.CONTAINER, wi.PRODUCTION.quadlet_path, wi.GENERATOR_DIR))
+
+    def test_the_same_answer_on_every_case(self):
+        for name, stdout, expected in self.CASES:
+            with self.subTest(name):
+                self.assertEqual((hp.unit_type(lambda argv, out=stdout: out), self.helper(stdout)),
+                                 (expected, expected))
 
 
 class TestWrite(Host):

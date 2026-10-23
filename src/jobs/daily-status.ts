@@ -3,6 +3,7 @@ import type { DB } from '../storage/db';
 import type { Env } from '../config/env';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import type { StatusMetrics } from '../storage/stats';
+import type { ImageFacts } from '../domain/status/types';
 import { getJobState, setJobState } from '../storage/job_state';
 import { saveStatusSnapshot, pruneStatusSnapshots } from '../storage/status_snapshots';
 import { pruneHandlerFailures } from '../storage/handler_failures';
@@ -87,6 +88,21 @@ export function dailyStatusEnvDeps(
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
 
+// Spec 2026-10-11 §10: which unit runs the bot and from which image, next to what the controller deployed.
+// Null when the host summary has no `image` (a collector installed before it) or cannot be read: the
+// Інфраструктура row already says so. Before the switchover the flat unit is `foreign`, and that is expected.
+const short = (digest: string): string => digest.slice('sha256:'.length, 'sha256:'.length + 12);
+export function buildImageLine(image: ImageFacts | null): string | null {
+  if (image === null) return null;
+  if (image.unit === 'foreign') return 'unit=flat (до перемикання)';
+  if (image.unit === 'absent') return 'unit=absent';
+  const unit = `unit=${image.unit ?? '?'}`;
+  const { runningDigest: running, deployedDigest: deployed } = image;
+  if (running === null) return `${unit} · образ ?`;
+  const against = deployed === null ? 'задеплоєний невідомий' : deployed === running ? '= задеплоєного' : '≠ задеплоєного';
+  return `${unit} · образ ${short(running)} (${against})`;
+}
+
 // Stage 1 of the traffic light reads no event log yet, so an incident that ended before 09:00 is
 // invisible; the report says so instead of letting 🟢 claim it (spec, "Claims and evidence").
 export const EVENTS_FOOTER = 'події: ще не підключені — нічні інциденти, що вже минули, звіт поки не бачить';
@@ -125,6 +141,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
     pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
   } catch { /* see above */ }
   // The pause is a channel-health fact (🔴 Канали), so the users section shows activity only.
+  const imageLine = buildImageLine(inputs.hostPatch.ok ? inputs.hostPatch.value.image : null);
   const bugReportLine = opts.repo && inputs.bugReports
     ? buildBugReportLine(inputs.bugReports.summary, null, opts.repo)
     : null;
@@ -132,7 +149,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
     stamp: warsawStamp(now),
     overall: evaluation.overall,
     subsystems: evaluation.subsystems,
-    footers: [...evaluation.footers, EVENTS_FOOTER, NOT_MEASURED_FOOTER],
+    footers: [...evaluation.footers, ...(imageLine === null ? [] : [imageLine]), EVENTS_FOOTER, NOT_MEASURED_FOOTER],
     events: inputs.triage.line ? [inputs.triage.line] : [],
     users: buildUserLines(inputs.metrics, bugReportLine),
     trends: computeTrends(dateKey, inputs.metrics, inputs.history),

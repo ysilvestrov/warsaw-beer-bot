@@ -11,6 +11,7 @@ const ROOT_UID = 0;
 
 const seconds = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const text = z.string().min(1).max(200);
+const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const summarySchema = z.object({
   version: z.literal(1),
   timestamp: seconds,
@@ -26,6 +27,12 @@ const summarySchema = z.object({
     security_pending: z.number().int().min(0).max(100_000).nullable(),
   }).strict(),
   packages: z.object({ nodejs: text.nullable(), cloudflared: text.nullable(), litestream: text.nullable() }).strict(),
+  // Spec 2026-10-11 §10, optional: a collector installed before it writes no `image`, and that summary still reads.
+  image: z.object({
+    unit: z.enum(['quadlet', 'foreign', 'absent']).nullable(),
+    running_digest: digest.nullable(),
+    deployed_digest: digest.nullable(),
+  }).strict().optional(),
 }).strict();
 
 export type { HostPatchRead };
@@ -50,6 +57,8 @@ export function readHostPatch(now: Date, path = HOST_PATCH_PATH, trustedUid = RO
       staleServices: s.stale_services,
       unattended: { lastRun: s.unattended.last_run, securityPending: s.unattended.security_pending },
       packages: s.packages,
+      image: s.image === undefined ? null
+        : { unit: s.image.unit, runningDigest: s.image.running_digest, deployedDigest: s.image.deployed_digest },
     },
   };
 }

@@ -157,12 +157,12 @@
 
 **Files:** `scripts/ops/host_patch_collect.py` (+ його тести), `deploy/install-host-patch-collector.sh` (аргумент шляху `image-state.env` оператора, якщо потрібен), `src/jobs/host-patch.ts`, `src/jobs/daily-status.ts` (+ тести).
 
-- [ ] Тести спершу:
+- [x] Тести спершу:
   - збирач для кожного з `quadlet/foreign/absent` дає точне поле `image`;
   - podman чи `image-state.env` нечитані → `null`;
   - бот: `quadlet` з однаковими digest-ами → `=`, з різними → `≠`, `foreign` → «flat (до перемикання)», без поля `image` (старий `summary.json`) → рядка нема.
-- [ ] Реалізація за п.5. Бот читає нове поле лише тоді, коли воно є (старий збирач — без нього).
-- [ ] Гейт, коміт.
+- [x] Реалізація за п.5. Бот читає нове поле лише тоді, коли воно є (старий збирач — без нього).
+- [x] Гейт, коміт.
 
 ### Task 4: preflight і runbook
 

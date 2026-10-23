@@ -37,6 +37,14 @@ export interface HostPatchFacts {
   staleServices: { unit: string; since: number }[] | null;
   unattended: { lastRun: number | null; securityPending: number | null };
   packages: { nodejs: string | null; cloudflared: string | null; litestream: string | null };
+  /** Spec 2026-10-11 §10. Null: the summary has no `image` (a collector from before it); a part it could not read is null. */
+  image: ImageFacts | null;
+}
+
+export interface ImageFacts {
+  unit: 'quadlet' | 'foreign' | 'absent' | null;
+  runningDigest: string | null;  // sha256:<64 hex>
+  deployedDigest: string | null; // sha256:<64 hex>, the operator's image-state.env DEPLOYED_DIGEST
 }
 
 export type HostPatchRead = { kind: 'ok'; facts: HostPatchFacts } | { kind: 'stale' } | { kind: 'unavailable' };

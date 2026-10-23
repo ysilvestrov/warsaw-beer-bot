@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import tempfile
@@ -22,6 +23,16 @@ LIVEPATCH_OK = ('applied', 'nothing-to-apply')
 TIMEOUT_SECONDS = 120
 # /snap/bin: canonical-livepatch is a snap. It only starts in its own unit's cgroup (spec C15).
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin', 'LC_ALL': 'C'}
+# The bot's unit and container (spec 2026-10-11 §10). The same names and the same rule as the image helper's
+# unit_type (deploy/image/helper/wbb_image.py), which this collector does not import: it is installed on its
+# own, without the helper next to it. test_host_patch_collect.py runs both over the same cases.
+UNIT = 'warsaw-beer-bot.service'
+CONTAINER = 'warsaw-beer-bot'
+QUADLET_PATH = '/etc/containers/systemd/warsaw-beer-bot.container'
+GENERATOR_DIR = '/run/systemd/generator/'
+DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
+# image-state.env is a few dozen short lines (deploy/autodeploy.sh STATE_KEYS); anything larger is not it.
+STATE_CAP = 65_536
 
 
 def run(argv):
@@ -144,7 +155,53 @@ def package_version(run_command, name):
     return version.strip() or None if status[1:2] == 'i' else None
 
 
-def collect(run_command, root, now, previous):
+def unit_type(run_command):
+    """'quadlet' when the bot's unit is generated from our Quadlet file, 'absent' when systemd knows no such
+    unit, 'foreign' otherwise (the flat unit in /etc/systemd/system, a masked unit, …) — the helper's rule."""
+    props = {}
+    for line in run_command(['systemctl', 'show', UNIT, '-p', 'LoadState,SourcePath,FragmentPath']).splitlines():
+        key, sep, value = line.partition('=')
+        if sep:
+            props[key] = value
+    if 'LoadState' not in props:
+        raise ValueError('systemctl show printed no LoadState')
+    if props['LoadState'] == 'not-found':
+        return 'absent'
+    if props.get('SourcePath') == QUADLET_PATH and props.get('FragmentPath', '').startswith(GENERATOR_DIR):
+        return 'quadlet'
+    return 'foreign'
+
+
+def running_digest(run_command):
+    """The registry digest of the image the bot's container runs (`.ImageDigest`, as the helper reads it)."""
+    out = run_command(['podman', 'container', 'inspect', CONTAINER, '--format', '{{.ImageDigest}}']).strip()
+    if not DIGEST.fullmatch(out):
+        raise ValueError('podman container inspect printed no digest')
+    return out
+
+
+def deployed_digest(path):
+    """DEPLOYED_DIGEST of the operator's image-state.env, parsed line by line and never sourced.
+
+    Root reads a file in the operator's home: a symlink, a FIFO or anything but a small regular file is not
+    followed or waited on. A key that is missing, repeated or not a digest is unreadable."""
+    if not path:
+        raise ValueError('no image-state.env path')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    with os.fdopen(fd, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError(f'{path} is not a regular file')
+        data = stream.read(STATE_CAP + 1)
+    if len(data) > STATE_CAP:
+        raise ValueError(f'{path} is larger than {STATE_CAP} bytes')
+    values = [line[len('DEPLOYED_DIGEST='):] for line in data.decode('utf-8').split('\n')
+              if line.startswith('DEPLOYED_DIGEST=')]
+    if len(values) != 1 or not DIGEST.fullmatch(values[0]):
+        raise ValueError(f'{path} names no single DEPLOYED_DIGEST')
+    return values[0]
+
+
+def collect(run_command, root, now, previous, image_state=None):
     needrestart = attempt(lambda: parse_needrestart(run_command(['needrestart', '-b', '-r', 'l'])))
     return {
         'version': 1,
@@ -159,6 +216,12 @@ def collect(run_command, root, now, previous):
             'security_pending': attempt(lambda: count_security(run_command(['apt', 'list', '--upgradable']))),
         },
         'packages': {name: attempt(lambda name=name: package_version(run_command, name)) for name in PACKAGES},
+        # Spec 2026-10-11 §10: what runs, and under which unit, next to what the controller deployed.
+        'image': {
+            'unit': attempt(lambda: unit_type(run_command)),
+            'running_digest': attempt(lambda: running_digest(run_command)),
+            'deployed_digest': attempt(lambda: deployed_digest(image_state)),
+        },
     }
 
 
@@ -198,10 +261,13 @@ def write_summary(out_dir, summary):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out-dir', default=OUT_DIR)
+    # The operator's ~/.local/state/wbb-autodeploy/image-state.env: install-host-patch-collector.sh knows the
+    # operator (SUDO_USER) and names it in the unit's drop-in. Empty: not known, deployed_digest is null.
+    parser.add_argument('--image-state', default='')
     parser.add_argument('--root', default='/', help=argparse.SUPPRESS)  # tests only
     args = parser.parse_args(argv)
     prepare_directory(args.out_dir)  # root reads nothing from a directory it has not verified
-    summary = collect(run, Path(args.root), int(time.time()), read_previous(args.out_dir))
+    summary = collect(run, Path(args.root), int(time.time()), read_previous(args.out_dir), args.image_state)
     write_summary(args.out_dir, summary)
     return 0
 

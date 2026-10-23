@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { buildBugReportLine, buildDailyReport, dailyStatus, dailyStatusEnvDeps, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
+import { buildBugReportLine, buildDailyReport, buildImageLine, dailyStatus, dailyStatusEnvDeps, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
 import { getJobState, setJobState } from '../storage/job_state';
 import { insertReport, markDone } from '../storage/bug_reports';
 import { recordMatchUsage } from '../storage/api_usage';
@@ -435,4 +435,91 @@ test('dailyStatus: testDiagnosticsUid reaches the monitor reader — disk is rea
     syncBuiltinESMExports();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Spec 2026-10-11 §10 (plan 2026-10-22 harness, Task 3): the unit and the running image next to the deployed one.
+describe('buildImageLine', () => {
+  const D1 = `sha256:0123456789ab${'c'.repeat(52)}`;
+  const D2 = `sha256:0123456789ab${'d'.repeat(52)}`; // the same first 12 hex: = / ≠ compares the whole digest
+  const line = (unit: 'quadlet' | 'foreign' | 'absent' | null, runningDigest: string | null, deployedDigest: string | null) =>
+    buildImageLine({ unit, runningDigest, deployedDigest });
+
+  it('quadlet running the deployed digest', () => {
+    expect(line('quadlet', D1, D1)).toBe('unit=quadlet · образ 0123456789ab (= задеплоєного)');
+  });
+
+  it('quadlet running another digest, even one with the same first 12 hex', () => {
+    expect(line('quadlet', D1, D2)).toBe('unit=quadlet · образ 0123456789ab (≠ задеплоєного)');
+  });
+
+  it('no image-state.env: the deployed image is unknown, never ≠', () => {
+    expect(line('quadlet', D1, null)).toBe('unit=quadlet · образ 0123456789ab (задеплоєний невідомий)');
+  });
+
+  it('no readable container digest', () => {
+    expect(line('quadlet', null, D1)).toBe('unit=quadlet · образ ?');
+  });
+
+  it('the flat unit before the switchover', () => {
+    expect(line('foreign', null, null)).toBe('unit=flat (до перемикання)');
+  });
+
+  it('no unit at all', () => {
+    expect(line('absent', null, null)).toBe('unit=absent');
+  });
+
+  it('an unreadable unit still shows the image', () => {
+    expect(line(null, D1, D1)).toBe('unit=? · образ 0123456789ab (= задеплоєного)');
+  });
+
+  it('a summary without `image` (a collector from before it) gives no line', () => {
+    expect(buildImageLine(null)).toBe(null);
+  });
+});
+
+describe('the image line in the daily report', () => {
+  const now = new Date('2026-10-06T07:00:00Z');
+  const D = `sha256:abcdef012345${'0'.repeat(52)}`;
+  const base = {
+    version: 1, timestamp: now.getTime() / 1000 - 60, kernel: null, reboot_required: null, livepatch: null,
+    stale_services: null, unattended: { last_run: null, security_pending: null },
+    packages: { nodejs: null, cloudflared: null, litestream: null },
+  };
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wbb-daily-image-')); chmodSync(dir, 0o755); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const report = (summary: unknown): string => {
+    const file = join(dir, 'host-patch.json');
+    writeFileSync(file, JSON.stringify(summary), { mode: 0o644 });
+    chmodSync(file, 0o644);
+    return buildDailyReport(emptyDb(), now, '2026-10-06', {
+      ...missingMonitor, hostPatchPath: file, hostPatchUid: process.getuid!(),
+    });
+  };
+  const footers = (text: string): string[] => text.split('\n').filter((l) => l.startsWith('ℹ️'));
+  // Read, not refused: the summary's own null Livepatch is reported, not «підсумок … недоступний».
+  const read = (text: string): boolean[] =>
+    [text.includes('  • нема даних: стан Livepatch'), text.includes('підсумок патчів хоста недоступний')];
+
+  it('a new summary puts the line among the footers, before the events footer', () => {
+    const text = report({ ...base, image: { unit: 'quadlet', running_digest: D, deployed_digest: D } });
+    expect(read(text)).toEqual([true, false]);
+    expect(footers(text)).toEqual([
+      'ℹ️ історія: 0/7 днів — порівняльні правила без потрібних днів ще не діють',
+      'ℹ️ unit=quadlet · образ abcdef012345 (= задеплоєного)',
+      `ℹ️ ${EVENTS_FOOTER}`,
+      'ℹ️ не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)',
+    ]);
+  });
+
+  it('an old summary without `image` still reads, and there is no line', () => {
+    const text = report(base);
+    expect(read(text)).toEqual([true, false]);
+    expect(footers(text)).toEqual([
+      'ℹ️ історія: 0/7 днів — порівняльні правила без потрібних днів ще не діють',
+      `ℹ️ ${EVENTS_FOOTER}`,
+      'ℹ️ не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)',
+    ]);
+  });
 });

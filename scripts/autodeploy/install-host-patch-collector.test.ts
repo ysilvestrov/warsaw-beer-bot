@@ -2,6 +2,7 @@ import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 
 /** #469 stage 2 periphery — spec 2026-10-06-469-host-patching-design.md. */
@@ -27,8 +28,13 @@ function host(opts: { uid?: string } = {}): Host {
   return { root, bin, log };
 }
 
-function run(h: Host, opts: { hostRoot?: boolean; cwd?: string } = {}) {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${h.bin}:${process.env.PATH}`, WBB_HOST_ROOT: h.root };
+/** SUDO_USER is the user running the test by default, so its real home names the image-state.env. */
+const OPERATOR = userInfo();
+
+function run(h: Host, opts: { hostRoot?: boolean; cwd?: string; sudoUser?: string } = {}) {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env, PATH: `${h.bin}:${process.env.PATH}`, WBB_HOST_ROOT: h.root, SUDO_USER: opts.sudoUser ?? OPERATOR.username,
+  };
   if (opts.hostRoot === false) delete env.WBB_HOST_ROOT;
   const r = spawnSync('bash', [SCRIPT], { encoding: 'utf8', env, cwd: opts.cwd ?? REPO });
   return { code: r.status, out: r.stdout, err: r.stderr };
@@ -42,6 +48,7 @@ const COLLECTOR = 'usr/local/libexec/wbb-host-patch-collect';
 const SERVICE = 'etc/systemd/system/wbb-host-patch.service';
 const TIMER = 'etc/systemd/system/wbb-host-patch.timer';
 const OUT = 'var/tmp/wbb-host-patch';
+const DROPIN = 'etc/systemd/system/wbb-host-patch.service.d/image-state.conf';
 
 describe('install-host-patch-collector — a clean host', () => {
   it('installs the collector 0755 and both units 0644, byte for byte', () => {
@@ -85,6 +92,39 @@ describe('install-host-patch-collector — a clean host', () => {
     expect(mode(at(h, OUT))).toBe(0o700);
   });
 
+  it('names the operator\'s image-state.env in a 0644 drop-in of the service', () => {
+    const h = host();
+    expect(run(h).code).toBe(0);
+    expect([readFileSync(at(h, DROPIN), 'utf8'), mode(at(h, DROPIN)), mode(join(at(h, DROPIN), '..'))]).toEqual([
+      '# install-host-patch-collector.sh: the image-state.env of the operator who ran it.\n'
+      + `[Service]\nEnvironment=WBB_IMAGE_STATE=${OPERATOR.homedir}/.local/state/wbb-autodeploy/image-state.env\n`,
+      0o644, 0o755,
+    ]);
+  });
+
+  it('writes the drop-in before the reload, so the first run already reads the image-state.env', () => {
+    const h = host();
+    writeFileSync(join(h.bin, 'systemctl'), `#!/usr/bin/env bash\necho "systemctl $* $(test -e '${at(h, DROPIN)}' && echo dropin)" >> "${h.log}"\n`);
+    run(h);
+    expect(calls(h)[0]).toBe('systemctl daemon-reload dropin');
+  });
+
+  it.each([['SUDO_USER unset', ''], ['SUDO_USER root', 'root']])('%s: installs without a drop-in and says the deployed image is unknown', (_n, user) => {
+    const h = host();
+    const r = run(h, { sudoUser: user });
+    expect([r.code, existsSync(at(h, DROPIN)), existsSync(at(h, COLLECTOR))]).toEqual([0, false, true]);
+    expect(r.out).toContain('the operator cannot be told (SUDO_USER is not set, or has no home): no image-state.env, the status shows the deployed image as unknown');
+  });
+
+  it('without an operator keeps the drop-in an earlier install wrote', () => {
+    const h = host();
+    run(h);
+    const before = readFileSync(at(h, DROPIN), 'utf8');
+    const r = run(h, { sudoUser: '' });
+    expect([r.code, readFileSync(at(h, DROPIN), 'utf8')]).toEqual([0, before]);
+    expect(r.out).toContain('/etc/systemd/system/wbb-host-patch.service.d/image-state.conf kept as it was');
+  });
+
   it('is idempotent', () => {
     const h = host();
     expect([run(h).code, run(h).code]).toEqual([0, 0]);
@@ -107,6 +147,15 @@ describe('install-host-patch-collector — refusals change nothing', () => {
     expect([r.code, r.err.includes('/var/tmp/wbb-host-patch'), existsSync(at(h, COLLECTOR)), calls(h)]).toEqual([1, true, false, []]);
   });
 
+  it.each(['/home/o p', '/home/%n', '/home/$x', '/home/o"p'])('refuses an operator home %j a unit value cannot hold, before installing anything', (home) => {
+    const h = host();
+    writeFileSync(join(h.bin, 'getent'), `#!/usr/bin/env bash\necho 'op:x:1000:1000::${home}:/bin/bash'\n`);
+    chmodSync(join(h.bin, 'getent'), 0o755);
+    const r = run(h, { sudoUser: 'op' });
+    expect([r.code, r.err.includes('has a character a unit value cannot hold'), existsSync(at(h, COLLECTOR)), existsSync(at(h, DROPIN)), calls(h)])
+      .toEqual([1, true, false, false, []]);
+  });
+
   it('refuses a squatted summary path that is a plain file', () => {
     const h = host();
     writeFileSync(at(h, OUT), '');
@@ -125,7 +174,8 @@ describe('the units', () => {
   it('the service is a 15-minute oneshot running the installed collector, unsandboxed', () => {
     expect(directives('deploy/wbb-host-patch.service', 'Service')).toEqual([
       'Type=oneshot',
-      'ExecStart=/usr/bin/python3 -B /usr/local/libexec/wbb-host-patch-collect',
+      'Environment=WBB_IMAGE_STATE=',
+      'ExecStart=/usr/bin/python3 -B /usr/local/libexec/wbb-host-patch-collect --image-state=${WBB_IMAGE_STATE}',
       'TimeoutStartSec=15min',
       'Nice=10',
     ]);
