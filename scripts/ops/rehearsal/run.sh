@@ -357,13 +357,14 @@ argv_pattern() {
   local p="$1"
   printf '[%s]%s' "${p:0:1}" "$(printf '%s' "${p:1}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
 }
-# A pgrep that found nothing says 1. Any other answer — found (0), refused, or cut at its limit (124) — is
-# not proof that nothing is left, so the cleanup goes on as if something were (#911 AI review). sudo -n
-# refusing says 1 too, so the ticket is asked first: without it no answer of pgrep is one.
+# A pgrep that found nothing says 1 and nothing else. Any other answer — found (0), cut at its limit (124),
+# or sudo refusing this very call (it says 1 too, and says why on stderr: no ticket, or not allowed) — is
+# not proof that nothing is left, so the cleanup goes on as if something were (#911 AI review).
 stray_left() { # <pattern>
-  bounded "$SUDO" -n true >/dev/null 2>&1 || return 0
-  bounded "$SUDO" -n pgrep -f -- "$1" >/dev/null 2>&1
-  [ "$?" != 1 ]
+  local err rc
+  err=$(bounded "$SUDO" -n pgrep -f -- "$1" 2>&1 >/dev/null)
+  rc=$?
+  [ "$rc" != 1 ] || [ -n "$err" ]
 }
 kill_strays() {
   local pats=() p waited=0 left

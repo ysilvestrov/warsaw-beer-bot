@@ -298,9 +298,8 @@ const CLEANUP = [
   'podman container exists wbb-rehearsal',
   'systemctl show wbb-rehearsal.service -p LoadState,ActiveState',
 ];
-// The stray-process sweep (pkill/pgrep by the kit's paths, each pgrep after a `sudo -n true`) is checked on
-// its own, below.
-const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n (p(kill|grep) |true$)/.test(l));
+// The stray-process sweep (pkill/pgrep by the kit's paths) is checked on its own, below.
+const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n p(kill|grep) /.test(l));
 const PROD_READ = [
   `sudo -n python3 -I -c import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wbb_image; sys.exit(wbb_image.main(["current"])) <R>/deploy/image/helper`,
   'systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState',
@@ -622,7 +621,8 @@ ${expected(w)[2]}` });
   // #911 AI review: sudo -n refusing exits 1, as pgrep finding nothing does — a lapsed ticket is not "none left".
   it('a ticket that lapses before the sweep: pgrep is not taken at its word, CLEANUP FAILED, FAIL cleanup', () => {
     const w = world();
-    script(w, { ...expected(w), 11: `echo 1 > "$STUB_DIR/sudo-rc"\n${expected(w)[11]}` });
+    // From the last controller run on, every sudo -n of a command refuses as a lapsed ticket does (exit 1, a reason on stderr).
+    script(w, { ...expected(w), 11: `: > "$STUB_DIR/lapsed"\n${expected(w)[11]}` });
     w.env.REHEARSAL_TERM_GRACE_S = '1';
     const r = run(w);
     const sub = (l: string) => l.split(w.root).join('<T>').replace(/<T>\/tmp\/wbb-rehearsal\.[A-Za-z0-9]+/g, '<W>');
