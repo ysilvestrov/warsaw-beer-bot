@@ -11,7 +11,9 @@
 # - api.telegram.org resolves to 127.0.0.1. Network=host is there for /health on the kit's port, and with a
 #   network getMe of the fake token would answer 404 — a rejection offline-telegram.cjs does not tolerate (it
 #   tolerates only node-fetch's FetchError, which a refused or a mis-certified connection gives). Nothing of the
-#   rehearsal reaches Telegram.
+#   rehearsal reaches Telegram;
+# - no [Install]: a cleanup killed before it removed this file, then a reboot, must not start a second bot.
+# API_PORT and the paths are wbb_image_rehearsal.py's KIT_PORT and KIT_ROOT (a test holds them equal).
 [Unit]
 Description=Warsaw Beer Crawler Bot (rehearsal of the image deploy)
 After=network-online.target
@@ -42,6 +44,3 @@ Volume=/var/lib/wbb-rehearsal/data:/var/lib/wbb-rehearsal/data:rw
 [Service]
 Restart=on-failure
 TimeoutStopSec=20
-
-[Install]
-WantedBy=multi-user.target

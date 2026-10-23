@@ -14,6 +14,12 @@ call time) and its `render_template` is wrapped:
                                          Any other digest renders the kit's template unchanged. Unset or
                                          empty: nothing is sick. Not a digest: REFUSED, exit 2, nothing run.
 
+`prune` also keeps the digest production's Quadlet file pins, when there is one: the helper keeps only its
+--keep and the pinned digest of ITS host (the kit's), and after the switchover production's image would be removed.
+A production Quadlet file the helper cannot read is REFUSED, exit 2, nothing run.
+
+`--kit-root` / `--kit-port`, alone: print KIT_ROOT / KIT_PORT and exit 0 (for run.sh; never passed to the helper).
+
 What the kit owns on the host: the Quadlet file below (systemd names the unit after it), the kit's template in
 this directory, and KIT_ROOT — `data/` (the bot's copy of the production DB and its pre snapshots) and
 `scratch/` (root, 0700: the trial copies). Podman, systemctl, the images' filesystem and the bot's user are
@@ -45,6 +51,8 @@ except Exception:
 CONTAINER = 'wbb-rehearsal'
 UNIT = 'wbb-rehearsal.service'
 KIT_ROOT = '/var/lib/wbb-rehearsal'
+# The kit bot's API_PORT (its /health); the template's literal, tested against this.
+KIT_PORT = 3917
 SICK_ENV = 'REHEARSAL_SICK_DIGEST'
 SICK_EXEC = 'Exec=node -e "process.exit(1)"'
 
@@ -83,11 +91,25 @@ def rehearsal_names(sick):
         wbb_image.CONTAINER, wbb_image.UNIT, wbb_image.render_template = saved
 
 
-def main(argv, host=REHEARSAL, environ=os.environ):
+KIT_VALUES = {'--kit-root': KIT_ROOT, '--kit-port': KIT_PORT}
+
+
+def main(argv, host=REHEARSAL, environ=os.environ, production=wbb_image.PRODUCTION):
+    if len(argv) == 1 and argv[0] in KIT_VALUES:
+        print(KIT_VALUES[argv[0]])
+        return 0
     sick = environ.get(SICK_ENV) or None
     if sick is not None and not wbb_image.DIGEST.fullmatch(sick):
         print(f'REFUSED: {SICK_ENV}={sick!r} is not a sha256:<64 lowercase hex> digest', file=sys.stderr)
         return wbb_image.EX_REFUSED
+    if argv[:1] == ['prune']:
+        try:
+            pinned = wbb_image.quadlet_digest(production)
+        except wbb_image.Refused as e:
+            print(f'REFUSED: production {e}', file=sys.stderr)
+            return wbb_image.EX_REFUSED
+        if pinned is not None:
+            argv = [*argv, '--keep', pinned]
     with rehearsal_names(sick):
         return wbb_image.main(argv, host)
 
