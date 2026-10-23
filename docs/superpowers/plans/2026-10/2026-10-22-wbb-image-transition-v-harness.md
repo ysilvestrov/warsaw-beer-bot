@@ -8,7 +8,7 @@
 - **read-only перевірка перед сеансом**;
 - **повний runbook** сеансу в README.
 
-Ядро «в»: `docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-core.md`, рішення 1–14, до `e9b2acf`. Наскрізне рев'ю ядра пройдено, знахідки закрито. Спека: поправка 4 (затверджена 22.10), §6.3, §7.2, §8 п.2–5, §10.
+Ядро «в»: `docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-core.md`, рішення 1–14, до `e9b2acf`; рішення 15 (23.10) — `reset-failed` в `activate` хелпера. Наскрізне рев'ю ядра пройдено, знахідки закрито. Спека: поправка 4 (затверджена 22.10), §6.3, §7.2, §8 п.2–5, §10.
 
 ## Рішення
 
@@ -43,7 +43,7 @@
 2. **Сценарії** (`run.sh` проганяє по черзі, кожен має очікуваний результат; після кожного — вердикт PASS/FAIL у підсумку):
    - **(а) bootstrap S** через `--manual bootstrap`. Набір сам «прибирає» старий юніт: для тестового юніта його нема, тож одразу другий запуск. Очікується: перший settled S. **P3** — набір логує час `pull`, `audit` і `trial` із подій.
    - **(б) деплой D через `--manual deploy` в `auto`** → settled D.
-   - **(в) поганий кандидат → автовідкат.** Shim для digest-а, позначеного набором як «хворий» (env `REHEARSAL_SICK_DIGEST`), рендерить шаблон з `Exec=node -e "process.exit(1)"`. Кандидат стартує і падає, вікно провалюється, відкат на D. Очікується: вихід 2, працює D, `LAST_FAILED_SHA` записано. Як «хворий» кандидат іде образ S, новий для вікна, бо settled тепер D. `REHEARSAL_SICK_DIGEST` іде лише в цей сценарій і через `sudo REHEARSAL_SICK_DIGEST=… python3 -I …` (sudo скидає оточення). **Очікуваний результат (в) чекає живої проби:** `Restart=on-failure` хворого кандидата може вичерпати `StartLimitBurst`, і тоді systemd відмовить і restart-у відкату.
+   - **(в) поганий кандидат → автовідкат.** Shim для digest-а, позначеного набором як «хворий» (env `REHEARSAL_SICK_DIGEST`), рендерить шаблон з `Exec=node -e "process.exit(1)"`. Кандидат стартує і падає, вікно провалюється, відкат на D. Очікується: відкат на D, вихід 2, працює D, `LAST_FAILED_SHA` записано. Як «хворий» кандидат іде образ S, новий для вікна, бо settled тепер D. `REHEARSAL_SICK_DIGEST` іде лише в цей сценарій і через `sudo REHEARSAL_SICK_DIGEST=… python3 -I …` (sudo скидає оточення). Ризик, який тут чекав живої проби, підтвердився й виправлений: проба 23.10 (спека, V16) показала, що хворий кандидат вичерпує ліміт стартів і `restart` відкату відмовляє; `activate` тепер спершу робить `reset-failed` (ядро, рішення 15). Набір імпортує хелпер **з checkout-а**, тож сценарій (в) перевіряє фікс ще до перевстановлення хелпера на кроці 7 runbook-у.
    - **(г) обриви за таблицею §7.2.** Набір запускає деплой S поверх D і вбиває контролер при `WINDOW_PHASE=activating`, потім при `watching`, кожен у окремому прогоні. Далі звичайний tick (з тим самим станом) має довести вікно за рядком таблиці: settled або скасування. Перед активацією очікується «вікно скасовано, повтор», після — «повне вікно від зараз».
    - **(ґ) рядок «юніт не наш»:** набір підміняє юніт (unit file у `/etc/systemd/system/wbb-rehearsal.service`), і `current` має сказати `foreign` → інцидент; потім прибирає.
 3. **Прибирання — `trap` на EXIT/INT/TERM**, до і після кожного сценарію:
@@ -78,7 +78,7 @@
    - `state.env` звичайний файл без `WINDOW_*`/`ROLLBACK_STARTED`;
    - `DEPLOYED_SHA` є і є предком `origin/main`;
    - `image-state.env` нема;
-   - `install-image.sh --check` чистий;
+   - `install-image.sh --check` чистий — з одним очікуваним винятком: до кроку 7 runbook-у встановлений хелпер старший за checkout (рішення 15 ядра). `--check` тоді виходить з 1 і друкує `DIFFERS: /usr/local/lib/wbb-image/wbb_image.py (content)` і `1 difference(s): sudo bash deploy/install-image.sh`. Preflight такий результат — коли єдина розбіжність — це `(content)` саме `wbb_image.py` — показує як «очікується перевстановлення (крок 7)», не FAIL. Будь-яка інша розбіжність (`not installed`, `mode`, `owner`, інший файл, каталог) — FAIL;
    - `gh attestation verify --help` має `--source-digest` і `--deny-self-hosted-runners`;
    - checkout чистий на `origin/main`;
    - у HEAD є опублікований атестований образ (резолв і verify);
@@ -94,7 +94,7 @@
    4. `switchover-preflight.sh`;
    5. репетиція (`run.sh`) і прочитати підсумок + P3;
    6. `migrate-state-to-image.sh`;
-   7. `install-image.sh --check`, потім `install-autodeploy.sh`, потім `install-host-patch-collector.sh`;
+   7. `sudo bash deploy/install-image.sh` (перевстановлює хелпер з рішенням 15 ядра), потім `sudo bash deploy/install-image.sh --check` — чистий, потім `install-autodeploy.sh`, потім `install-host-patch-collector.sh`;
    8. `bash deploy/deploy.sh --bootstrap` двічі, з кроками root між ними;
    9. `sudo systemctl enable --now wbb-autodeploy.timer`;
    10. перевірити перший tick і статус.
@@ -115,7 +115,7 @@
 
 - Правила тестів CLAUDE.md. Гейт як у ядрі: повний прогін у фоні, тайм-аут ≥ 40 хв, плюс від root `release.test.ts`.
 - Ніколи `chown`/`chmod` репо, крім режиму нових скриптів.
-- Хелпер (`deploy/image/helper/**`) і sudoers не змінюються.
+- Хелпер (`deploy/image/helper/**`) і sudoers не змінюються. Виняток — рішення 15 ядра (23.10): `reset-failed` перед `restart` в `activate`; через нього хелпер перевстановлюється на кроці 7 runbook-у.
 - Набір тестується без root: shim — Python-тестом на фейковому `Host`, як `test_wbb_image.py`; `run.sh` — через seams (`REHEARSAL_SUDO`, `REHEARSAL_SYSTEMCTL`, `REHEARSAL_PODMAN`) і стаби; прибирання — тестом, що вбиває на кожному кроці.
 - PR В1 (ядро + обв'язка): `[deploy:hold]` + мітка. Кроки — runbook. В описі:
   - production заморожений від мерджу до bootstrap;

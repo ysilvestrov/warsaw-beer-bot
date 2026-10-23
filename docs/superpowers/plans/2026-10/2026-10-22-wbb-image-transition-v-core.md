@@ -83,6 +83,14 @@
     - рядок паритету: `deploy/migrate-state-to-image.sh` не held;
     - зміну `deploy/release/test_gates.py` (лише тест, що читає інсталятор) названо в PR.
 
+### Рішення після проби на хості (23.10)
+
+15. **`activate` скидає юніту ліміт стартів перед `restart`.**
+    - Дефект: кандидат, що падає одразу, за кілька секунд упирається в ліміт стартів systemd. Тоді відкат `activate --digest <S>` у межах ~10 с отримує `ACTIVATE FAILED`: `restart` відмовляє, навіть не пробуючи, хоча файл уже називає здоровий S. Бот лишається лежати з інцидентом.
+    - Проба 23.10 на прод-хості (спека, V16): 6 стартів за 2,37 с → «Start request repeated too quickly»; та сама послідовність `activate` зі здоровим файлом — `restart` виходить з 1 за 2,75 с; `reset-failed` + `restart` — active, `NRestarts=0`.
+    - Фікс: `systemctl reset-failed <UNIT>` після перевірки типу юніта і перед `restart`. Best effort: його збій чи тайм-аут рестарту не зупиняє, вердикт — вихід `restart`, як і досі. `UNIT` читається під час виклику, тож шим репетиції скидає `wbb-rehearsal.service`.
+    - Затверджено власником 23.10. Наслідок для сеансу: хелпер змінився, тож у сеансі його **перевстановлюють** (`sudo bash deploy/install-image.sh`, потім `--check`) — runbook обв'язки, п.7. Обмеження «хелпер не змінюється» (Global Constraints) має цей один виняток.
+
 ## Таблиця «заявка → доказ»
 
 | Заявка | Що стверджує | Доказ | Сила |
@@ -97,7 +105,7 @@
 
 - Правила тестів CLAUDE.md. Гейт: `su tester -c 'cd /home/user/warsaw-beer-bot && npm test && npm run typecheck'` (дивитися справжні коди виходу; повний прогін у фоні з тайм-аутом ≥ 40 хв) і від root `npm test -- scripts/release.test.ts`.
 - Ніколи `chown`/`chmod` репо.
-- `ships.sh`, `rsync-filter`, `record-deployed.sh`, `deploy/release/**` і хелпер **не змінюються**: це В2.
+- `ships.sh`, `rsync-filter`, `record-deployed.sh`, `deploy/release/**` і хелпер **не змінюються**: це В2. Виняток — Рішення 15 (`reset-failed` в `activate`).
 - PR: `[deploy:hold]` + мітка `deploy:hold`. Кроки — посилання на runbook з обв'язки «в». Поки його немає, PR не мерджиться (так і скажеш в описі).
 
 ---

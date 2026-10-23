@@ -35,6 +35,7 @@ SYSTEMCTL = '/fake/bin/systemctl'
 SHOW_ARGV = [SYSTEMCTL, 'show', 'wbb-rehearsal.service', '-p', 'LoadState,SourcePath,FragmentPath']
 CONTAINER_ARGV = [PODMAN, 'container', 'inspect', 'wbb-rehearsal', '--format', '{{.Image}} {{.ImageDigest}}']
 RELOAD = [SYSTEMCTL, 'daemon-reload']
+RESET_FAILED = [SYSTEMCTL, 'reset-failed', 'wbb-rehearsal.service']
 RESTART = [SYSTEMCTL, 'restart', 'wbb-rehearsal.service']
 GENERATED = '/run/systemd/generator/wbb-rehearsal.service'
 SICK = 'Exec=node -e "process.exit(1)"'
@@ -96,7 +97,7 @@ class ShimCase(unittest.TestCase):
 
     def activate(self, digest, environ=None):
         runner = FakeRunner(inspect(digest), show('not-found', '', ''), done(),
-                            show('loaded', self.quadlet, GENERATED), done())
+                            show('loaded', self.quadlet, GENERATED), done(), done())
         result = self.main(['activate', '--digest', digest], runner, environ)
         return result, runner.calls
 
@@ -187,7 +188,7 @@ class Activate(ShimCase):
         (result, calls) = self.activate(D1)
         self.assertEqual(result, (0, f'ACTIVATED {D1}\n', ''))
         self.assertEqual(calls, [[PODMAN, 'image', 'inspect', f'{REPO}@{D1}', '--format', 'json'], SHOW_ARGV,
-                                 RELOAD, SHOW_ARGV, RESTART])
+                                 RELOAD, SHOW_ARGV, RESET_FAILED, RESTART])
         self.assertEqual((os.listdir(self.quadlet_dir), self.written()),
                          (['wbb-rehearsal.container'], self.rendered_kit_template(D1)))
 
