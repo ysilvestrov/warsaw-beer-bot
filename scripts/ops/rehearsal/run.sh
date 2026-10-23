@@ -358,8 +358,10 @@ argv_pattern() {
   printf '[%s]%s' "${p:0:1}" "$(printf '%s' "${p:1}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
 }
 # A pgrep that found nothing says 1. Any other answer — found (0), refused, or cut at its limit (124) — is
-# not proof that nothing is left, so the cleanup goes on as if something were (#911 AI review).
+# not proof that nothing is left, so the cleanup goes on as if something were (#911 AI review). sudo -n
+# refusing says 1 too, so the ticket is asked first: without it no answer of pgrep is one.
 stray_left() { # <pattern>
+  bounded "$SUDO" -n true >/dev/null 2>&1 || return 0
   bounded "$SUDO" -n pgrep -f -- "$1" >/dev/null 2>&1
   [ "$?" != 1 ]
 }

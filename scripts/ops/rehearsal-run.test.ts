@@ -298,8 +298,9 @@ const CLEANUP = [
   'podman container exists wbb-rehearsal',
   'systemctl show wbb-rehearsal.service -p LoadState,ActiveState',
 ];
-// The stray-process sweep (pkill/pgrep by the kit's paths) is checked on its own, below.
-const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n p(kill|grep) /.test(l));
+// The stray-process sweep (pkill/pgrep by the kit's paths, each pgrep after a `sudo -n true`) is checked on
+// its own, below.
+const fromCleanup = (lines: string[]) => lines.slice(lines.indexOf(CLEANUP[0])).filter((l) => !/^sudo -n (p(kill|grep) |true$)/.test(l));
 const PROD_READ = [
   `sudo -n python3 -I -c import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]); import wbb_image; sys.exit(wbb_image.main(["current"])) <R>/deploy/image/helper`,
   'systemctl show warsaw-beer-bot.service -p LoadState,ActiveState,SubState',
@@ -616,6 +617,17 @@ ${expected(w)[2]}` });
     expect([r.code, r.out.split('\n').filter((l) => l.startsWith('CLEANUP FAILED: processes')).map(sub), sub(summary(r.out).split('\n')[9])]).toEqual([1,
       ['CLEANUP FAILED: processes naming <T>/kit/wbb-rehearsal or <W> survived the KILL — sudo pgrep -af <T>/kit/wbb-rehearsal; sudo pgrep -af <W>'],
       'FAIL  cleanup — processes naming <T>/kit/wbb-rehearsal or <W> survived the KILL']);
+  });
+
+  // #911 AI review: sudo -n refusing exits 1, as pgrep finding nothing does — a lapsed ticket is not "none left".
+  it('a ticket that lapses before the sweep: pgrep is not taken at its word, CLEANUP FAILED, FAIL cleanup', () => {
+    const w = world();
+    script(w, { ...expected(w), 11: `echo 1 > "$STUB_DIR/sudo-rc"\n${expected(w)[11]}` });
+    w.env.REHEARSAL_TERM_GRACE_S = '1';
+    const r = run(w);
+    const sub = (l: string) => l.split(w.root).join('<T>').replace(/<T>\/tmp\/wbb-rehearsal\.[A-Za-z0-9]+/g, '<W>');
+    expect([r.code, r.out.split('\n').filter((l) => l.startsWith('CLEANUP FAILED: processes')).map(sub)]).toEqual([1,
+      ['CLEANUP FAILED: processes naming <T>/kit/wbb-rehearsal or <W> survived the KILL — sudo pgrep -af <T>/kit/wbb-rehearsal; sudo pgrep -af <W>']]);
   });
 
   it('a process the controller left in a group of its own (timeout …) and naming the kit is killed before the kit goes', () => {
