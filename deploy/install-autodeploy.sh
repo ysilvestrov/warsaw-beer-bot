@@ -80,9 +80,9 @@ active=$("$SYSTEMCTL" is-active wbb-autodeploy.timer 2>/dev/null || true)
 # it back with the new copy (#911 AI review). Only a timer that is neither runs nothing.
 armed=""
 if [ "$have_state" = 0 ]; then
-  if [ "$active" = active ]; then
-    armed=active
-  else
+  # A timer on its way up (activating, reloading) runs the new copy as soon as it is up (#911 AI review).
+  case "$active" in active|activating|reloading|refreshing) armed=$active ;; esac
+  if [ -z "$armed" ]; then
     case $("$SYSTEMCTL" is-enabled wbb-autodeploy.timer 2>/dev/null || true) in
       enabled|enabled-runtime) armed=enabled ;;
     esac
@@ -189,11 +189,12 @@ echo "== timer state =="
 enabled=$("$SYSTEMCTL" is-enabled wbb-autodeploy.timer 2>&1 || true)
 echo "wbb-autodeploy.timer: ${enabled}, ${active:-unknown}"
 echo
-if [ "$active" = active ]; then
+case "$active" in active|activating|reloading|refreshing) timer_running=1 ;; *) timer_running=0 ;; esac
+if [ "$timer_running" = 1 ]; then
   echo "The timer is ARMED and now runs the newly installed copy."
   echo "Emergency stop, no password needed:"
   echo "  touch ~/.local/state/wbb-autodeploy/PAUSED"
-elif [ "$enabled" = enabled ]; then
+elif [ "$enabled" = enabled ] || [ "$enabled" = enabled-runtime ]; then
   echo "The timer is enabled but not running: it starts with the next boot, or now with"
   echo "  sudo systemctl start wbb-autodeploy.timer"
 else

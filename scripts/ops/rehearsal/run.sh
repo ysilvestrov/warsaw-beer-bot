@@ -357,6 +357,12 @@ argv_pattern() {
   local p="$1"
   printf '[%s]%s' "${p:0:1}" "$(printf '%s' "${p:1}" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
 }
+# A pgrep that found nothing says 1. Any other answer — found (0), refused, or cut at its limit (124) — is
+# not proof that nothing is left, so the cleanup goes on as if something were (#911 AI review).
+stray_left() { # <pattern>
+  bounded "$SUDO" -n pgrep -f -- "$1" >/dev/null 2>&1
+  [ "$?" != 1 ]
+}
 kill_strays() {
   local pats=() p waited=0 left
   if [ -n "$KIT_ROOT" ]; then pats+=("$(argv_pattern "$KIT_ROOT")"); fi
@@ -368,17 +374,17 @@ kill_strays() {
   while :; do
     left=0
     for p in "${pats[@]}"; do
-      if bounded "$SUDO" -n pgrep -f -- "$p" >/dev/null 2>&1; then left=1; fi
+      if stray_left "$p"; then left=1; fi
     done
     [ "$left" = 1 ] && [ "$waited" -lt "$TERM_GRACE_S" ] || break
     sleep 1
     waited=$(( waited + 1 ))
   done
   [ "$left" = 1 ] || return 0
-  for p in "${pats[@]}"; do "$SUDO" -n pkill -KILL -f -- "$p" 2>/dev/null; done
+  for p in "${pats[@]}"; do bounded "$SUDO" -n pkill -KILL -f -- "$p" 2>/dev/null; done
   sleep 1
   for p in "${pats[@]}"; do
-    if "$SUDO" -n pgrep -f -- "$p" >/dev/null 2>&1; then return 1; fi
+    if stray_left "$p"; then return 1; fi
   done
 }
 
@@ -407,7 +413,7 @@ cleanup() {
   bounded "$SUDO" -n "$PODMAN" rm -f --ignore "$KIT_CONTAINER" >/dev/null \
     || cleanup_failed "podman rm -f $KIT_CONTAINER" "sudo podman rm -f --ignore $KIT_CONTAINER"
   bounded "$SUDO" -n rm -rf "$KIT_ROOT" || cleanup_failed "rm -rf $KIT_ROOT" "sudo rm -rf $KIT_ROOT"
-  if [ -n "$WORK" ]; then rm -rf "$WORK" || cleanup_failed "rm -rf $WORK" "rm -rf $WORK"; fi
+  if [ -n "$WORK" ]; then bounded rm -rf "$WORK" || cleanup_failed "rm -rf $WORK" "rm -rf $WORK"; fi
   # What is left is checked, not assumed. The images S and D are not the kit's: the settles' prune already
   # removed all but the last settled one, and the next prune of production removes that.
   for f in "$QUADLET" "$UNIT_FILE" "$KIT_ROOT"; do

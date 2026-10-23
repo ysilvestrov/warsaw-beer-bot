@@ -521,9 +521,10 @@ ${expected(w)[2]}` });
     w.env.PATH = `${w.stub}:${w.env.PATH}`;
     const r = run(w);
     expect(r.out.split('\n').filter((l) => l.startsWith('CLEANUP FAILED') || l.startsWith('  sudo ') || l.startsWith('FAIL  cleanup'))
-      .map((l) => l.split(w.root).join('<T>'))).toEqual([
+      .map((l) => l.split(w.root).join('<T>').replace(/<T>\/tmp\/wbb-rehearsal\.[A-Za-z0-9]+/g, '<W>'))).toEqual([
       'CLEANUP FAILED: rm -f <T>/etc/containers/systemd/wbb-rehearsal.container <T>/etc/systemd/system/wbb-rehearsal.service — sudo rm -f <T>/etc/containers/systemd/wbb-rehearsal.container <T>/etc/systemd/system/wbb-rehearsal.service',
       'CLEANUP FAILED: rm -rf <T>/kit/wbb-rehearsal — sudo rm -rf <T>/kit/wbb-rehearsal',
+      'CLEANUP FAILED: rm -rf <W> — rm -rf <W>',
       // (ґ)'s own removal of the shadowing unit file failed too: it is left, and systemd still has it.
       'CLEANUP FAILED: <T>/etc/systemd/system/wbb-rehearsal.service is still there — sudo rm -rf <T>/etc/systemd/system/wbb-rehearsal.service',
       'CLEANUP FAILED: <T>/kit/wbb-rehearsal is still there — sudo rm -rf <T>/kit/wbb-rehearsal',
@@ -535,8 +536,9 @@ ${expected(w)[2]}` });
       '  sudo systemctl reset-failed wbb-rehearsal.service',
       '  sudo podman rm -f --ignore wbb-rehearsal',
       '  sudo rm -rf <T>/kit/wbb-rehearsal',
+      // The kit's own rm -rf of its work directory meets the refusing rm too (it is looked up afresh under timeout).
       'FAIL  cleanup — rm -f <T>/etc/containers/systemd/wbb-rehearsal.container <T>/etc/systemd/system/wbb-rehearsal.service; '
-        + 'rm -rf <T>/kit/wbb-rehearsal; <T>/etc/systemd/system/wbb-rehearsal.service is still there; <T>/kit/wbb-rehearsal is still there; '
+        + 'rm -rf <T>/kit/wbb-rehearsal; rm -rf <W>; <T>/etc/systemd/system/wbb-rehearsal.service is still there; <T>/kit/wbb-rehearsal is still there; '
         + 'systemd still knows wbb-rehearsal.service',
     ]);
     expect(r.code).toBe(1);
@@ -600,6 +602,20 @@ ${expected(w)[2]}` });
     expect([r.code, summary(r.out).split('\n')[3]]).toEqual([1,
       `FAIL  ${TITLES[1]} — what runs: expected ${DD} ${DD} quadlet active/running, got ${DS} ${DS} quadlet active/running; `
       + 'the settled notice: expected 1, got 0; the sudo ticket lapsed (sudo -n refused a helper call) — run sudo -v and the rehearsal again']);
+  });
+
+  // #911 AI review: a pgrep that cannot answer (refused, cut at its limit) is not proof that nothing is left.
+  it('a pgrep that fails (neither found nor not found): the sweep is not trusted, CLEANUP FAILED, FAIL cleanup', () => {
+    const w = world();
+    script(w, { ...expected(w), 11: `printf '#!/usr/bin/env bash\\nexit 3\\n' > "$STUB_DIR/pgrep"; chmod +x "$STUB_DIR/pgrep"\n${expected(w)[11]}` });
+    w.env.PATH = `${w.stub}:${w.env.PATH}`;
+    w.env.REHEARSAL_TERM_GRACE_S = '1';
+    const r = run(w);
+    // The work directory is mktemp's: <W>.
+    const sub = (l: string) => l.split(w.root).join('<T>').replace(/<T>\/tmp\/wbb-rehearsal\.[A-Za-z0-9]+/g, '<W>');
+    expect([r.code, r.out.split('\n').filter((l) => l.startsWith('CLEANUP FAILED: processes')).map(sub), sub(summary(r.out).split('\n')[9])]).toEqual([1,
+      ['CLEANUP FAILED: processes naming <T>/kit/wbb-rehearsal or <W> survived the KILL — sudo pgrep -af <T>/kit/wbb-rehearsal; sudo pgrep -af <W>'],
+      'FAIL  cleanup — processes naming <T>/kit/wbb-rehearsal or <W> survived the KILL']);
   });
 
   it('a process the controller left in a group of its own (timeout …) and naming the kit is killed before the kit goes', () => {

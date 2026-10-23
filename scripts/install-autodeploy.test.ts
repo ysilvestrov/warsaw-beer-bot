@@ -180,6 +180,22 @@ describe('install-autodeploy.sh', () => {
       + 'and the migration would then refuse for good. Nothing was installed.');
   });
 
+  // #911 AI review: a disabled timer on its way up runs the new copy as soon as it is up.
+  test('a disabled timer that is activating and no image-state.env: refused, nothing installed', () => {
+    const s = setup({ active: 'activating', enabled: 'disabled' });
+    const r = run(s);
+    expect([r.status, files(s.dest), lines(s.log), r.stderr.split('\n')[0]]).toEqual([1, [], ['systemctl is-active wbb-autodeploy.timer'],
+      `ERROR: the timer is activating and there is no ${STATE} — the first tick of the new controller would write its own image-state.env, `
+      + 'and the migration would then refuse for good. Nothing was installed.']);
+  });
+
+  test('a runtime-enabled timer that is not running, with the image-state.env present: reported as enabled, not as unarmed', () => {
+    const s = setup({ active: 'inactive', enabled: 'enabled-runtime', withState: true });
+    const r = run(s);
+    expect([r.status, r.stdout.includes('The timer is not armed')]).toEqual([0, false]);
+    expect(r.stdout).toContain('wbb-autodeploy.timer: enabled-runtime, inactive\n\nThe timer is enabled but not running: it starts with the next boot, or now with\n');
+  });
+
   test('an active timer and an operator it cannot tell: refused, nothing installed', () => {
     const s = setup({ active: 'active', withState: true });
     const r = run(s, [], { SUDO_USER: '' });
@@ -225,7 +241,10 @@ describe('install-autodeploy.sh', () => {
   test('with the operator\'s image-state.env: no advice about it', () => {
     const s = setup({ withState: true });
     const r = run(s);
-    expect([r.status, r.stdout.includes('image-state.env'), r.stdout.includes('migrate-state-to-image')]).toEqual([0, false, false]);
+    // The `HEAD:` line quotes the checkout's commit subject, which may name anything (#911: one named
+    // image-state.env); the advice is what the installer itself says.
+    const own = r.stdout.split('\n').filter((l) => !l.startsWith('   HEAD: ')).join('\n');
+    expect([r.status, own.includes('image-state.env'), own.includes('migrate-state-to-image')]).toEqual([0, false, false]);
   });
 
   test.each([['SUDO_USER unset', ''], ['SUDO_USER root', 'root']])('%s, timer stopped: installs, and says it cannot tell the operator', (_name, user) => {
