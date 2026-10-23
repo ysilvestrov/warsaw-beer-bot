@@ -124,7 +124,9 @@ describe('install-autodeploy.sh', () => {
     run(s);
     const d = s.dest;
     expect(lines(s.log)).toEqual([
+      // No image-state.env in this setup: a timer that is not active is also asked whether it is enabled.
       'systemctl is-active wbb-autodeploy.timer',
+      'systemctl is-enabled wbb-autodeploy.timer',
       'image-check ',
       ...INSTALLED.map(([, t]) => `install ${join(d, t)}`),
       'systemctl daemon-reload',
@@ -149,7 +151,7 @@ describe('install-autodeploy.sh', () => {
   test('a failing image check installs nothing, shows its output and the way to fix it', () => {
     const s = setup({ checkExit: 1 });
     const r = run(s);
-    expect([r.status, files(s.dest), lines(s.log)]).toEqual([1, [], ['systemctl is-active wbb-autodeploy.timer', 'image-check ']]);
+    expect([r.status, files(s.dest), lines(s.log)]).toEqual([1, [], ['systemctl is-active wbb-autodeploy.timer', 'systemctl is-enabled wbb-autodeploy.timer', 'image-check ']]);
     expect(r.stderr).toBe(
       'ERROR: the image helper is not installed as this checkout has it — the controller would only wait for it. Nothing was installed.\n'
       + 'wbb-image: every installed copy matches HEAD 1234567\n'
@@ -165,6 +167,17 @@ describe('install-autodeploy.sh', () => {
       `ERROR: the timer is active and there is no ${STATE} — the first tick of the new controller would write its own image-state.env, `
       + 'and the migration would then refuse for good. Nothing was installed.\n'
       + 'Stop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), install the helper (sudo bash deploy/install-image.sh), then run this again (deploy/README.md → Switchover session, steps 2–7).\n');
+  });
+
+  // #911 AI review: enabled but not running is armed all the same — a reboot starts it with the new copy.
+  test('an enabled timer that is not running and no image-state.env: refused, nothing installed', () => {
+    const s = setup({ active: 'inactive', enabled: 'enabled' });
+    const r = run(s);
+    expect([r.status, files(s.dest), lines(s.log)]).toEqual([1, [],
+      ['systemctl is-active wbb-autodeploy.timer', 'systemctl is-enabled wbb-autodeploy.timer']]);
+    expect(r.stderr.split('\n')[0]).toBe(
+      `ERROR: the timer is enabled and there is no ${STATE} — the first tick of the new controller would write its own image-state.env, `
+      + 'and the migration would then refuse for good. Nothing was installed.');
   });
 
   test('an active timer and an operator it cannot tell: refused, nothing installed', () => {
@@ -187,12 +200,11 @@ describe('install-autodeploy.sh', () => {
     ].join('\n'));
   });
 
-  test('an enabled but stopped timer and no image-state.env: installs, with the advice; not "ARMED"', () => {
-    const s = setup({ enabled: 'enabled', active: 'inactive' });
+  test('an enabled but stopped timer with the image-state.env present: installs; says a boot starts it; not "ARMED"', () => {
+    const s = setup({ enabled: 'enabled', active: 'inactive', withState: true });
     const r = run(s);
     expect([r.status, files(s.dest).length, r.stdout.includes('ARMED')]).toEqual([0, INSTALLED.length, false]);
-    expect(r.stdout).toContain(ADVICE);
-    expect(r.stdout).toContain('wbb-autodeploy.timer: enabled, inactive\n\nThe timer is enabled but not running: nothing deploys until\n'
+    expect(r.stdout).toContain('wbb-autodeploy.timer: enabled, inactive\n\nThe timer is enabled but not running: it starts with the next boot, or now with\n'
       + '  sudo systemctl start wbb-autodeploy.timer\n');
   });
 

@@ -74,7 +74,8 @@ case "$1" in
       v=$(sed -n "s/^$p=//p" "$src")
       if [ "$value" = 1 ]; then echo "$v"; else echo "$p=$v"; fi
     done ;;
-  stop) if [ "$2" = wbb-rehearsal.service ]; then rm -f "$STUB_DIR/kit-active"; fi ;;
+  stop) if [ -e "$STUB_DIR/stop-hangs" ]; then exec sleep 1000; fi
+    if [ "$2" = wbb-rehearsal.service ]; then rm -f "$STUB_DIR/kit-active"; fi ;;
   is-active) cat "$STUB_DIR/active-$2" 2>/dev/null || echo inactive ;;
 esac
 exit 0`;
@@ -496,6 +497,21 @@ ${expected(w)[2]}` });
       'CLEANUP FAILED: the container wbb-rehearsal is still there (or podman could not say) — sudo podman rm -f --ignore wbb-rehearsal',
       'CLEANUP FAILED — what the cleanup does, to run by hand:',
     ]);
+  });
+
+  // #911 AI review: the cleanup ignores INT/TERM/HUP, so a hung command must end on its own limit.
+  it('a cleanup command that hangs: cut at its limit, CLEANUP FAILED with the recipe, the rest of the cleanup runs', () => {
+    const w = world();
+    script(w, { ...expected(w), 11: `touch "$STUB_DIR/stop-hangs"\n${expected(w)[11]}` });
+    w.env.REHEARSAL_CLEANUP_STEP_S = '1';
+    const r = run(w);
+    expect([r.code, r.out.split('\n').filter((l) => l.startsWith('CLEANUP FAILED')), summary(r.out).split('\n')[9]]).toEqual([1, [
+      'CLEANUP FAILED: systemctl stop wbb-rehearsal.service (exit 124) — sudo systemctl stop wbb-rehearsal.service',
+      // The stop never ran, so the unit is still active: the check after says so too.
+      'CLEANUP FAILED: systemd still knows wbb-rehearsal.service — sudo systemctl stop wbb-rehearsal.service; sudo systemctl daemon-reload; sudo systemctl reset-failed wbb-rehearsal.service',
+      'CLEANUP FAILED — what the cleanup does, to run by hand:',
+    ], 'FAIL  cleanup — systemctl stop wbb-rehearsal.service (exit 124); systemd still knows wbb-rehearsal.service']);
+    expect(existsSync(w.kit)).toBe(false);
   });
 
   it('cleanup steps that fail (rm refused): CLEANUP FAILED with each recipe, the whole recipe, FAIL cleanup', () => {

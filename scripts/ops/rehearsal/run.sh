@@ -36,7 +36,7 @@
 # Seams (tests only; each defaults to the real thing): REHEARSAL_SUDO, REHEARSAL_SYSTEMCTL, REHEARSAL_PODMAN,
 # REHEARSAL_CURL, REHEARSAL_DF, REHEARSAL_CLOCK, REHEARSAL_CONTROLLER, REHEARSAL_SHIM, REHEARSAL_GIT_DIR,
 # REHEARSAL_ETC, REHEARSAL_PROD_DB, REHEARSAL_CONTAINERS_ROOT, REHEARSAL_EUID, REHEARSAL_POLL_S,
-# REHEARSAL_KEEPALIVE_S, REHEARSAL_TERM_GRACE_S, REHEARSAL_PR_LABELS_CMD, REHEARSAL_CHECKS_CMD,
+# REHEARSAL_KEEPALIVE_S, REHEARSAL_TERM_GRACE_S, REHEARSAL_CLEANUP_STEP_S, REHEARSAL_PR_LABELS_CMD, REHEARSAL_CHECKS_CMD,
 # REHEARSAL_COMPAT_BASE.
 #
 # Every sudo is `sudo -n`: a ticket that lapsed is a loud failure, never a password prompt from a background
@@ -64,6 +64,11 @@ POLL_S="${REHEARSAL_POLL_S:-2}"
 KEEPALIVE_S="${REHEARSAL_KEEPALIVE_S:-60}"
 # How long a TERMed controller gets to go (its helper call ends with it) before the KILL.
 TERM_GRACE_S="${REHEARSAL_TERM_GRACE_S:-30}"
+# The cleanup ignores INT/TERM/HUP (a second Ctrl-C must not cut it short), so each of its commands has a
+# limit of its own: a hung systemctl or podman becomes a CLEANUP FAILED line and the recipe, never a
+# rehearsal that only SIGKILL ends (#911 AI review).
+CLEANUP_STEP_S="${REHEARSAL_CLEANUP_STEP_S:-180}"
+bounded() { timeout --kill-after=10 "$CLEANUP_STEP_S" "$@"; }
 PR_LABELS_CMD="${REHEARSAL_PR_LABELS_CMD:-}"
 CHECKS_SEAM="${REHEARSAL_CHECKS_CMD:-}"
 # The first commit whose start-check knows --leave-running (README → Root helper `wbb-image`): S's image is the
@@ -357,13 +362,13 @@ kill_strays() {
   if [ -n "$KIT_ROOT" ]; then pats+=("$(argv_pattern "$KIT_ROOT")"); fi
   if [ -n "$WORK" ]; then pats+=("$(argv_pattern "$WORK")"); fi
   for p in "${pats[@]}"; do
-    "$SUDO" -n pkill -TERM -f -- "$p" 2>/dev/null
-    "$SUDO" -n pkill -CONT -f -- "$p" 2>/dev/null
+    bounded "$SUDO" -n pkill -TERM -f -- "$p" 2>/dev/null
+    bounded "$SUDO" -n pkill -CONT -f -- "$p" 2>/dev/null
   done
   while :; do
     left=0
     for p in "${pats[@]}"; do
-      if "$SUDO" -n pgrep -f -- "$p" >/dev/null 2>&1; then left=1; fi
+      if bounded "$SUDO" -n pgrep -f -- "$p" >/dev/null 2>&1; then left=1; fi
     done
     [ "$left" = 1 ] && [ "$waited" -lt "$TERM_GRACE_S" ] || break
     sleep 1
@@ -391,28 +396,28 @@ cleanup() {
   P3_TEXT="$(p3_line pull; p3_line audit; p3_line trial)"$'\n'
   if [ -n "$KEEPALIVE_PID" ]; then kill -KILL -- "-$KEEPALIVE_PID" 2>/dev/null; wait "$KEEPALIVE_PID" 2>/dev/null; fi
   echo "==> cleanup"
-  "$SUDO" -n "$SYSTEMCTL" stop "$KIT_UNIT" 2>/dev/null
+  bounded "$SUDO" -n "$SYSTEMCTL" stop "$KIT_UNIT" 2>/dev/null
   rc=$?
   # 5: the unit is not loaded — nothing to stop.
   if [ "$rc" != 0 ] && [ "$rc" != 5 ]; then cleanup_failed "systemctl stop $KIT_UNIT (exit $rc)" "sudo systemctl stop $KIT_UNIT"; fi
   kill_strays || cleanup_failed "processes naming $KIT_ROOT or $WORK survived the KILL" "sudo pgrep -af $KIT_ROOT; sudo pgrep -af $WORK"
-  "$SUDO" -n rm -f "$QUADLET" "$UNIT_FILE" || cleanup_failed "rm -f $QUADLET $UNIT_FILE" "sudo rm -f $QUADLET $UNIT_FILE"
-  "$SUDO" -n "$SYSTEMCTL" daemon-reload || cleanup_failed "systemctl daemon-reload" "sudo systemctl daemon-reload"
-  "$SUDO" -n "$SYSTEMCTL" reset-failed "$KIT_UNIT" 2>/dev/null
-  "$SUDO" -n "$PODMAN" rm -f --ignore "$KIT_CONTAINER" >/dev/null \
+  bounded "$SUDO" -n rm -f "$QUADLET" "$UNIT_FILE" || cleanup_failed "rm -f $QUADLET $UNIT_FILE" "sudo rm -f $QUADLET $UNIT_FILE"
+  bounded "$SUDO" -n "$SYSTEMCTL" daemon-reload || cleanup_failed "systemctl daemon-reload" "sudo systemctl daemon-reload"
+  bounded "$SUDO" -n "$SYSTEMCTL" reset-failed "$KIT_UNIT" 2>/dev/null
+  bounded "$SUDO" -n "$PODMAN" rm -f --ignore "$KIT_CONTAINER" >/dev/null \
     || cleanup_failed "podman rm -f $KIT_CONTAINER" "sudo podman rm -f --ignore $KIT_CONTAINER"
-  "$SUDO" -n rm -rf "$KIT_ROOT" || cleanup_failed "rm -rf $KIT_ROOT" "sudo rm -rf $KIT_ROOT"
+  bounded "$SUDO" -n rm -rf "$KIT_ROOT" || cleanup_failed "rm -rf $KIT_ROOT" "sudo rm -rf $KIT_ROOT"
   if [ -n "$WORK" ]; then rm -rf "$WORK" || cleanup_failed "rm -rf $WORK" "rm -rf $WORK"; fi
   # What is left is checked, not assumed. The images S and D are not the kit's: the settles' prune already
   # removed all but the last settled one, and the next prune of production removes that.
   for f in "$QUADLET" "$UNIT_FILE" "$KIT_ROOT"; do
     if [ -e "$f" ] || [ -L "$f" ]; then cleanup_failed "$f is still there" "sudo rm -rf $f"; fi
   done
-  "$SUDO" -n "$PODMAN" container exists "$KIT_CONTAINER" 2>/dev/null
+  bounded "$SUDO" -n "$PODMAN" container exists "$KIT_CONTAINER" 2>/dev/null
   if [ "$?" != 1 ]; then
     cleanup_failed "the container $KIT_CONTAINER is still there (or podman could not say)" "sudo podman rm -f --ignore $KIT_CONTAINER"
   fi
-  if [ "$("$SYSTEMCTL" show "$KIT_UNIT" -p LoadState,ActiveState 2>/dev/null)" != $'LoadState=not-found\nActiveState=inactive' ]; then
+  if [ "$(bounded "$SYSTEMCTL" show "$KIT_UNIT" -p LoadState,ActiveState 2>/dev/null)" != $'LoadState=not-found\nActiveState=inactive' ]; then
     cleanup_failed "systemd still knows $KIT_UNIT" "sudo systemctl stop $KIT_UNIT; sudo systemctl daemon-reload; sudo systemctl reset-failed $KIT_UNIT"
   fi
   if [ "${#CLEANUP_PROBLEMS[@]}" -gt 0 ]; then

@@ -290,14 +290,14 @@ describe('deploy/migrate-state-to-image.sh', () => {
       chmodSync(old, 0o755);
       const before = tree(h.dir);
       const r = migrate(h, { WBB_CONTROLLER: old });
-      // The old controller, finding the lock busy, records lock-busy-since as it always did; that is its
-      // file, not the migration's. Everything the migration owns is as before.
-      // Its message names how long it found the lock held, in whole seconds of the wall clock.
-      expect([r.code, r.stderr.replace(/lock \(\d+s\)/, 'lock (Ns)'), tree(h.dir).filter((e) => !e.startsWith('lock-busy-since'))]).toEqual([
-        1,
-        refused(`the controller (${old}) does not accept the carried state (exit 0, want exactly 'STATE OK — ${h.image}'): another process holds the lock (Ns); exiting`),
-        before,
-      ]);
+      // The old controller may record lock-busy-since as it always did; that is its file, not the
+      // migration's. Everything the migration owns is as before.
+      // What it prints is its own and depends on the machine (a busy lock here, nothing at all on the CI
+      // runner, #911): the fact is that its exit 0 without the exact line is refused — the words after the
+      // colon are not this test's. The exact-line rule itself is pinned by the stub test above.
+      const prefix = `REFUSED: the controller (${old}) does not accept the carried state (exit 0, want exactly 'STATE OK — ${h.image}'): `;
+      expect([r.code, r.stderr.startsWith(prefix), r.stderr.endsWith('\nNothing was changed.\n'), tree(h.dir).filter((e) => !e.startsWith('lock-busy-since'))])
+        .toEqual([1, true, true, before]);
     });
 
     it('state.env.flat exists', () => {

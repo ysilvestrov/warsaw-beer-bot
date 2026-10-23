@@ -76,14 +76,26 @@ if [ -n "$op_home" ]; then
   if [ -e "$DEST$image_state" ]; then have_state=1; fi
 fi
 active=$("$SYSTEMCTL" is-active wbb-autodeploy.timer 2>/dev/null || true)
-if [ "$have_state" = 0 ] && [ "$active" = active ]; then
+# An enabled timer that is not running now is armed all the same: a reboot or a `systemctl start` brings
+# it back with the new copy (#911 AI review). Only a timer that is neither runs nothing.
+armed=""
+if [ "$have_state" = 0 ]; then
+  if [ "$active" = active ]; then
+    armed=active
+  else
+    case $("$SYSTEMCTL" is-enabled wbb-autodeploy.timer 2>/dev/null || true) in
+      enabled|enabled-runtime) armed=enabled ;;
+    esac
+  fi
+fi
+if [ -n "$armed" ]; then
   if [ -n "$image_state" ]; then
     why="there is no $image_state"
   else
     why="the operator cannot be told (SUDO_USER), so its image-state.env cannot be checked"
   fi
-  printf 'ERROR: the timer is active and %s — the first tick of the new controller would write its own image-state.env, and the migration would then refuse for good. Nothing was installed.\nStop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), install the helper (sudo bash deploy/install-image.sh), then run this again (deploy/README.md → Switchover session, steps 2–7).\n' \
-    "$why" >&2
+  printf 'ERROR: the timer is %s and %s — the first tick of the new controller would write its own image-state.env, and the migration would then refuse for good. Nothing was installed.\nStop it (sudo systemctl disable --now wbb-autodeploy.timer), migrate the state (bash deploy/migrate-state-to-image.sh, as the operator), install the helper (sudo bash deploy/install-image.sh), then run this again (deploy/README.md → Switchover session, steps 2–7).\n' \
+    "$armed" "$why" >&2
   exit 1
 fi
 
@@ -182,7 +194,7 @@ if [ "$active" = active ]; then
   echo "Emergency stop, no password needed:"
   echo "  touch ~/.local/state/wbb-autodeploy/PAUSED"
 elif [ "$enabled" = enabled ]; then
-  echo "The timer is enabled but not running: nothing deploys until"
+  echo "The timer is enabled but not running: it starts with the next boot, or now with"
   echo "  sudo systemctl start wbb-autodeploy.timer"
 else
   echo "The timer is not armed. Nothing will deploy until:"
