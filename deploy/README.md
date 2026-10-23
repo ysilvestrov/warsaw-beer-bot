@@ -236,13 +236,126 @@ deployer is out of date" once a day — ignore it until the session, and do not 
 The wrapper `bash deploy/deploy.sh` refuses (the installed copy is not this checkout's controller).
 Production is frozen from the merge until the bootstrap, so merge at the start of the session.
 
-The session, in order (the full runbook comes with the stage's harness plan):
-1. `sudo systemctl disable --now wbb-autodeploy.timer`; wait until `wbb-autodeploy.service` is inactive
-   and the lock is free (`fuser -v ~/.local/state/wbb-autodeploy/lock` shows nobody).
-2. `bash deploy/migrate-state-to-image.sh` (Migrating, below).
-3. `sudo bash deploy/install-image.sh --check`, then `sudo bash deploy/install-autodeploy.sh`.
-4. The bootstrap (The first image release, below).
-5. `sudo systemctl enable --now wbb-autodeploy.timer`.
+The session is one sitting, in this order; each step says what to do when it refuses. Plan:
+`docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-harness.md` ("Рішення" п.6–7). Work
+in **one checkout of `main` on the host** (the one you run `deploy.sh` from), as the operator, inside
+**tmux or screen**: the rehearsal (step 5) takes about an hour and uses the `sudo` ticket of that
+terminal session — a dropped SSH session hangs it up, and `setsid`, `nohup` into a new session or cron
+do not see the ticket at all.
+
+**Abort rule.** Up to step 5, aborting is: `sudo systemctl enable --now wbb-autodeploy.timer` — the host
+is back where it was before the session (the old timer, frozen production, nothing migrated). From
+step 6 on the old timer must not run again (its `state.env` is a directory now): if you must stop
+between step 6 and step 8, leave the timer **disabled** — the flat bot keeps running untouched — and
+resume at the step you stopped on.
+
+1. **Merge the stage «в» PR** (`[deploy:hold]`) at the start of the session, and wait for CI on the
+   merge commit: the `image` job must have published and attested its image (step 4 checks it). Then
+   in the checkout: `git switch main && git pull`.
+2. **Stop the timer:** `sudo systemctl disable --now wbb-autodeploy.timer`. `disable` too, not only
+   `stop`: a reboot during the session must not bring the old timer back.
+3. **Wait for the running tick:** `systemctl is-active wbb-autodeploy.service` must say `inactive` (or
+   `failed`) and `fuser -v ~/.local/state/wbb-autodeploy/lock` must show nobody. A flat tick that is
+   watching a deploy window holds both for up to ~12 min; do not kill it.
+4. **Preflight:** `sudo -v && bash scripts/ops/switchover-preflight.sh`. Read-only (no state, no lock,
+   no git ref is written; `origin`'s head is read with `git ls-remote`). One line per check —
+   `PASS`, `FAIL` with what to do, or the one `EXPECTED` — then
+   `RESULT: PASS|FAIL (<n> PASS, <n> EXPECTED, <n> FAIL)`; exit 0 only without a `FAIL`:
+
+   | Check | PASS when |
+   |---|---|
+   | `timer`, `service` | `wbb-autodeploy.timer` disabled and inactive, `wbb-autodeploy.service` inactive |
+   | `lock` | the deploy lock is free (opened read-only; a missing file is free) |
+   | `state` | `state.env` is a regular file the migration (step 6) accepts — its own key lists and rules — with no `WINDOW_*`/`ROLLBACK_STARTED` |
+   | `deployed` | `DEPLOYED_SHA` is there and an ancestor of `origin/main` |
+   | `image-state` | no `image-state.env` yet |
+   | `helper` | `sudo bash deploy/install-image.sh --check` is clean. **`EXPECTED`** when its only difference is exactly `DIFFERS: /usr/local/lib/wbb-image/wbb_image.py (content)` + `1 difference(s): …` — the installed helper predates this checkout's (`reset-failed` in `activate`), step 7 reinstalls it. Any other difference is a `FAIL` |
+   | `gh` | `gh attestation verify --help` knows `--source-digest` and `--deny-self-hosted-runners` |
+   | `checkout` | clean (`git status --porcelain` empty) and HEAD = `origin/main`'s head |
+   | `image` | HEAD's tag resolves to a digest that passes `gh attestation verify` — the controller's own two calls, read from `deploy/autodeploy.sh` |
+   | `quadlet` | no `/etc/containers/systemd/warsaw-beer-bot.container` |
+   | `space` | ≥ 5 GiB free in `/var/lib/containers` and `/var/lib` |
+   | `old-checkouts` | no copy of the repo under `~` or `/root` whose flat `deploy/deploy.sh` lacks the `state.env` guard (spec §8 п.3): such a copy would rsync the flat tree and reinstall the old unit over the Quadlet one. `git pull` or remove each it names; copies with the guard are listed for information |
+   | `rehearsal` | nothing of `wbb-rehearsal` is left: `/var/lib/wbb-rehearsal`, its Quadlet file, `/etc/systemd/system/wbb-rehearsal.service`, the unit, the container |
+
+   Without a sudo ticket it refuses before any check (`REFUSED: … run sudo -v first`). If `checkout`
+   and `deployed` say "cannot read origin's main" and `git ls-remote origin main` prints
+   `GitHub is temporarily limiting some unauthenticated downloads`, that is #583: wait and run it
+   again. Fix every `FAIL` and run it again until `RESULT: PASS`.
+5. **Rehearsal** (spec поправка 4; `scripts/ops/rehearsal/`): the checkout's controller and the
+   checkout's helper go through the scenarios on a test unit `wbb-rehearsal`, against the real
+   podman, systemd, GHCR and attestation, on a copy of the production database. Pick **S** and
+   **D**, two commits of `main` with published images, S an ancestor of D, with different
+   `wbb.content` and no `migration:contract`/`rollback:unsafe` PR between them (D = the head of
+   `main` is a good choice; `git log --first-parent --format='%H %ad %s' --date=short origin/main`
+   for S). Then, in tmux/screen:
+
+   ```bash
+   sudo -v
+   bash scripts/ops/rehearsal/run.sh <S-sha> <D-sha>
+   ```
+
+   - **About an hour** (four 600 s windows plus pulls and trials). It keeps the ticket alive itself
+     (`sudo -n -v` every minute); every `sudo` in it is `sudo -n`, so a lapsed ticket is a loud
+     failure, never a password prompt.
+   - Before it creates anything it refuses (`REFUSED: …`, nothing created) when a precondition does
+     not hold: the timer or its service active, a leftover kit, production's Quadlet file present,
+     the port in use, < 5 GiB, S/D not as above (no image, same `wbb.content`, a contract PR in the
+     range). Pick other S/D or fix the cause, then run it again.
+   - **The kit bot is a real bot on a copy:** its crons make real outbound requests (the same sites
+     as production) and it writes only into the copy `/var/lib/wbb-rehearsal/data/bot.db`. Telegram is
+     unreachable for it (`api.telegram.org` → 127.0.0.1, a fake token, no `.env`), and the
+     controller's messages go to a file of the kit — nothing reaches Telegram.
+   - **Firewall:** during the rehearsal the kit listens on **port 3917 on the host network**
+     (`Network=host`, its `/health`). If the host firewall lets that port in from outside, close it
+     for the hour.
+   - **The summary** comes after the cleanup:
+     `=== rehearsal summary ===`, `S=… D=…`, then `PASS|FAIL|SKIP` for each scenario —
+     (а) bootstrap S, (б) deploy D, (в) a sick candidate rolled back, three (г) interruptions, (ґ) a
+     unit that is not ours — then `PASS cleanup`, `PASS production unchanged`, the three **P3** lines
+     and `RESULT: PASS (9/9)`. A failed scenario prints why and the end of the controller's output;
+     the later ones are `SKIP`.
+   - **P3** (`P3 pull: <n>s`, `P3 audit: <n>s`, `P3 trial: <n>s`, from (а)) is how long the first
+     pull, audit and trial took on this host: the trial and the activation are the bootstrap's
+     downtime (step 8). Keep the three lines for the session's record (spec P3).
+   - **If it FAILs** (any scenario, `cleanup`, or `production unchanged`): **stop the session.** The
+     timer stays disabled and production was not touched (that is what `production unchanged`
+     states; a `!!! PRODUCTION CHANGED` banner means look at `warsaw-beer-bot` first). To abort:
+     `sudo systemctl enable --now wbb-autodeploy.timer` (the abort rule above). `CLEANUP FAILED: <step>
+     — <command>` lines and the recipe printed after them are the commands to remove what is left by
+     hand; afterwards `bash scripts/ops/switchover-preflight.sh` must show `PASS rehearsal`.
+6. **Migrate the state:** `bash deploy/migrate-state-to-image.sh` (Migrating the flat deployer's
+   state, below — what it carries, its refusals, and the table for an interrupted run).
+7. **Install, in this order**, from the same clean checkout:
+
+   ```bash
+   sudo bash deploy/install-image.sh            # reinstalls the helper (reset-failed in activate)
+   sudo bash deploy/install-image.sh --check    # must say: every installed copy matches HEAD
+   sudo bash deploy/install-autodeploy.sh       # the image controller and its copies
+   sudo bash deploy/install-host-patch-collector.sh
+   ```
+
+   `install-image.sh` refuses on a dirty checkout or when `quadlet -dryrun` rejects the template
+   (Root helper `wbb-image`, below); `install-autodeploy.sh` refuses unless `--check` is clean, and
+   after installing it checks the copies with `wbb-installed-current` (Install / upgrade, below). Any
+   refusal changes nothing: fix it and run that line again. The collector's installer is safe for the
+   frozen flat bot: `summary.json` keeps its shape, the unit and the image go into a separate
+   `image.json`; before the bootstrap `python3 -m json.tool /var/tmp/wbb-host-patch/image.json`
+   shows `"unit": "foreign"` and `"deployed_digest": null`.
+8. **Bootstrap:** `bash deploy/deploy.sh --bootstrap`, the printed root steps, then
+   `bash deploy/deploy.sh --bootstrap` again — The first image release (bootstrap), below, with the
+   way back on every refusal; a failed window is After a failed bootstrap, below.
+9. **Start the timer:** `sudo systemctl enable --now wbb-autodeploy.timer`.
+10. **Check the first tick and the status.** Within 5 min:
+    `journalctl -u wbb-autodeploy.service -n 30` shows a tick that exited 0 (nothing to deploy: the
+    bootstrapped HEAD is `main`); `wbb-autodeploy --check-state` → `STATE OK`;
+    `sudo -n /usr/local/libexec/wbb-image current` → `unit=quadlet` and the bootstrapped digest. The
+    host collector runs hourly (`sudo systemctl start wbb-host-patch.service` to run it now); the
+    next daily status then carries the footer **`unit=quadlet · образ <12 hex> (= задеплоєного)`**.
+    `≠ задеплоєного`, `⚠️ unit=foreign` or `unit=absent` there means production does not run what
+    the controller recorded: compare `wbb-image current` with `DEPLOYED_DIGEST` in
+    `~/.local/state/wbb-autodeploy/image-state.env` before anything else (Messages, below, for what
+    the controller itself said).
 
 ### When a merge is deployed
 
