@@ -50,6 +50,7 @@ export function greenInputs(overrides: Partial<StatusInputs> = {}): StatusInputs
     handlerFailures: { ok: true, value: [] },
     disk: { ok: true, value: { bytesAvailable: 32 * GIB_BYTES, inodesFree: 2_000_000, pendingRuns: 0 } },
     hostPatch: { ok: true, value: GREEN_HOST_PATCH },
+    hostImage: null,
     upstream: GREEN_UPSTREAM,
     runtimeNode: '24.21.0',
     fest: null,

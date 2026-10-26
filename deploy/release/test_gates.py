@@ -208,7 +208,8 @@ class HeldPaths(unittest.TestCase):
     def test_every_file_an_installer_copies_is_held(self):
         # The installers are the record of what has an installed copy; a new one must land in INSTALLED_COPIES.
         self.assertEqual(installed_sources(), {
-            'deploy/ships.sh', 'deploy/db-snapshot.sh', 'deploy/trial-migrate.cjs', 'deploy/read-env.sh',
+            # Stage «в»: install-autodeploy.sh no longer installs ships.sh and trial-migrate.cjs.
+            'deploy/db-snapshot.sh', 'deploy/read-env.sh',
             'deploy/installed-current.sh', 'deploy/autodeploy.sh', 'deploy/wbb-autodeploy.service',
             'deploy/wbb-autodeploy.timer', 'scripts/ops/host_patch_collect.py', 'deploy/wbb-host-patch.service',
             'deploy/wbb-host-patch.timer', 'scripts/ops/reboot_request.py', 'deploy/wbb-reboot-request.path',

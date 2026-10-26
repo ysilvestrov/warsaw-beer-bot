@@ -2,8 +2,7 @@
  * Merge-deploy — the PR-side hold check (spec 2026-09-30, "Holds").
  *
  * The deployer on the host decides holds by itself (path_is_held in
- * deploy/autodeploy.sh and in the image controller deploy/image/autodeploy.sh,
- * plus the labels) and does not rely on this.
+ * deploy/autodeploy.sh, the image controller, plus the labels) and does not rely on this.
  * This check exists so that whoever presses merge SEES that the deploy will
  * not be unattended: the title carries [deploy:hold] exactly when the label
  * does, and every PR touching a hold path carries both.
@@ -25,15 +24,13 @@ const HELD_EXACT = new Set([
   'scripts/ops/host_patch_collect.py',
   // #469 stage 3: root runs the installed copy; re-run deploy/install-reboot-request.sh
   'scripts/ops/reboot_request.py',
-  // The image controller and the Quadlet template the root helper renders: installed copies
+  // The Quadlet template the root helper renders: an installed copy
   // (plan docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md, "Рішення" п.12).
-  'deploy/image/autodeploy.sh',
   'deploy/image/warsaw-beer-bot.container',
 ]);
 
 /**
- * Mirrors path_is_held() in deploy/image/autodeploy.sh, whose list is the one of
- * deploy/autodeploy.sh plus the image deployer's own installed copies; a parity test pins all three.
+ * Mirrors path_is_held() in deploy/autodeploy.sh (the image controller); a parity test pins the two.
  */
 export function isHoldPath(path: string): boolean {
   if (path === 'deploy/warsaw-beer-bot.service') return false;

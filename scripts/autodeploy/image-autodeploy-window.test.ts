@@ -351,6 +351,17 @@ describe('(є) the code-only rollback', () => {
     expect(events(d.w).length).toBe(before);
   });
 
+  // Stage «в» audit (autodeploy.test.ts, #768): the tick's own rollback is no regression a human made.
+  it('its own rollback is not reported as production going backwards, and fences nothing', () => {
+    const d = deployWorld();
+    fault(d.w, 'health', 300, 99999, d.img.digest);
+    expect(tick(d.w).code).toBe(2);
+    const told = notes(d.w);
+    advance(d.w, 600);
+    expect(tick(d.w).code).toBe(0);
+    expect([notes(d.w), readState(d.w).LAST_SEEN_DEPLOYED_SHA, readState(d.w).REGRESSION_FROM_SHA]).toEqual([told, d.s.sha, undefined]);
+  });
+
   it('(ж) ACTIVATE FAILED: D could not start, S is activated again', () => {
     const d = deployWorld();
     hostSet(d.w, `sick/${d.img.digest}`, '');

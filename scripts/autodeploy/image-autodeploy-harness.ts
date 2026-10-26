@@ -1,8 +1,8 @@
 /**
- * Test harness of the image controller deploy/image/autodeploy.sh (plan
+ * Test harness of the image controller deploy/autodeploy.sh (plan
  * docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md, Global Constraints).
  *
- * The tick is real bash and real git (a throwaway bare "origin" per world, as in autodeploy.test.ts).
+ * The tick is real bash and real git (a throwaway bare "origin" per world).
  * Every other contact is a WBB_* seam pointing at a fake here, and the fakes share ONE simulated host:
  * a directory of plain files —
  *
@@ -46,7 +46,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-export const SCRIPT = resolve(__dirname, '../../deploy/image/autodeploy.sh');
+export const SCRIPT = resolve(__dirname, '../../deploy/autodeploy.sh');
 export const DB_SNAPSHOT = resolve(__dirname, '../../deploy/db-snapshot.sh');
 export const GOLDEN_DIR = resolve(__dirname, 'fixtures/wbb-image');
 export const QUIET_S = 600;
@@ -665,3 +665,100 @@ export async function holdLock(lock: string, seconds = 60): Promise<ChildProcess
   holder.kill();
   throw new Error('the lock holder never acquired the lock');
 }
+
+// --- damaged states ------------------------------------------------------------------------------------
+const good = (w: ImageWorld) => Object.entries(settledState(w.settled)).map(([k, v]) => `${k}=${v}\n`).join('');
+const someWindow = (w: ImageWorld) => `WINDOW_SHA=${w.base}\nWINDOW_MODE=auto\nWINDOW_PHASE=activating\n`;
+/** A whole window of the given phase, every key it stands on. */
+const fullWindow = (w: ImageWorld, phase: string, extra: string[] = []) => [
+  `WINDOW_SHA=${w.base}`, `WINDOW_DIGEST=${w.settled.digest}`, `WINDOW_ID=${w.settled.id}`, `WINDOW_CONTENT=${w.settled.content}`,
+  `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_KIND=deploy', 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
+  'WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_START=100000', `WINDOW_BOOT=${BOOT_ID}`,
+  'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
+].join('\n');
+const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
+/** A valid bootstrap window: nothing settled, manual, no rollback target. */
+const bootWindow = (w: ImageWorld) => `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'activating')}`
+  .replace(/^WINDOW_PREV_DIGEST=.*\n/m, '').replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
+/** The window of `text` as a resolve window: manual, and (unless `withPre`) without WINDOW_PRE. */
+const resolveWindow = (_w: ImageWorld, text: string, withPre = false) => {
+  const t = text.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=resolve').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
+  return withPre ? t : t.replace(/^WINDOW_PRE=.*\n/m, '');
+};
+/**
+ * Damaged states and the reason STATE CORRUPT gives for each (plan п.3): the tick's table and
+ * `--check-state`'s (stage «в»). [name, the file's text, the reason]
+ */
+export const CORRUPT_STATES: Array<[string, (w: ImageWorld) => string, string]> = [
+  ['an unknown key', (w) => `${good(w)}DEPLOYED_TAG=v1\n`, 'line 9: unknown key DEPLOYED_TAG'],
+  // Spec amendment 3 (V14): the key is gone; a state that still carries it was not written by this controller.
+  ['WINDOW_NRESTARTS_PRE, retired by V14', (w) => `${good(w)}WINDOW_NRESTARTS_PRE=0\n`, 'line 9: unknown key WINDOW_NRESTARTS_PRE'],
+  ['a duplicated key', (w) => `${good(w)}DEPLOYED_SHA=${w.base}\n`, 'line 9: duplicate key DEPLOYED_SHA'],
+  ['a truncated file', (w) => good(w).slice(0, -1), 'the last line has no newline (a truncated file)'],
+  ['a line that is not KEY=value', (w) => `# written by hand\n${good(w)}`, 'line 1 is not KEY=value'],
+  ['an empty file', () => '', 'the file is empty'],
+  ['a NUL byte', (w) => `${good(w)}\0`, 'the file holds a NUL byte'],
+  ['a SHA that is not 40 hex', (w) => good(w).replace(`DEPLOYED_SHA=${w.base}`, `DEPLOYED_SHA=${short(w.base)}`),
+    'DEPLOYED_SHA has a value that is not of its format'],
+  ['SETTLED_SHA without SETTLED_DIGEST', (w) => good(w).replace(/^SETTLED_DIGEST=.*\n/m, ''),
+    'SETTLED_SHA is set but SETTLED_DIGEST is not'],
+  ['WINDOW_PHASE without WINDOW_DIGEST', (w) => `${good(w)}${someWindow(w)}`, 'WINDOW_PHASE is set but WINDOW_DIGEST is not'],
+  ['an unknown WINDOW_PHASE', (w) => `${good(w)}${someWindow(w)}WINDOW_DIGEST=${w.settled.digest}\n`.replace('=activating', '=deploying'),
+    'WINDOW_PHASE has a value that is not of its format'],
+  ['an integer with a leading zero', (w) => `${good(w)}MAIN_SEEN_SHA=${w.base}\nMAIN_SEEN_S=0100000\n`,
+    'MAIN_SEEN_S has a value that is not of its format'],
+  // F7: what each phase stands on.
+  ['an activating window without WINDOW_PRE', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PRE=.*\n/m, ''),
+    'WINDOW_PHASE is set but WINDOW_PRE is not'],
+  ['a watching window without WINDOW_LAST_READ', (w) => `${good(w)}${fullWindow(w, 'watching')}`.replace(/^WINDOW_LAST_READ=.*\n/m, ''),
+    'WINDOW_PHASE is set but WINDOW_LAST_READ is not'],
+  ['a rolling-back window without ROLLBACK_ATTEMPTS', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ['WINDOW_REASON=a reason'])}`,
+    'WINDOW_PHASE is set but ROLLBACK_ATTEMPTS is not'],
+  ['a manual window rolling back', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ROLLING)}`.replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
+    'WINDOW_PHASE is rolling-back but WINDOW_MODE is manual (a manual window never rolls back)'],
+  // Spec amendment 3 (§7.1): every window says where it came from.
+  ['a window without WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_KIND=.*\n/m, ''),
+    'WINDOW_PHASE is set but WINDOW_KIND is not'],
+  ['an unknown WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=manual'),
+    'WINDOW_KIND has a value that is not of its format'],
+  // Plan b2 п.15: a resolve window (closing an incident) is manual, only watches, has no pre, and
+  // rolls back to the settled image exactly when there is one.
+  ['a resolve window in auto mode', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`).replace('WINDOW_MODE=manual', 'WINDOW_MODE=auto'),
+    'WINDOW_KIND is resolve but WINDOW_MODE is auto (a resolve window is always manual)'],
+  ['a resolve window that is activating', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'activating')}`),
+    'WINDOW_KIND is resolve but WINDOW_PHASE is activating (a resolve window only watches)'],
+  ['a resolve window with a pre snapshot', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`, true),
+    'WINDOW_KIND is resolve but WINDOW_PRE is set (closing an incident takes no snapshot)'],
+  ['a resolve window without WINDOW_PREV_DIGEST while an image is settled',
+    (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`).replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
+    'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
+  ['a resolve window with WINDOW_PREV_DIGEST while nothing is settled',
+    (w) => resolveWindow(w, `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'watching')}`),
+    'WINDOW_KIND is resolve and nothing is settled, but WINDOW_PREV_DIGEST is set'],
+  // Plan b2 п.15: the first image release is manual, has no rollback target, and exists only while nothing is settled.
+  ['a bootstrap window in auto mode', (w) => bootWindow(w).replace('WINDOW_MODE=manual', 'WINDOW_MODE=auto'),
+    'WINDOW_KIND is bootstrap but WINDOW_MODE is auto (the first image release is always manual)'],
+  ['a bootstrap window with WINDOW_PREV_DIGEST', (w) => `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'activating')}`
+    .replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
+    'WINDOW_KIND is bootstrap but WINDOW_PREV_DIGEST is set (the first image release has no rollback target)'],
+  ['a bootstrap window while an image is settled', (w) => `${good(w)}${fullWindow(w, 'activating')}`
+    .replace(/^WINDOW_PREV_DIGEST=.*\n/m, '').replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
+    'WINDOW_KIND is bootstrap but SETTLED_DIGEST is set (a bootstrap window exists only while nothing is settled)'],
+  ['a bootstrap window without WINDOW_PRE', (w) => bootWindow(w).replace(/^WINDOW_PRE=.*\n/m, ''),
+    'WINDOW_PHASE is set but WINDOW_PRE is not'],
+  ['a deploy window without WINDOW_PREV_DIGEST', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
+    'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
+  ['WINDOW_KIND without a window', (w) => `${good(w)}WINDOW_KIND=deploy\n`, 'WINDOW_KIND is set but WINDOW_PHASE is not'],
+  ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
+  // Round 2, item 3: snapshot paths — no glob character, no space, one space between list elements.
+  ['a PENDING_MARK path with a glob character', (w) => `${good(w)}PENDING_MARK=/s/*-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
+  // #867 AI review: a pending mark is an UNMARKED pre (a marked one would be renamed twice);
+  // a retained one is MARKED.
+  ['a PENDING_MARK path that is already marked', (w) => `${good(w)}PENDING_MARK=/s/a-rollback-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
+  ['a PENDING_PRE path that is already marked', (w) => `${good(w)}PENDING_PRE=/s/a-rollback-pre.db\n`, 'PENDING_PRE has a value that is not of its format'],
+  ['a RETAINED_PRE path that is not marked', (w) => `${good(w)}RETAINED_PRE=/s/a-pre.db\n`, 'RETAINED_PRE has a value that is not of its format'],
+  ['a RETAINED_PRE list with an empty element', (w) => `${good(w)}RETAINED_PRE=/s/a-rollback-pre.db  /s/b-rollback-pre.db\n`,
+    'RETAINED_PRE has a value that is not of its format'],
+  ['a WINDOW_PRE that is not a pre snapshot', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_PRE=/s/notes.txt'),
+    'WINDOW_PRE has a value that is not of its format'],
+];
