@@ -95,6 +95,8 @@ export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBe
     global_rating: untappdRating(h.rating_score),
     beer_slug: slug.length > 0 ? slug : null,
     brewery_alias: strList(h.brewery_alias),
+    // #923 §2.5: parity with parseAlgoliaResponse — an install's enrich matches on hydrated records.
+    alias_alt: strList(h.alias_alt),
     rating_count: ratingCount(h.rating_count),
   };
 }
