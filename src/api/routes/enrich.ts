@@ -22,7 +22,10 @@ import { digitIdentity, readNameDigits } from '../../domain/digit-identity';
 import { styleNameIdentity } from '../../domain/style-identity';
 import { ABV_TOLERANCE } from '../../domain/matcher';
 import { isEligible, RECURRING_CLASSES } from '../../domain/lookup-backoff';
-import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
+import { buildSearchUrl, htmlSearch, type SearchResult } from '../../sources/untappd/search';
+import { isCircuitOpen } from '../../domain/untappd-circuit';
+import { warsawDateAndHour } from '../../domain/warsaw-time';
+import { claimInstallEnrich, recordInstallUsage } from '../../storage/install_usage';
 import {
   ALGOLIA_DEFAULTS,
   ALGOLIA_HITS_PER_PAGE,
@@ -291,6 +294,13 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     async (c) => {
     const { brewery, name, abv, style, html, algolia, pageUrl, bid, bidSlug, brand, query } =
       c.req.valid('json');
+    const principal = c.get('principal');
+    if (principal?.kind === 'install') {
+      const [body, status] = await installEnrichResult(deps, principal.installId, {
+        brewery, name, abv, style, algolia: html === undefined ? algolia : undefined, pageUrl, query,
+      });
+      return c.json(body, status);
+    }
     if (findActiveDispositionForCard(deps.db, brewery, name, abv ?? null)) {
       return c.json({ status: 'not_found' });
     }
@@ -418,4 +428,101 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     return c.json({ status: kind });
     },
   );
+}
+
+type InstallReply =
+  | [{ status: 'matched'; untappd_id: number; rating_global: number | null }, 200]
+  | [{ status: 'not_found' }, 200]
+  | [{ error: 'algolia_required' | 'enrich_limit' | 'unavailable' }, 400 | 429 | 503];
+
+function shopOf(pageUrl: string | undefined): string {
+  if (!pageUrl) return '';
+  try {
+    return new URL(pageUrl).hostname.slice(0, 64);
+  } catch {
+    return '';
+  }
+}
+
+// #923 §2.5: the relay picks only WHICH candidates to consider (their bids); WHAT they say comes from
+// Algolia, fetched here. One hydration per request (lookupBeer calls search() more than once), in
+// the relay's order, dropping bids Algolia does not know or could not prove.
+function verifiedSearch(
+  bids: number[],
+  hydrate: NonNullable<ApiDeps['hydrateByBid']>,
+): { search: () => Promise<SearchResult[]> } {
+  let records: Promise<SearchResult[]> | null = null;
+  return {
+    search: () => (records ??= hydrate(bids).then((m) =>
+      bids.flatMap((b) => { const r = m.get(b); return r ? [r] : []; }))),
+  };
+}
+
+// An install's /enrich/result (spec #923 §2.5 and its periphery amendments). Nothing is written to
+// `beers` or enrich_failures until a verified `matched`: an install is not tied to a person, so a
+// not_found, a hydration failure or a forged hit must leave no orphan and move no backoff. The
+// shop-published bid is not consulted, and the paid web fallback never runs on an install's behalf.
+async function installEnrichResult(
+  deps: ApiDeps,
+  installId: string,
+  card: {
+    brewery: string; name: string; abv?: number | null; style?: string | null;
+    algolia?: unknown; pageUrl?: string; query?: string;
+  },
+): Promise<InstallReply> {
+  const notFound: InstallReply = [{ status: 'not_found' }, 200];
+  if (card.algolia === undefined) return [{ error: 'algolia_required' }, 400];
+  if (findActiveDispositionForCard(deps.db, card.brewery, card.name, card.abv ?? null)) return notFound;
+
+  const now = new Date();
+  const date = warsawDateAndHour(now).date;
+  const shop = shopOf(card.pageUrl);
+  let claim: 'ok' | 'capped';
+  try {
+    claim = claimInstallEnrich(deps.db, { date, installId, shop });
+  } catch (e) {
+    deps.log.warn({ err: e }, 'install enrich claim failed');
+    return [{ error: 'unavailable' }, 503];
+  }
+  if (claim === 'capped') return [{ error: 'enrich_limit' }, 429];
+
+  const facts = { abv: card.abv ?? undefined, style: card.style ?? undefined };
+  const row = findBeerRow(deps.db, card.brewery, card.name, facts);
+  if (row?.untappd_id != null) {
+    return [{ status: 'matched', untappd_id: row.untappd_id, rating_global: row.rating_global ?? null }, 200];
+  }
+  const hydrate = deps.hydrateByBid;
+  if (deps.env.UNTAPPD_LOOKUP_ENABLED === false || !hydrate
+    || isCircuitOpen(deps.db, 'untappd_circuit_open_until', now)) return notFound;
+
+  const bids = parseAlgoliaResponse(card.algolia as AlgoliaResponse)
+    .map((h) => h.bid).slice(0, ALGOLIA_HITS_PER_PAGE);
+  const rowAbv = row?.abv ?? sanitizeAbv(card.abv ?? undefined) ?? null;
+  const rowStyle = row?.style ?? card.style ?? null;
+  let outcome: LookupOutcome;
+  try {
+    outcome = await lookupBeer({
+      brewery: card.brewery, name: card.name, abv: rowAbv, style: rowStyle,
+      search: verifiedSearch(bids, hydrate),
+    });
+  } catch (e) {
+    deps.log.warn({ err: e, installId }, 'install enrich lookup failed');
+    return notFound;
+  }
+  if (outcome.kind !== 'matched') return notFound;
+
+  const matched = withRelayQuery(outcome, card.brewery, card.name, card.query);
+  const kind = deps.db.transaction(() => {
+    const target = ensureBeerRow(deps.db, card.brewery, card.name, facts);
+    return applyLookupOutcome({ db: deps.db, log: deps.log }, target.id, matched, now.toISOString(), {
+      brewery: card.brewery, name: card.name, abv: target.abv, sourceUrl: card.pageUrl,
+    });
+  })();
+  if ((kind !== 'matched' && kind !== 'merged') || matched.kind !== 'matched') return notFound;
+  try {
+    recordInstallUsage(deps.db, { date, installId, shop, enrichLinks: 1 });
+  } catch (e) {
+    deps.log.warn({ err: e }, 'install enrich usage record failed');
+  }
+  return [{ status: 'matched', untappd_id: matched.result.bid, rating_global: matched.result.global_rating }, 200];
 }
