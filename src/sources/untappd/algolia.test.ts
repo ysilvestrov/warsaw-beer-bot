@@ -171,6 +171,7 @@ describe('hydrateByBid (#384)', () => {
       beer_name: 'Tomatøl:BULDAK BULGOGI',
       brewery_name: 'Mad Brew',
       brewery_alias: ['madbrew'],
+      alias_alt: [], // #923: the record has none; the field is still there, as in a search hit
       beer_slug: 'mad-brew-tomatol-buldak-bulgogi',
       style: 'Gose',
       abv: 4.2,
@@ -279,6 +280,22 @@ describe('rating_count (#487)', () => {
       beer_abv: 4.2, rating_score: 3.77, rating_count: 992660, beer_slug: 'guinness-guinness-draught', brewery_alias: [],
     });
     expect(out?.rating_count).toBe(992660);
+  });
+
+  // #923 §2.5: an install's enrich runs lookupBeer on hydrated records instead of relayed hits, so a
+  // hydrated record must carry every field lookupBeer reads from a search hit — alias_alt included.
+  it('a hydrated record carries the same matching fields as a search hit of the same raw object', () => {
+    const raw = {
+      bid: 70951, beer_name: '  Atak  Chmielu ', brewery_name: 'Browar Pinta', type_name: 'IPA - American',
+      beer_abv: '6.1', rating_score: 3.71234, rating_count: 15873, beer_slug: 'pinta-atak-chmielu',
+      brewery_alias: ['Pinta', ''], alias_alt: ['Hop Attack', '  '],
+    };
+    const expected = {
+      bid: 70951, beer_name: 'Atak Chmielu', brewery_name: 'Browar Pinta', style: 'IPA - American',
+      abv: 6.1, global_rating: 3.71, brewery_alias: ['Pinta'], alias_alt: ['Hop Attack'], rating_count: 15873,
+    };
+    expect(parseAlgoliaResponse({ hits: [raw] })[0]).toEqual(expected);
+    expect(parseHydratedBeer(raw)).toEqual({ ...expected, beer_slug: 'pinta-atak-chmielu' });
   });
 });
 
