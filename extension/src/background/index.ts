@@ -1,6 +1,7 @@
-import { getSettings } from '../shared/config';
+import { authToken, getSettings, type Settings } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
-import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
+import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, DEFAULT_TIMEOUT_MS, getCheckinSyncState, postCheckinSyncPage, type MatchClient } from '../api/client';
+import { ensureInstall, extensionVersion, forgetInstallToken } from './install';
 import { feedFailure, runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
@@ -78,11 +79,36 @@ export const handleCacheSetIfMatching = (key: string, expected: MatchResult, res
     return setCachedIfMatching(key, expected, result);
   });
 
-export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
+// #923: the shop the cards came from, for per-shop accounting. The server caps it at 64 characters
+// and rejects the whole request beyond that, so a longer hostname is simply not sent.
+export function shopOf(senderUrl: string | undefined): string | undefined {
+  try {
+    const host = new URL(senderUrl ?? '').hostname;
+    return host && host.length <= 64 ? host : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// A 401 on the install token means the server forgot it (pruned or deleted). The cards are
+// re-asked anonymously — the install token's answer is the anonymous answer anyway.
+async function postMatchAs(settings: Settings, cards: RawBeer[], client: MatchClient): Promise<MatchResult[]> {
+  const bearer = authToken(settings);
+  try {
+    return await postMatch(settings.baseUrl, bearer, cards, DEFAULT_TIMEOUT_MS, client);
+  } catch (e) {
+    if (settings.token || !bearer || !(e instanceof ApiError) || e.code !== 'unauthorized') throw e;
+    await forgetInstallToken(bearer);
+    return postMatch(settings.baseUrl, '', cards, DEFAULT_TIMEOUT_MS, client);
+  }
+}
+
+export async function handleMatch(msg: MatchMessage, shop?: string): Promise<MatchReply> {
   try {
     const binding = await currentCacheBinding();
-    const { token, baseUrl } = await getSettings();
-    const results = await postMatch(baseUrl, token, msg.cards);
+    const settings = await getSettings();
+    const client: MatchClient = { version: extensionVersion(), ...(shop !== undefined ? { shop } : {}) };
+    const results = await postMatchAs(settings, msg.cards, client);
     const current = await currentCacheBinding();
     if (!sameCacheBinding(binding, current)) throw new ApiError(binding.credential !== current.credential ? 'unauthorized' : 'server');
     return { type: 'match:ok', results: results.map(result => ({ ...result, cacheBinding: binding })) };
@@ -133,22 +159,30 @@ export async function handleEnrichFetch(
 export async function handleEnrichCandidates(
   msg: EnrichCandidatesMessage,
 ): Promise<{ type: 'enrich:candidates:ok'; candidates: EnrichCandidate[] }> {
-  const { token, baseUrl, enrichEnabled } = await getSettings();
-  if (!enrichEnabled || !token) return { type: 'enrich:candidates:ok', candidates: [] };
+  const settings = await getSettings();
+  const token = authToken(settings);
+  if (!settings.enrichEnabled || !token) return { type: 'enrich:candidates:ok', candidates: [] };
   try {
-    return { type: 'enrich:candidates:ok', candidates: await postEnrichCandidates(baseUrl, token, msg.beers) };
-  } catch {
+    return { type: 'enrich:candidates:ok', candidates: await postEnrichCandidates(settings.baseUrl, token, msg.beers) };
+  } catch (e) {
+    await forgetRejectedInstall(settings, token, e);
     return { type: 'enrich:candidates:ok', candidates: [] };
   }
+}
+
+// #923: enrich has no anonymous form, so a 401 on the install token only forgets it.
+async function forgetRejectedInstall(settings: Settings, bearer: string, e: unknown): Promise<void> {
+  if (!settings.token && e instanceof ApiError && e.code === 'unauthorized') await forgetInstallToken(bearer);
 }
 
 export async function handleEnrichResult(
   msg: EnrichResultMessage,
 ): Promise<{ type: 'enrich:result:ok'; result: EnrichResult | null }> {
-  const { token, baseUrl, enrichEnabled } = await getSettings();
-  if (!enrichEnabled || !token) return { type: 'enrich:result:ok', result: null };
+  const settings = await getSettings();
+  const token = authToken(settings);
+  if (!settings.enrichEnabled || !token) return { type: 'enrich:result:ok', result: null };
   try {
-    const result = await postEnrichResult(baseUrl, token, {
+    const result = await postEnrichResult(settings.baseUrl, token, {
       brewery: msg.brewery, name: msg.name, algolia: msg.algolia,
       ...(msg.abv !== undefined ? { abv: msg.abv } : {}),
       ...(msg.style !== undefined ? { style: msg.style } : {}),
@@ -159,7 +193,8 @@ export async function handleEnrichResult(
       pageUrl: msg.pageUrl,
     });
     return { type: 'enrich:result:ok', result };
-  } catch {
+  } catch (e) {
+    await forgetRejectedInstall(settings, token, e);
     return { type: 'enrich:result:ok', result: null };
   }
 }
@@ -447,9 +482,13 @@ export async function handleCheckinSyncStatus() {
   return syncStatusReply(status);
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onInstalled.addListener(() => { void ensureInstall(); });
+chrome.runtime.onStartup.addListener(() => { void ensureInstall(); });
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  void ensureInstall();
   const t = (message as { type?: unknown }).type;
-  if (t === 'match') { handleMatch(message as MatchMessage).then(sendResponse); return true; }
+  if (t === 'match') { handleMatch(message as MatchMessage, shopOf(sender.tab?.url)).then(sendResponse); return true; }
   if (t === 'enrich:fetch') { handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse); return true; }
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }

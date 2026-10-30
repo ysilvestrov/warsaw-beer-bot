@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleEnrichFetch, handleEnrichCandidates, handleEnrichResult } from './index';
+import { getSettings, setSettings } from '../shared/config';
 
 beforeEach(() => { vi.unstubAllGlobals(); });
 
@@ -191,5 +192,67 @@ describe('handleEnrichResult', () => {
     await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } });
     const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>;
     expect(Object.keys(body)).not.toContain('query');
+  });
+});
+
+describe('enrich with an install token (#923)', () => {
+  const candidatesBody = { candidates: [{ brewery: 'B', name: 'N', eligible: true }] };
+  const authOf = (init: RequestInit | undefined) => (init!.headers as Record<string, string>).Authorization;
+
+  beforeEach(async () => {
+    await setSettings({ token: '', installToken: 'wbi_1', enrichEnabled: true, baseUrl: 'https://api' });
+  });
+
+  it('the gate admits an install token: candidates go out with it', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(candidatesBody), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] });
+    expect(out.candidates).toEqual(candidatesBody.candidates);
+    expect(authOf(fetchMock.mock.calls[0][1])).toBe('Bearer wbi_1');
+  });
+
+  it('a result goes out with the install token', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } }))
+      .toEqual({ type: 'enrich:result:ok', result: { status: 'not_found' } });
+    expect(authOf(fetchMock.mock.calls[0][1])).toBe('Bearer wbi_1');
+  });
+
+  it('a 401 on the install token forgets it and answers empty', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    expect(await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] }))
+      .toEqual({ type: 'enrich:candidates:ok', candidates: [] });
+    expect((await getSettings()).installToken).toBe('');
+  });
+
+  it('a 401 on a result forgets the install token too', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    expect(await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } }))
+      .toEqual({ type: 'enrich:result:ok', result: null });
+    expect((await getSettings()).installToken).toBe('');
+  });
+
+  it('the daily enrich limit (429) keeps the install token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"enrich_limit"}', { status: 429 })));
+    expect(await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } }))
+      .toEqual({ type: 'enrich:result:ok', result: null });
+    expect((await getSettings()).installToken).toBe('wbi_1');
+  });
+
+  it('a pending deletion closes the gate — no request at all', async () => {
+    await setSettings({ installDeletionPending: true });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] }))
+      .toEqual({ type: 'enrich:candidates:ok', candidates: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a 401 on a Telegram token leaves the install token alone', async () => {
+    await setSettings({ token: 'tg' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] });
+    expect((await getSettings()).installToken).toBe('wbi_1');
   });
 });

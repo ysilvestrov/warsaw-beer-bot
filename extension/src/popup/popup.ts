@@ -1,7 +1,7 @@
 import { pickAdapter } from '../sites/registry';
 import { countAll } from '../cache/store';
 import { clearAll } from '../cache/client';
-import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
+import { authToken, getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
 import { wireClearButton } from './clear-cache';
 import { applyTokenState, tokenStateView } from './token-state';
@@ -94,9 +94,10 @@ export function canRefresh(url: string): boolean {
 }
 
 /** Popup note shown when the extension has no token: global-only, with how to authorize. */
-export function authNoteText(hasToken: boolean): string | null {
-  return hasToken
-    ? null
+export function authNoteText(hasToken: boolean, hasInstall = false): string | null {
+  if (hasToken) return null;
+  return hasInstall
+    ? "Works without Telegram — global ratings (⭐) and missing-beer search. Add a token to see which beers you've had ✅ and your own rating."
     : "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.";
 }
 
@@ -171,16 +172,17 @@ async function initPopup(): Promise<void> {
   const header = document.querySelector<HTMLElement>('header.head');
   const foot = document.querySelector<HTMLElement>('footer.foot');
 
-  const { token } = await getSettings();
-  const hasToken = Boolean(token);
+  const settings = await getSettings();
+  const hasToken = Boolean(settings.token);
+  const hasInstall = Boolean(authToken(settings)) && !hasToken;
 
   if (authNote && authBlock && getTokenBtn && guideLink && syncBtn && syncStatus && header && foot) {
-    authNote.textContent = authNoteText(hasToken) ?? '';
+    authNote.textContent = authNoteText(hasToken, hasInstall) ?? '';
     guideLink.href = SETUP_GUIDE_URL;
     getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
     applyTokenState(
       { header, authBlock, syncBtn, syncStatus, getTokenBtn, guideLink, foot },
-      tokenStateView(hasToken),
+      tokenStateView(hasToken, hasInstall),
     );
   }
 

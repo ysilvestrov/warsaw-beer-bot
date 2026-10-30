@@ -146,6 +146,11 @@ describe('authNoteText', () => {
   it('returns null when a token is present', () => {
     expect(authNoteText(true)).toBeNull();
   });
+  it('with only an install token, says the extension works without Telegram (#923)', () => {
+    expect(authNoteText(false, true)).toBe(
+      "Works without Telegram — global ratings (⭐) and missing-beer search. Add a token to see which beers you've had ✅ and your own rating.",
+    );
+  });
 });
 
 describe('beers', () => {

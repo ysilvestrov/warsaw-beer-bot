@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ENRICH_ORIGINS, requestEnrichPermission, testConnection } from './options';
+import { ENRICH_ORIGINS, requestEnrichPermission, setStatisticsEnabled, testConnection } from './options';
+import { authToken, getSettings, setSettings } from '../shared/config';
 import * as client from '../api/client';
 import { ApiError } from '../api/client';
 
@@ -21,6 +22,42 @@ describe('testConnection', () => {
     vi.spyOn(client, 'getHealth').mockResolvedValue(true);
     vi.spyOn(client, 'postMatch').mockRejectedValue(new ApiError('unauthorized'));
     expect(await testConnection('https://api.test', 'bad')).toEqual({ ok: false, reason: 'unauthorized' });
+  });
+});
+
+describe('setStatisticsEnabled (#923)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('switching off withholds the token at once and deletes the install', async () => {
+    await setSettings({ installToken: 'wbi_1' });
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await setStatisticsEnabled(false)).toBe('Statistics off.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await getSettings()).toMatchObject({ installToken: '', installRegistration: false, installDeletionPending: false });
+  });
+
+  it('switching off with the server down says so, and requests go out without the token meanwhile', async () => {
+    await setSettings({ installToken: 'wbi_1' });
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+    expect(await setStatisticsEnabled(false)).toBe('Deletion not finished yet — will retry.');
+    const s = await getSettings();
+    expect(s).toMatchObject({ installToken: 'wbi_1', installDeletionPending: true });
+    expect(authToken(s)).toBe('');
+  });
+
+  it('switching on registers a new install', async () => {
+    await setSettings({ installRegistration: false });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ install_id: 'i', token: 'wbi_2' }), { status: 201 })));
+    expect(await setStatisticsEnabled(true)).toBe('Statistics on.');
+    expect((await getSettings()).installToken).toBe('wbi_2');
+  });
+
+  it('switching on with registration refused still reads on — the next start retries', async () => {
+    await setSettings({ installRegistration: false });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 429 })));
+    expect(await setStatisticsEnabled(true)).toBe('Statistics on.');
+    expect(await getSettings()).toMatchObject({ installToken: '', installRegistration: true });
   });
 });
 

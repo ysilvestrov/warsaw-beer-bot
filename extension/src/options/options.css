@@ -80,6 +80,13 @@ input::placeholder { color: var(--fg-muted); }
   accent-color: var(--accent);
 }
 
+.checkbox-note {
+  margin: 0 0 0 21px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .actions {
   display: flex;
   align-items: center;

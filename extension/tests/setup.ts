@@ -32,6 +32,9 @@ const store = new Map<string, unknown>();
   },
   runtime: {
     onMessage: { addListener: vi.fn() },
+    onInstalled: { addListener: vi.fn() },
+    onStartup: { addListener: vi.fn() },
+    getManifest: vi.fn(() => ({ version: '9.9.9' })),
     sendMessage: vi.fn(),
     lastError: undefined,
   },
