@@ -16,5 +16,15 @@ export interface ApiDeps {
   hydrateByBid?: (bids: number[]) => Promise<Map<number, HydratedBeer | null>>;
 }
 
-// Hono generics: variables set on the request context by middleware.
-export type ApiEnv = { Variables: { telegramId: number | null } };
+/**
+ * Who is calling (#923). `install` is an extension install registered without Telegram: it carries
+ * no personal data and is admitted only where optionalAuthMiddleware runs. `lastSeenDate` and
+ * `extVersion` are the stored row, so a route can update the version without reading it again.
+ */
+export type Principal =
+  | { kind: 'user'; telegramId: number }
+  | { kind: 'install'; installId: string; lastSeenDate: string; extVersion: string | null };
+
+// Hono generics: variables set on the request context by middleware. `telegramId` stays set for
+// user principals only, so the routes that read it keep working unchanged.
+export type ApiEnv = { Variables: { telegramId: number | null; principal: Principal | null } };
