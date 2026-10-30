@@ -558,6 +558,8 @@ async function main(): Promise<void> {
     releaseSha: identity.releaseSha,
     // #384: lets /enrich/result resolve a shop-published bid the local catalog misses.
     hydrateByBid: (bids) => algoliaSearch.hydrateByBid(bids),
+    // #923: the install registration cap alert.
+    notifyAdmin,
   });
   const apiServer = createApiServer(apiApp, env, log);
 

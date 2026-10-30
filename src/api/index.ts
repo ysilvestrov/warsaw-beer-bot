@@ -25,6 +25,7 @@ import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
 import { festRoute } from './routes/fest';
 import { festPrintRoute } from './routes/fest-print';
+import { installsRoute } from './routes/installs';
 
 export function postPayloadBodyLimit(
   deps: ApiDeps,
@@ -55,6 +56,9 @@ export function createApiApp(deps: ApiAppDeps): Hono<ApiEnv> {
   // The frozen startup value (spec §10a): /health never re-reads release.json.
   const releaseSha = deps.releaseSha;
   app.get('/health', (c) => c.json({ ok: true, releaseSha }));
+
+  // #923: install registration and self-deletion; authenticates itself (install tokens only).
+  installsRoute(app, deps);
 
   // /match is optional-auth: no token → anonymous global-only; invalid token → 401.
   app.use('/match', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));

@@ -14,6 +14,8 @@ export interface ApiDeps {
    * the local catalog does not know. Absent ⇒ bid resolution stays local-only.
    */
   hydrateByBid?: (bids: number[]) => Promise<Map<number, HydratedBeer | null>>;
+  /** #923: admin Telegram message (install registration cap alert). Absent ⇒ no alert. */
+  notifyAdmin?: (msg: string) => Promise<void>;
 }
 
 /**
