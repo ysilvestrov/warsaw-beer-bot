@@ -451,6 +451,27 @@ describe('POST /match — install accounting and the misses journal (#923)', () 
     expect(usage()).toEqual([]);
   });
 
+  it('400 for an empty client.version — it would overwrite the registered version with nothing', async () => {
+    const { appWith, install, db } = ledger();
+    expect((await post(appWith(install), { beers: [found], client: { version: '' } })).status).toBe(400);
+    expect(db.prepare('SELECT ext_version FROM extension_installs').get()).toEqual({ ext_version: '0.23.0' });
+  });
+
+  it('a failed journal write still counts the install request and updates its version', async () => {
+    const { appWith, install, db, usage } = ledger();
+    db.exec('DROP TABLE match_misses');
+    await post(appWith(install), { beers: [found, missing], client: { shop: 'a.pl', version: '0.24.0' } });
+    expect(usage()).toEqual([{ shop: 'a.pl', match_requests: 1, match_beers: 2, match_misses: 0 }]);
+    expect(db.prepare('SELECT ext_version FROM extension_installs').get()).toEqual({ ext_version: '0.24.0' });
+  });
+
+  it('a failed usage write still updates the version', async () => {
+    const { appWith, install, db } = ledger();
+    db.exec(`CREATE TRIGGER no_usage BEFORE INSERT ON install_usage_daily BEGIN SELECT RAISE(ABORT, 'busy'); END`);
+    await post(appWith(install), { beers: [found], client: { version: '0.24.0' } });
+    expect(db.prepare('SELECT ext_version FROM extension_installs').get()).toEqual({ ext_version: '0.24.0' });
+  });
+
   it('a failed journal write does not break the answer, and is logged', async () => {
     const { appWith, install, appAnon, db, warn } = ledger();
     const expected = await (await post(appAnon(), { beers: [found, missing] })).text();

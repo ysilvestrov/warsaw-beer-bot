@@ -42,6 +42,19 @@ describe('recordMisses', () => {
     expect(rows(d)).toEqual([expect.objectContaining({ last_seen_date: '2026-10-31', seen_days: 2, first_seen_at: '2026-10-30T10:00:00.000Z' })]);
   });
 
+  it('an older observation arriving late neither moves last-seen back nor counts a day twice', () => {
+    const d = db();
+    const card = { brewery: 'Browar X', name: 'Hazy One' };
+    recordMisses(d, { at: '2026-10-30T10:00:00.000Z', date: '2026-10-30', shop: '', cards: [card] });
+    recordMisses(d, { at: '2026-10-31T10:00:00.000Z', date: '2026-10-31', shop: '', cards: [card] });
+    recordMisses(d, { at: '2026-10-30T12:00:00.000Z', date: '2026-10-30', shop: '', cards: [card] });
+    expect(rows(d)).toEqual([expect.objectContaining({
+      last_seen_at: '2026-10-31T10:00:00.000Z', last_seen_date: '2026-10-31', seen_days: 2,
+    })]);
+    recordMisses(d, { at: '2026-10-31T20:00:00.000Z', date: '2026-10-31', shop: '', cards: [card] });
+    expect(rows(d)).toEqual([expect.objectContaining({ seen_days: 2, last_seen_at: '2026-10-31T20:00:00.000Z' })]);
+  });
+
   it('keys by the matcher normalizers, so a re-spelt card lands on the same row', () => {
     const d = db();
     recordMisses(d, { at: '2026-10-30T10:00:00.000Z', date: '2026-10-30', shop: '', cards: [{ brewery: 'Browar X', name: 'Hazy One' }] });

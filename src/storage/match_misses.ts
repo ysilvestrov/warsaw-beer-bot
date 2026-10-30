@@ -11,7 +11,8 @@ export interface MissCard {
 // not in the catalog at that moment" — not that it is a beer, nor that Untappd lacks it. Keyed by
 // the matcher's own normalizers; raw text, ABV and shop are those of the first sighting.
 // seen_days counts distinct Warsaw dates via last_seen_date: slicing the UTC ISO time near
-// midnight would credit the wrong day. Same busy_timeout = 0 window as the other /match writes.
+// midnight would credit the wrong day. Only a newer date counts and the last-seen fields never move
+// back (ISO strings compare in time order), so an out-of-order write cannot count a day twice. Same busy_timeout = 0 window as the other /match writes.
 // Returns the number of cards recorded.
 export function recordMisses(
   db: DB,
@@ -27,9 +28,9 @@ export function recordMisses(
          first_seen_at, last_seen_at, last_seen_date, seen_days)
       VALUES (@nb, @nn, @brewery, @name, @abv, @shop, @at, @at, @date, 1)
       ON CONFLICT(normalized_brewery, normalized_name) DO UPDATE SET
-        seen_days      = seen_days + (last_seen_date <> excluded.last_seen_date),
-        last_seen_date = excluded.last_seen_date,
-        last_seen_at   = excluded.last_seen_at,
+        seen_days      = seen_days + (excluded.last_seen_date > last_seen_date),
+        last_seen_date = MAX(last_seen_date, excluded.last_seen_date),
+        last_seen_at   = MAX(last_seen_at, excluded.last_seen_at),
         abv            = COALESCE(abv, excluded.abv)
     `);
     db.transaction(() => {
