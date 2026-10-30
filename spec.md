@@ -1916,8 +1916,12 @@ Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]
    `lookupBeer` на гідратованих записах — без веб-фолбеку (Brave оплачує сервіс). Збій гідрації →
    `not_found`.
 6. Лише `matched` пише: в одній транзакції `ensureBeerRow` (сирота, якщо треба) і
-   `applyLookupOutcome` (провенанс `search`), `enrich_links += 1`. Будь-що інше → `not_found` **без
-   жодного запису** — ні сироти, ні `enrich_failures`, ні бекофу.`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`;
+   `applyLookupOutcome` (провенанс `search`), `enrich_links += 1` (тобто `enrich_links` рахує
+   записані лінки, а не відповіді `matched`). Рядок, що став злінкованим, поки йшла гідрація,
+   перечитується в тій самій транзакції й лишає свій лінк: відповідь `matched` із ним, без запису.
+   Будь-що інше → `not_found` **без жодного запису** — ні сироти, ні `enrich_failures`, ні бекофу.
+
+`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`;
 його `query` будується через `cleanSearchQuery(brewery,name)` і лишається серверним
 контрактом. Додатково (#391) відповідь несе опційний `algoliaNarrow` — той самий об'єкт із
 **вузькою** сходинкою драбини `searchQueryLadder` (#382); поле присутнє лише коли сходинки

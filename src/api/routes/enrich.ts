@@ -512,12 +512,19 @@ async function installEnrichResult(
   if (outcome.kind !== 'matched') return notFound;
 
   const matched = withRelayQuery(outcome, card.brewery, card.name, card.query);
-  const kind = deps.db.transaction(() => {
+  // The row is re-read after the hydration await: a check-in import or another request may have
+  // linked it meanwhile, and that link wins — the install's search pick never overwrites it.
+  const settled = deps.db.transaction((): { linked: InstallReply } | { kind: ReturnType<typeof applyLookupOutcome> } => {
     const target = ensureBeerRow(deps.db, card.brewery, card.name, facts);
-    return applyLookupOutcome({ db: deps.db, log: deps.log }, target.id, matched, now.toISOString(), {
+    if (target.untappd_id != null) {
+      return { linked: [{ status: 'matched', untappd_id: target.untappd_id, rating_global: target.rating_global ?? null }, 200] };
+    }
+    return { kind: applyLookupOutcome({ db: deps.db, log: deps.log }, target.id, matched, now.toISOString(), {
       brewery: card.brewery, name: card.name, abv: target.abv, sourceUrl: card.pageUrl,
-    });
+    }) };
   })();
+  if ('linked' in settled) return settled.linked;
+  const { kind } = settled;
   if ((kind !== 'matched' && kind !== 'merged') || matched.kind !== 'matched') return notFound;
   try {
     recordInstallUsage(deps.db, { date, installId, shop, enrichLinks: 1 });
