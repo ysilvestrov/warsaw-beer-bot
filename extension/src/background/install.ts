@@ -1,4 +1,4 @@
-import { getSettings, setSettings } from '../shared/config';
+import { getSettings, setSettings, wantsRegistration } from '../shared/config';
 import { deleteInstall, postInstall } from '../api/client';
 
 // #923: the anonymous install token. It lets an install without Telegram use enrich and be counted
@@ -17,20 +17,25 @@ export function extensionVersion(): string {
 export async function syncInstall(): Promise<'none' | 'registered' | 'deletion_pending'> {
   let s = await getSettings();
   if (s.installDeletionPending) {
-    if (s.installToken && (await deleteInstall(s.baseUrl, s.installToken)) === 'retry') return 'deletion_pending';
-    await setSettings({ installToken: '', installDeletionPending: false });
+    // Deleted where it was issued: another server would answer 401 and falsely confirm it.
+    if (s.installToken && (await deleteInstall(s.installBaseUrl, s.installToken)) === 'retry') return 'deletion_pending';
+    await setSettings({ installToken: '', installBaseUrl: '', installDeletionPending: false });
     s = await getSettings();
   }
   if (s.installToken) return 'registered';
-  if (!s.installRegistration || s.token) return 'none';
+  if (!wantsRegistration(s)) return 'none';
   const token = await postInstall(s.baseUrl, extensionVersion());
   // The user may have switched statistics off or changed the server while the request was out.
   const latest = await getSettings();
   if (!latest.installRegistration || latest.installDeletionPending || latest.installToken || latest.baseUrl !== s.baseUrl) {
-    await deleteInstall(s.baseUrl, token);
-    return latest.installToken ? 'registered' : 'none';
+    if ((await deleteInstall(s.baseUrl, token)) === 'deleted' || latest.installToken) {
+      return latest.installToken ? 'registered' : 'none';
+    }
+    // Not deleted yet: keep the token only as a pending deletion, so the next start finishes it.
+    await setSettings({ installToken: token, installBaseUrl: s.baseUrl, installDeletionPending: true });
+    return 'deletion_pending';
   }
-  await setSettings({ installToken: token });
+  await setSettings({ installToken: token, installBaseUrl: s.baseUrl });
   return 'registered';
 }
 
@@ -47,5 +52,5 @@ export function ensureInstall(): Promise<void> {
  * it has already been replaced; the next ensureInstall registers a fresh one.
  */
 export async function forgetInstallToken(rejected: string): Promise<void> {
-  if ((await getSettings()).installToken === rejected) await setSettings({ installToken: '' });
+  if ((await getSettings()).installToken === rejected) await setSettings({ installToken: '', installBaseUrl: '' });
 }

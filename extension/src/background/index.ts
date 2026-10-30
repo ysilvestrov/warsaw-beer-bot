@@ -1,4 +1,4 @@
-import { authToken, getSettings, type Settings } from '../shared/config';
+import { authToken, getSettings, wantsRegistration, type Settings } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, DEFAULT_TIMEOUT_MS, getCheckinSyncState, postCheckinSyncPage, type MatchClient } from '../api/client';
 import { ensureInstall, extensionVersion, forgetInstallToken } from './install';
@@ -159,7 +159,13 @@ export async function handleEnrichFetch(
 export async function handleEnrichCandidates(
   msg: EnrichCandidatesMessage,
 ): Promise<{ type: 'enrich:candidates:ok'; candidates: EnrichCandidate[] }> {
-  const settings = await getSettings();
+  let settings = await getSettings();
+  // The first page after install can ask before registration has answered; without waiting, its
+  // missing beers would settle unsearched. Only waits when a registration is actually due.
+  if (settings.enrichEnabled && wantsRegistration(settings)) {
+    await ensureInstall();
+    settings = await getSettings();
+  }
   const token = authToken(settings);
   if (!settings.enrichEnabled || !token) return { type: 'enrich:candidates:ok', candidates: [] };
   try {

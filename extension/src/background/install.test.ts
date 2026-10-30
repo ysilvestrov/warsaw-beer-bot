@@ -24,7 +24,18 @@ describe('syncInstall — registration', () => {
     const calls = server(issued);
     expect(await syncInstall()).toBe('registered');
     expect(calls).toEqual([{ url: 'https://beer-api.ysilvestrov-ai.uk/installs', method: 'POST', auth: undefined, body: { version: '9.9.9' } }]);
-    expect((await getSettings()).installToken).toBe('wbi_new');
+    expect(await getSettings()).toMatchObject({ installToken: 'wbi_new', installBaseUrl: 'https://beer-api.ysilvestrov-ai.uk' });
+  });
+
+  it('switching statistics off while registering, with the server unreachable for the cleanup, keeps the token as a pending deletion', async () => {
+    server(async (call) => {
+      if (call.method === 'POST') { await setSettings({ installRegistration: false }); return issued(); }
+      throw new TypeError('offline');
+    });
+    expect(await syncInstall()).toBe('deletion_pending');
+    expect(await getSettings()).toMatchObject({
+      installToken: 'wbi_new', installBaseUrl: 'https://beer-api.ysilvestrov-ai.uk', installDeletionPending: true,
+    });
   });
 
   it('does not register when a Telegram token is set', async () => {
@@ -72,6 +83,16 @@ describe('syncInstall — pending deletion', () => {
     expect(await syncInstall()).toBe('none');
     expect(calls).toEqual([{ url: 'https://beer-api.ysilvestrov-ai.uk/installs/me', method: 'DELETE', auth: 'Bearer wbi_old', body: undefined }]);
     expect(await getSettings()).toMatchObject({ installToken: '', installDeletionPending: false });
+  });
+
+  it('the deletion goes to the server that issued the token, not to the one configured now', async () => {
+    await setSettings({
+      baseUrl: 'https://b.test', installToken: 'wbi_old', installBaseUrl: 'https://a.test',
+      installRegistration: false, installDeletionPending: true,
+    });
+    const calls = server(() => new Response(null, { status: 204 }));
+    expect(await syncInstall()).toBe('none');
+    expect(calls.map((c) => c.url)).toEqual(['https://a.test/installs/me']);
   });
 
   it('a 401 on deletion counts as deleted — the server has forgotten the install already', async () => {
