@@ -7,6 +7,7 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { ensureProfile } from '../storage/user_profiles';
 import { rotateToken, hashToken } from '../storage/api_tokens';
+import { registerInstall } from '../storage/extension_installs';
 import { createApiApp, createApiServer, type ApiAppDeps } from './index';
 import {
   CHECKINS_SYNC_BODY_LIMIT_BYTES,
@@ -82,6 +83,21 @@ describe('createApiApp', () => {
     }
   });
 
+  it.each(['/checkins/sync', '/fest/state', '/mcp', '/enrich/candidates', '/enrich/result'])(
+    'an install token gets 403 on the user-only route %s (#923)',
+    async (path) => {
+      const d = deps();
+      registerInstall(d.db, { date: '2026-10-30', at: '2026-10-30T09:00:00.000Z', version: '1', tokenHash: hashToken('wbi_x') });
+      const res = await createApiApp(d).request(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer wbi_x' },
+        body: '{}',
+      });
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: 'install_token_not_allowed' });
+    },
+  );
+
   it('POST /match works anonymously when no token is sent (global-only)', async () => {
     const app = createApiApp(deps());
     const res = await app.request('/match', {
@@ -113,7 +129,7 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }, { brewery: 'A', name: 'B' }] }),
     });
     const today = warsawDateAndHour(new Date()).date;
-    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 1, authedRequests: 0, beers: 2, mcpRequests: 0, mcpBeers: 0 });
+    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 1, authedRequests: 0, installRequests: 0, beers: 2, mcpRequests: 0, mcpBeers: 0 });
   });
 
   it('POST /match records authenticated usage when a valid token is sent', async () => {
@@ -125,7 +141,7 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
     });
     const today = warsawDateAndHour(new Date()).date;
-    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 0, authedRequests: 1, beers: 1, mcpRequests: 0, mcpBeers: 0 });
+    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 0, authedRequests: 1, installRequests: 0, beers: 1, mcpRequests: 0, mcpBeers: 0 });
   });
 
   it('POST /match still returns 200 when usage recording fails (best-effort)', async () => {
