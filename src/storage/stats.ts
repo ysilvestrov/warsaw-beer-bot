@@ -238,7 +238,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     enrichMatched24h: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND untappd_lookup_at >= ?', [cutoff24]),
     enrichFailures24h: count('SELECT COUNT(*) AS c FROM enrich_failures WHERE last_at >= ?', [cutoff24]),
     untappdSearchHealthy: canaryOk && !circuitOpen,
-    extMatchRequests: usage.anonRequests + usage.authedRequests,
+    extMatchRequests: usage.anonRequests + usage.authedRequests + usage.installRequests,
     extMatchAnon: usage.anonRequests,
     extMatchBeers: usage.beers,
     mcpMatchRequests: usage.mcpRequests,

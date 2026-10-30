@@ -11,7 +11,7 @@ function db() {
 
 test('getUsageForDate: zeros when no row exists', () => {
   expect(getUsageForDate(db(), '2026-07-14')).toEqual({
-    anonRequests: 0, authedRequests: 0, beers: 0, mcpRequests: 0, mcpBeers: 0,
+    anonRequests: 0, authedRequests: 0, installRequests: 0, beers: 0, mcpRequests: 0, mcpBeers: 0,
   });
 });
 
@@ -21,7 +21,7 @@ test('recordMatchUsage: inserts then increments the same-day row', () => {
   recordMatchUsage(d, { date: '2026-07-14', authed: false, beers: 2, channel: 'extension' });
   recordMatchUsage(d, { date: '2026-07-14', authed: true, beers: 5, channel: 'extension' });
   expect(getUsageForDate(d, '2026-07-14')).toEqual({
-    anonRequests: 2, authedRequests: 1, beers: 10, mcpRequests: 0, mcpBeers: 0,
+    anonRequests: 2, authedRequests: 1, installRequests: 0, beers: 10, mcpRequests: 0, mcpBeers: 0,
   });
 });
 
@@ -30,10 +30,10 @@ test('recordMatchUsage: separate dates are independent rows', () => {
   recordMatchUsage(d, { date: '2026-07-14', authed: false, beers: 1, channel: 'extension' });
   recordMatchUsage(d, { date: '2026-07-15', authed: true, beers: 4, channel: 'extension' });
   expect(getUsageForDate(d, '2026-07-14')).toEqual({
-    anonRequests: 1, authedRequests: 0, beers: 1, mcpRequests: 0, mcpBeers: 0,
+    anonRequests: 1, authedRequests: 0, installRequests: 0, beers: 1, mcpRequests: 0, mcpBeers: 0,
   });
   expect(getUsageForDate(d, '2026-07-15')).toEqual({
-    anonRequests: 0, authedRequests: 1, beers: 4, mcpRequests: 0, mcpBeers: 0,
+    anonRequests: 0, authedRequests: 1, installRequests: 0, beers: 4, mcpRequests: 0, mcpBeers: 0,
   });
 });
 
@@ -86,6 +86,23 @@ test('recordMatchUsage: an extension call leaves the MCP counters untouched', ()
   expect(usage.mcpBeers).toBe(0);
 });
 
+test('recordMatchUsage: an install call counts only install_requests, never anon or authed (#923)', () => {
+  const d = db();
+  // authed: false — if the install guard were dropped this would land in anon_requests.
+  recordMatchUsage(d, { date: '2026-10-30', authed: false, install: true, beers: 6, channel: 'extension' });
+  expect(getUsageForDate(d, '2026-10-30')).toEqual({
+    anonRequests: 0, authedRequests: 0, installRequests: 1, beers: 6, mcpRequests: 0, mcpBeers: 0,
+  });
+});
+
+test('recordMatchUsage: install on the MCP channel is ignored — MCP has its own counters', () => {
+  const d = db();
+  recordMatchUsage(d, { date: '2026-10-30', authed: true, install: true, beers: 2, channel: 'mcp' });
+  expect(getUsageForDate(d, '2026-10-30')).toEqual({
+    anonRequests: 0, authedRequests: 0, installRequests: 0, beers: 0, mcpRequests: 1, mcpBeers: 2,
+  });
+});
+
 test('recordMatchUsage: both channels accumulate side by side on one date', () => {
   const d = db();
   recordMatchUsage(d, { date: '2026-09-10', authed: false, beers: 3, channel: 'extension' });
@@ -94,6 +111,6 @@ test('recordMatchUsage: both channels accumulate side by side on one date', () =
 
   const usage = getUsageForDate(d, '2026-09-10');
   expect(usage).toEqual({
-    anonRequests: 1, authedRequests: 1, beers: 7, mcpRequests: 1, mcpBeers: 9,
+    anonRequests: 1, authedRequests: 1, installRequests: 0, beers: 7, mcpRequests: 1, mcpBeers: 9,
   });
 });

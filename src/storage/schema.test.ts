@@ -46,6 +46,13 @@ function dropV39AuditColumns(db: ReturnType<typeof openDb>): void {
   db.exec('ALTER TABLE user_profiles DROP COLUMN untappd_link_revision');
   db.exec('ALTER TABLE bug_reports DROP COLUMN related_json');
   db.exec('ALTER TABLE bug_reports DROP COLUMN jev_json');
+  dropV52InstallColumns(db);
+}
+
+// v52 (#923) re-runs in every rewind window below it and ALTERs api_usage; its tables are
+// CREATE IF NOT EXISTS and survive a replay.
+function dropV52InstallColumns(db: ReturnType<typeof openDb>): void {
+  db.exec('ALTER TABLE api_usage DROP COLUMN install_requests');
 }
 
 function dropV37ObservationColumns(db: ReturnType<typeof openDb>): void {
@@ -64,6 +71,7 @@ describe('schema migrations', () => {
     db.exec('ALTER TABLE user_profiles DROP COLUMN untappd_link_revision');
     db.exec('ALTER TABLE fests DROP COLUMN target_min_abv'); // v48 re-runs after the rewind below
     db.exec('ALTER TABLE fests DROP COLUMN target_name_patterns'); // and so does v49
+    dropV52InstallColumns(db); // and v52
     db.prepare('DELETE FROM schema_version WHERE version = 40').run();
     seedBeer(db, 1);
     db.prepare('INSERT INTO user_profiles (telegram_id, untappd_username) VALUES (42, ?)').run('beerfan');
@@ -153,12 +161,29 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..51 on a fresh db, with no gaps', () => {
+  it('records every migration 1..52 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 51 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 52 }, (_, i) => i + 1));
+    db.close();
+  });
+
+  it('migration v52 records its version and creates the install tables and api_usage.install_requests', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 52').get())
+      .toEqual({ version: 52 });
+    const tables = (db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN
+         ('extension_installs', 'install_usage_daily', 'install_registrations_daily', 'match_misses')
+       ORDER BY name`,
+    ).all() as { name: string }[]).map((r) => r.name);
+    expect(tables).toEqual(['extension_installs', 'install_registrations_daily', 'install_usage_daily', 'match_misses']);
+    const usageCols = (db.prepare('PRAGMA table_info(api_usage)').all() as { name: string; dflt_value: string | null }[])
+      .filter((c) => c.name === 'install_requests');
+    expect(usageCols).toEqual([expect.objectContaining({ name: 'install_requests', dflt_value: '0' })]);
     db.close();
   });
 
