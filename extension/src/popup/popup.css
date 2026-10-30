@@ -1,12 +1,6 @@
 @import "../shared/extension-ui.css";
 
-/* Warsaw Beer Overlay — toolbar popup.
-   Tiering: Sync (primary, amber) > Refresh (secondary, outlined) > Clear all cache
-   (ghost, below a hairline). Height and colour both encode rank, so the destructive
-   action can never be mistaken for the primary one.
-   Brand amber #d9822b is only 2.93:1 on white, so the light-mode fill is the deeper
-   #ab6217 (4.68:1); dark mode gets the brand hue at full strength with a dark label
-   (5.75:1). Same brand, honest contrast. */
+/* Warsaw Beer Overlay — toolbar popup */
 
 body {
   margin: 0;
@@ -18,10 +12,8 @@ body {
   scrollbar-color: var(--border) transparent;
 }
 
-/* One fixed width, so the popup does not resize itself around whichever status
-   string happens to be showing. */
 .card {
-  width: 284px;
+  width: 300px;
   padding: 14px;
 }
 
@@ -30,30 +22,194 @@ body {
 .head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   margin-bottom: 12px;
 }
 
+.head-title {
+  display: flex;
+  flex-direction: column;
+}
+
+.badge-direct {
+  font-size: 10px;
+  color: #ab6217;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .mark {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: none;
   fill: url(#markFill);
 }
 
 h1 {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--fg);
 }
 
+/* ---------- user profile block ---------- */
+
+.profile-card {
+  background: var(--surface-quiet, #f5f5f5);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #ccc;
+}
+
+.user-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.user-meta strong {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-stats {
+  font-size: 11px;
+  color: var(--fg-muted, #666);
+}
+
+.btn-logout {
+  background: none;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 3px 6px;
+  color: var(--fg-muted, #666);
+  cursor: pointer;
+}
+.btn-logout:hover {
+  background: var(--surface-quiet-hover, #eee);
+  color: var(--fg);
+}
+
+.db-stats {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--fg-muted, #555);
+  border-top: 1px solid var(--border, #e0e0e0);
+  padding-top: 6px;
+}
+
+/* ---------- login section ---------- */
+
+.login-section {
+  background: var(--surface-quiet, #f9f9f9);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.login-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--fg-muted, #666);
+}
+
+.security-note {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-muted, #555);
+}
+
+.login-error {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: #d32f2f;
+}
+
 /* ---------- buttons ---------- */
 
-.card > .btn,
+.card .btn,
 .foot .btn {
   width: 100%;
+  margin-bottom: 6px;
+}
+
+.btn-primary {
+  background: #ab6217;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #8e4f10;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-quiet-hover, #eee);
+}
+
+.btn-ghost {
+  min-height: 28px;
+  color: var(--fg-muted, #777);
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-quiet, #eee);
+  color: var(--fg);
 }
 
 .ico {
@@ -67,195 +223,50 @@ h1 {
   stroke-linejoin: round;
 }
 
-/* Ghost — reachable, never in the primary scan path. */
-.btn-ghost {
-  min-height: 28px;
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-.btn-ghost:hover:not(:disabled) { background: var(--surface-quiet); color: var(--fg); }
-.btn-ghost:active:not(:disabled) { background: var(--surface-quiet-hover); }
-
-/* #517: the armed half of the two-step clear. Colour is the only change — the
-   button keeps the ghost tier's height so arming cannot reflow the footer. */
-.btn-ghost.btn-danger {
-  background: var(--danger-surface);
-  color: var(--danger);
-  font-weight: 600;
+.status {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: var(--fg-muted, #666);
 }
 
 .status-foot {
-  margin: 6px 0 0;
-  color: var(--fg-muted);
-}
-/* The running state is carried by the disabled fill plus the live "Syncing… 1200 /
-   8200" line beneath, which reports real counts. An indeterminate animation on top
-   of exact numbers is decoration, so there isn't one. */
-
-@media (prefers-reduced-motion: reduce) {
-  .shops-summary,
-  .shops-chevron,
-  .shop-link { transition: none; }
-}
-
-/* ---------- status + auth block ---------- */
-
-.status {
-  margin: 6px 0 12px;
-  min-height: 1.2em;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-
-/* Idle: no message, no reserved band. The height is only held once there is
-   something to hold it for. */
-.status:empty {
-  margin: 0 0 10px;
-  min-height: 0;
-}
-
-/* #524 review: .status:empty (0-2-0) otherwise beats .status-foot (0-1-0), so the
-   idle footer caption still reserved a 10px band under the last control. This
-   selector's specificity (0-3-0) wins outright — the footer caption collapses to
-   no margin at all when empty, without touching the other captions' idle margin. */
-.status.status-foot:empty {
-  margin: 0;
-}
-
-/* #519: the block moves as a unit to the top of the card, so the rule that
-   fences it off belongs to the wrapper, not to the note's first line. */
-.auth {
-  padding-top: 12px;
-  border-top: 1px solid var(--hairline);
-  margin-bottom: 8px;
-}
-
-/* #519/#522 review finding 4: when the block leads the card (no token), it
-   sits directly under .head, which already carries its own margin-bottom.
-   The fence rule is redundant there — it just adds dead space between the
-   <h1> and the primary CTA and softens the very promotion this state is
-   for — so drop it for that position only. Any other position keeps the
-   fence. */
-.head + .auth {
-  padding-top: 0;
-  border-top: 0;
-}
-
-.note {
-  margin: 0 0 8px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-
-.guide {
-  display: block;
-  margin-top: 8px;
-  padding: 5px 0;
-  min-height: 24px;      /* WCAG 2.5.8: an inline link here was 19.6px */
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 500;
-  text-decoration: none;
-  text-underline-offset: 2px;
-}
-.guide:hover { text-decoration: underline; }
-
-/* ---------- supported shops ---------- */
-
-.shops {
-  margin: 0 0 12px;
-  border-block: 1px solid var(--hairline);
-}
-
-.shops-summary {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  color: var(--fg);
-  font-weight: 500;
-  cursor: pointer;
-  list-style: none;
-  transition: background-color 120ms ease;
-}
-
-.shops-summary::-webkit-details-marker { display: none; }
-.shops-summary:hover { background: var(--surface-quiet); }
-
-.shop-count {
-  min-width: 20px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--surface-quiet);
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  margin: 4px 0 0;
   text-align: center;
 }
 
-.shops-chevron {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: var(--fg-muted);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 160ms cubic-bezier(.22, 1, .36, 1);
+/* Supported shops details */
+.shops {
+  margin: 8px 0;
+  border-top: 1px solid var(--border, #eee);
+  padding-top: 8px;
 }
-
-.shops[open] .shops-chevron { transform: rotate(180deg); }
-
-.shop-list {
-  max-height: 286px;
-  margin: 0 -4px;
-  padding: 2px 4px 9px;
-  overflow-y: auto;
-}
-
-.shop-group + .shop-group { margin-top: 8px; }
-
-.shop-country {
-  margin: 0 0 2px;
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.shop-link {
+.shops-summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 30px;
-  padding: 5px 7px;
-  border-radius: 6px;
-  color: var(--fg);
-  text-decoration: none;
-  transition: background-color 120ms ease, color 120ms ease;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-muted, #666);
+  cursor: pointer;
+  user-select: none;
 }
-
-.shop-link:hover {
-  background: var(--surface-quiet);
-  color: var(--accent);
+.shop-count {
+  margin-left: auto;
+  font-weight: 600;
 }
-
-.shop-icon {
-  width: 13px;
-  height: 13px;
-  flex: none;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.shops-chevron {
+  width: 12px;
+  height: 12px;
 }
-
-/* ---------- footer ---------- */
+.shop-list {
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
 
 .foot {
-  margin-top: 14px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border, #eee);
   padding-top: 8px;
-  border-top: 1px solid var(--hairline);
 }

@@ -1,39 +1,62 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ENRICH_ORIGINS, requestEnrichPermission, testConnection } from './options';
-import * as client from '../api/client';
-import { ApiError } from '../api/client';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as auth from '../untappd/auth';
+import * as db from '../db/indexed-db';
+import * as config from '../shared/config';
+import { refreshOptionsUI } from './options';
 
-afterEach(() => vi.restoreAllMocks());
-
-describe('testConnection', () => {
-  it('ok when health passes and a probe match succeeds', async () => {
-    vi.spyOn(client, 'getHealth').mockResolvedValue(true);
-    vi.spyOn(client, 'postMatch').mockResolvedValue([]);
-    expect(await testConnection('https://api.test', 'tok')).toEqual({ ok: true });
+describe('options UI', () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <div id="authStatusText"></div>
+      <div id="dbStatsText"></div>
+      <input type="checkbox" id="enrichEnabled" />
+    `;
+    vi.spyOn(config, 'getSettings').mockResolvedValue({
+      baseUrl: 'https://api.untappd.com',
+      token: '',
+      enrichEnabled: true,
+      lastCheckinSync: null,
+    });
+    vi.spyOn(db, 'countUserHad').mockResolvedValue(42);
+    vi.spyOn(db, 'countCatalogBeers').mockResolvedValue(105);
   });
 
-  it('fails with reason "health" when health is down', async () => {
-    vi.spyOn(client, 'getHealth').mockResolvedValue(false);
-    expect(await testConnection('https://api.test', 'tok')).toEqual({ ok: false, reason: 'health' });
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('fails with reason "unauthorized" when the probe match is 401', async () => {
-    vi.spyOn(client, 'getHealth').mockResolvedValue(true);
-    vi.spyOn(client, 'postMatch').mockRejectedValue(new ApiError('unauthorized'));
-    expect(await testConnection('https://api.test', 'bad')).toEqual({ ok: false, reason: 'unauthorized' });
+  it('renders logged-in state correctly', async () => {
+    vi.spyOn(auth, 'getAuthState').mockResolvedValue({
+      isLoggedIn: true,
+      user: {
+        username: 'craft_lover',
+        name: 'Beer Lover',
+        avatarUrl: '',
+        totalCheckins: 500,
+        uniqueBeers: 450,
+      },
+    });
+
+    await refreshOptionsUI();
+
+    const authText = document.getElementById('authStatusText')!;
+    expect(authText.innerHTML).toContain('craft_lover');
+    expect(authText.innerHTML).toContain('500');
+
+    const dbText = document.getElementById('dbStatsText')!;
+    expect(dbText.innerHTML).toContain('42');
+    expect(dbText.innerHTML).toContain('105');
   });
-});
 
-describe('requestEnrichPermission', () => {
-  it('requests both Untappd and Algolia origins for missing-beer enrichment', async () => {
-    const request = vi.fn(async () => true);
-    vi.stubGlobal('chrome', { permissions: { request } });
+  it('renders logged-out state correctly', async () => {
+    vi.spyOn(auth, 'getAuthState').mockResolvedValue({
+      isLoggedIn: false,
+      user: null,
+    });
 
-    expect(await requestEnrichPermission()).toBe(true);
-    expect(request).toHaveBeenCalledWith({ origins: ENRICH_ORIGINS });
-    expect(ENRICH_ORIGINS).toContain('https://untappd.com/*');
-    expect(ENRICH_ORIGINS).toContain('https://*.algolia.net/*');
+    await refreshOptionsUI();
 
-    vi.unstubAllGlobals();
+    const authText = document.getElementById('authStatusText')!;
+    expect(authText.innerHTML).toContain('Not signed in');
   });
 });

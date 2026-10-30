@@ -2,27 +2,36 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Warsaw Beer Overlay — Options</title>
+    <title>Warsaw Beer Overlay — Settings</title>
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
     <main class="card">
-      <h1>Warsaw Beer Overlay</h1>
-      <p class="guide">New here? <a id="guideLink" target="_blank" rel="noopener">Read the setup guide →</a></p>
-      <label for="token">Token (from the bot's <code>/extension</code> command)</label>
-      <input id="token" type="password" autocomplete="off" placeholder="paste your token" />
+      <h1>Warsaw Beer Overlay Settings</h1>
+      <p class="guide">Privacy-first craft beer overlay: direct Untappd integration with local browser database (IndexedDB). No third-party servers.</p>
 
-      <label for="baseUrl">API URL</label>
-      <input id="baseUrl" type="url" placeholder="https://beer-api.ysilvestrov-ai.uk" />
+      <section class="settings-group">
+        <h2>Untappd Account</h2>
+        <div id="authStatusText" class="status-box">Checking Untappd account status…</div>
+      </section>
 
-      <label class="checkbox">
-        <input type="checkbox" id="enrichEnabled" />
-        Find missing beers via Untappd (uses your Untappd session)
-      </label>
+      <section class="settings-group">
+        <h2>Browser Database (IndexedDB)</h2>
+        <p class="desc">All your check-ins and matched beer cards are stored directly in your browser's IndexedDB storage to minimize requests to Untappd.</p>
+        <div id="dbStatsText" class="status-box">Loading database statistics…</div>
+        <button id="clearDBBtn" class="btn btn-secondary" type="button">Clear Local Database</button>
+      </section>
+
+      <section class="settings-group">
+        <h2>Beer Search</h2>
+        <label class="checkbox">
+          <input type="checkbox" id="enrichEnabled" />
+          Find missing beers on-the-fly via Untappd Algolia search
+        </label>
+      </section>
 
       <div class="actions">
-        <button id="save" class="btn btn-primary" type="button">Save</button>
-        <button id="test" class="btn btn-secondary" type="button">Test connection</button>
+        <button id="save" class="btn btn-primary" type="button">Save Settings</button>
       </div>
       <p id="status" class="options-status" aria-live="polite"></p>
     </main>

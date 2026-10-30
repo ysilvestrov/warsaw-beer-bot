@@ -11,7 +11,7 @@ describe('config', () => {
   it('persists and reads back token + baseUrl', async () => {
     await setSettings({ token: 'abc', baseUrl: 'http://localhost:3000' });
     const s = await getSettings();
-    expect(s).toEqual({ token: 'abc', baseUrl: 'http://localhost:3000', enrichEnabled: false });
+    expect(s).toEqual({ token: 'abc', baseUrl: 'http://localhost:3000', enrichEnabled: false, directUntappd: true });
   });
 
   it('falls back to default baseUrl when stored baseUrl is blank', async () => {
@@ -36,7 +36,7 @@ describe('config', () => {
 });
 
 describe('SETUP_GUIDE_URL', () => {
-  it('points at the hosted English setup guide', () => {
-    expect(SETUP_GUIDE_URL).toBe('https://ysilvestrov.github.io/warsaw-beer-bot/install/');
+  it('points at untappd.com directly', () => {
+    expect(SETUP_GUIDE_URL).toBe('https://untappd.com');
   });
 });

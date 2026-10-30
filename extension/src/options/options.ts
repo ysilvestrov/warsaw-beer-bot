@@ -1,101 +1,65 @@
-import { getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from '../shared/config';
-import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
-import { getHealth, postMatch, ApiError } from '../api/client';
-export { ENRICH_ORIGINS } from '../shared/enrich-permissions';
+import { getSettings, setSettings } from '../shared/config';
+import { getAuthState } from '../untappd/auth';
+import { countUserHad, countCatalogBeers, clearAllLocalDB } from '../db/indexed-db';
 
-// Replaced at build time by Vite `define`. Undefined under Vitest (no define), hence the
-// typeof guard at every read. True only in the store build.
-declare const __CWS_BUILD__: boolean;
-const IS_STORE_BUILD = typeof __CWS_BUILD__ !== 'undefined' && __CWS_BUILD__;
-
-export interface ConnectionResult {
-  ok: boolean;
-  reason?: 'health' | ApiError['code'];
+function el<T extends HTMLElement>(id: string): T {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`Missing expected element #${id}`);
+  return node as T;
 }
 
-export async function testConnection(baseUrl: string, token: string): Promise<ConnectionResult> {
-  const healthy = await getHealth(baseUrl);
-  if (!healthy) return { ok: false, reason: 'health' };
-  try {
-    await postMatch(baseUrl, token, [{ brewery: 'connection', name: 'check' }]);
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, reason: e instanceof ApiError ? e.code : 'server' };
-  }
-}
-
-export async function requestEnrichPermission(): Promise<boolean> {
-  return chrome.permissions.request({ origins: [...ENRICH_ORIGINS] });
-}
-
-export async function removeEnrichPermission(): Promise<boolean> {
-  return chrome.permissions.remove({ origins: [...ENRICH_ORIGINS] });
-}
-
-// --- DOM wiring (runs only in the options page, not under test) ---
-function el<T extends HTMLElement>(id: string): T | null {
-  return document.getElementById(id) as T | null;
-}
-
-async function initOptionsPage(): Promise<void> {
-  const tokenInput = el<HTMLInputElement>('token');
-  const urlInput = el<HTMLInputElement>('baseUrl');
-  const status = el<HTMLElement>('status');
-  if (!tokenInput || !urlInput || !status) return;
-
-  const guideLink = el<HTMLAnchorElement>('guideLink');
-  if (guideLink) guideLink.href = SETUP_GUIDE_URL;
+export async function refreshOptionsUI(): Promise<void> {
+  const authStatusText = el<HTMLElement>('authStatusText');
+  const dbStatsText = el<HTMLElement>('dbStatsText');
+  const enrichCheck = el<HTMLInputElement>('enrichEnabled');
 
   const s = await getSettings();
-  tokenInput.value = s.token;
-  urlInput.value = s.baseUrl || DEFAULT_BASE_URL;
+  enrichCheck.checked = s.enrichEnabled;
 
-  // Store build can't grant arbitrary hosts (no 'https://*/*'), so the custom API URL
-  // is fixed to the default — hide the field and its label to avoid a dead control.
-  if (IS_STORE_BUILD) {
-    urlInput.style.display = 'none';
-    document.querySelector('label[for="baseUrl"]')?.setAttribute('style', 'display:none');
+  const auth = await getAuthState();
+  if (auth.isLoggedIn && auth.user) {
+    authStatusText.innerHTML = `<strong>Connected as:</strong> ${auth.user.name || auth.user.username} (@${auth.user.username})<br>Total check-ins: ${auth.user.totalCheckins}`;
+    authStatusText.style.borderColor = '#4caf50';
+  } else {
+    authStatusText.innerHTML = '<strong>Not signed in.</strong> Open the extension popup in your browser toolbar to log in to Untappd.';
+    authStatusText.style.borderColor = '#ff9800';
   }
 
-  const enrich = el<HTMLInputElement>('enrichEnabled');
-  if (enrich) {
-    enrich.checked = s.enrichEnabled;
-    enrich.addEventListener('change', async () => {
-      if (enrich.checked) {
-        const granted = await requestEnrichPermission();
-        enrich.checked = granted;
-        await setSettings({ enrichEnabled: granted });
-        status.textContent = granted ? 'Enrichment on.' : 'Permission denied.';
-      } else {
-        await removeEnrichPermission();
-        await setSettings({ enrichEnabled: false });
-        status.textContent = 'Enrichment off.';
-      }
+  const hadCount = await countUserHad();
+  const catCount = await countCatalogBeers();
+  dbStatsText.innerHTML = `Personal tried beers stored: <strong>${hadCount}</strong><br>Cached beer catalog entries: <strong>${catCount}</strong>`;
+}
+
+export function initOptions(): void {
+  const enrichCheck = el<HTMLInputElement>('enrichEnabled');
+  const saveBtn = el<HTMLButtonElement>('save');
+  const clearDBBtn = el<HTMLButtonElement>('clearDBBtn');
+  const statusEl = el<HTMLElement>('status');
+
+  void refreshOptionsUI();
+
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    await setSettings({
+      enrichEnabled: enrichCheck.checked,
     });
-  }
-
-  el<HTMLButtonElement>('save')?.addEventListener('click', async () => {
-    await setSettings({ token: tokenInput.value.trim(), baseUrl: urlInput.value.trim() });
-    // Best-effort: request permission for a custom (non-default) host so the worker can
-    // fetch it. Skipped in the store build, which has no 'https://*/*' to grant.
-    if (!IS_STORE_BUILD) {
-      try {
-        const origin = new URL(urlInput.value.trim()).origin + '/*';
-        await chrome.permissions.request({ origins: [origin] });
-      } catch {
-        /* invalid URL or denied — surfaced by Test connection */
-      }
-    }
-    status.textContent = 'Saved.';
+    statusEl.textContent = '✓ Settings saved';
+    saveBtn.disabled = false;
+    setTimeout(() => {
+      statusEl.textContent = '';
+    }, 2000);
   });
 
-  el<HTMLButtonElement>('test')?.addEventListener('click', async () => {
-    status.textContent = 'Testing…';
-    const r = await testConnection(urlInput.value.trim(), tokenInput.value.trim());
-    status.textContent = r.ok ? '✅ Connected.' : `❌ Failed (${r.reason}).`;
+  clearDBBtn.addEventListener('click', async () => {
+    clearDBBtn.disabled = true;
+    await clearAllLocalDB();
+    await refreshOptionsUI();
+    statusEl.textContent = '✓ Local database cleared';
+    clearDBBtn.disabled = false;
+    setTimeout(() => {
+      statusEl.textContent = '';
+    }, 2500);
   });
 }
 
-if (typeof document !== 'undefined' && document.getElementById('token')) {
-  void initOptionsPage();
-}
+document.addEventListener('DOMContentLoaded', initOptions);

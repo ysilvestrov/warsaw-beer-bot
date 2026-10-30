@@ -17,19 +17,66 @@
           </defs>
           <path d="M12 2.6c0 0-6.8 7-6.8 11.3a6.8 6.8 0 0 0 13.6 0C18.8 9.6 12 2.6 12 2.6z" />
         </svg>
-        <h1>Warsaw Beer Overlay</h1>
+        <div class="head-title">
+          <h1>Warsaw Beer Overlay</h1>
+          <span class="badge-direct">Direct Untappd & Local DB</span>
+        </div>
       </header>
 
-      <button id="syncCheckins" class="btn btn-primary" type="button">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
-        <span>Sync my check-ins</span>
-      </button>
-      <p id="syncStatus" class="status"></p>
+      <!-- Authenticated Profile Card -->
+      <section id="userProfileBlock" class="profile-card" style="display:none">
+        <div class="user-row">
+          <img id="userAvatar" class="avatar" src="" alt="Avatar" />
+          <div class="user-meta">
+            <strong id="userName"></strong>
+            <span id="userStats" class="user-stats"></span>
+          </div>
+          <button id="logoutBtn" class="btn-logout" type="button" title="Log out">Log out</button>
+        </div>
+        <div class="db-stats">
+          <span>📦 Local Browser Database: <strong id="dbCount">0 beers</strong></span>
+        </div>
+      </section>
 
+      <!-- Login Section -->
+      <section id="loginBlock" class="login-section">
+        <p class="login-hint">Connect your Untappd account to see which beers you've tried and your ratings directly on craft beer shop pages.</p>
+        
+        <button id="detectSessionBtn" class="btn btn-primary" type="button">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          <span>Connect via Untappd Web Session</span>
+        </button>
+
+        <button id="openLoginBtn" class="btn btn-secondary" type="button" style="margin-top: 8px;">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+          <span>Open untappd.com to sign in</span>
+        </button>
+
+        <p class="security-note">🔒 <strong>100% Secure:</strong> We use your active browser session on untappd.com. We never ask for, collect, or store your password.</p>
+        <p id="loginError" class="login-error" style="display:none"></p>
+      </section>
+
+      <!-- Sync Section -->
+      <section id="syncSection">
+        <button id="syncCheckins" class="btn btn-primary" type="button">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <span>Sync my check-ins</span>
+        </button>
+        <p id="syncStatus" class="status"></p>
+      </section>
+
+      <!-- Refresh Page Section -->
       <button id="refresh" class="btn btn-secondary" type="button">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <polyline points="23 4 23 10 17 10" />
@@ -51,24 +98,13 @@
         <div id="supportedShops" class="shop-list"></div>
       </details>
 
-      <section id="authBlock" class="auth" style="display:none">
-        <p id="authNote" class="note"></p>
-        <button id="getToken" class="btn btn-secondary" type="button">
-          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
-          </svg>
-          <span>Get a token</span>
-        </button>
-      </section>
-
       <footer class="foot">
-        <a id="guideLink" class="guide" target="_blank" rel="noopener" style="display:none">Read the setup guide →</a>
         <button id="clearAll" class="btn btn-ghost" type="button">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
           </svg>
-          <span>Clear all cache</span>
+          <span>Clear local browser database</span>
         </button>
         <p id="clearStatus" class="status status-foot"></p>
       </footer>

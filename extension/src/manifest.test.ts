@@ -50,10 +50,12 @@ describe('manifest (both variants)', () => {
     }
   });
 
-  it('keeps enrichment optional origins in both variants', () => {
+  it('keeps untappd host permissions in both variants', () => {
     for (const m of [dev, store]) {
-      expect(m.optional_host_permissions).toContain('https://untappd.com/*');
-      expect(m.optional_host_permissions).toContain('https://*.algolia.net/*');
+      expect(m.host_permissions).toContain('https://untappd.com/*');
+      expect(m.host_permissions).toContain('https://*.untappd.com/*');
+      expect(m.host_permissions).toContain('https://api.untappd.com/*');
+      expect(m.host_permissions).toContain('https://*.algolia.net/*');
     }
   });
 });
@@ -63,17 +65,11 @@ describe('dev variant', () => {
     expect(typeof dev.key).toBe('string');
     expect((dev.key as string).length).toBeGreaterThan(100);
   });
-  it('allows a custom baseUrl origin (https://*/*)', () => {
-    expect(dev.optional_host_permissions).toContain('https://*/*');
-  });
 });
 
 describe('store variant', () => {
   it('omits key (CWS rejects packages that carry one)', () => {
     expect(dev.key).toBeDefined();
     expect(store.key).toBeUndefined();
-  });
-  it('omits the broad https://*/* optional origin', () => {
-    expect(store.optional_host_permissions).not.toContain('https://*/*');
   });
 });

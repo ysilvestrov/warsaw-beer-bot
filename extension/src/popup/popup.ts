@@ -1,90 +1,13 @@
 import { pickAdapter } from '../sites/registry';
-import { countAll } from '../cache/store';
-import { clearAll } from '../cache/client';
-import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
-import { wireClearButton } from './clear-cache';
-import { applyTokenState, tokenStateView } from './token-state';
-import type { SyncOutcome } from '../background/handle-checkin-sync';
+import type { AuthState } from '../untappd/auth';
 
-export interface SyncStatusView {
-  running: boolean;
-  serverCount: number;
-  profileTotal: number | null;
-  mergedThisRun: number;
-  // #587: похідне від фонового типу, а не власна копія — інакше новий статус
-  // фону (напр. `no_session`) мовчки провалюється в `default` без помилки типів.
-  outcome: SyncOutcome['status'] | null;
-  complete: boolean;
+function el<T extends HTMLElement>(id: string): T {
+  const node = document.getElementById(id);
+  if (!node) throw new Error(`Missing expected element #${id}`);
+  return node as T;
 }
 
-export function formatSyncStatus(s: SyncStatusView): string {
-  if (s.running) {
-    return s.profileTotal !== null
-      ? `Syncing… ${s.serverCount} / ${s.profileTotal}`
-      : `Syncing… ${s.serverCount}`;
-  }
-  switch (s.outcome) {
-    case null: return '';
-    case 'not_linked': return 'Link your Untappd account in the bot first (/link).';
-    case 'blocked': return 'Untappd is rate-limiting — try again later.';
-    case 'no_session': return 'Untappd session expired — open untappd.com, sign in, then sync again.';
-    case 'account_changed': return 'Untappd account changed — start a new sync for the linked account.';
-    case 'sync_context_required': return 'Update the extension, then start a new sync for the linked account.';
-    case 'feed_unavailable': return 'Untappd did not return your check-in feed — open untappd.com, make sure you are signed in to the linked account, then sync again.';
-    // Не «nothing was saved»: сторінки, прийняті до відмови, уже збережені.
-    case 'page_rejected': return `Untappd returned an unexpected page, so the sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''} — try again later, or use /import in the bot.`;
-    case 'error': return 'Sync failed — check your connection and token, then retry.';
-    case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
-    case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
-    case 'done':
-      return s.complete
-        ? `✓ Fully synced (${s.serverCount}).`
-        : `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
-    default: {
-      // #587: вичерпний switch — якщо `SyncOutcome['status']` отримає новий варіант
-      // без гілки тут, компілятор впаде на цьому присвоєнні, а не мовчки поверне ''.
-      const exhaustive: never = s.outcome;
-      return exhaustive;
-    }
-  }
-}
-
-export function syncButtonLabel(s: SyncStatusView): string {
-  if (s.running) return 'Stop';
-  if (s.outcome === 'capped') {
-    return s.profileTotal === null
-      ? 'Continue sync'
-      : `Continue — ${Math.max(0, s.profileTotal - s.serverCount)} left`;
-  }
-  return 'Sync my check-ins';
-}
-
-type SendSyncStart = (callback: () => void) => void;
-
-export async function requestSyncStart(sendStart: SendSyncStart, timeoutMs: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const acknowledged = await new Promise<boolean>((resolve) => {
-      let settled = false;
-      const finish = (value: boolean) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      };
-      const timer = setTimeout(() => finish(false), timeoutMs);
-      try {
-        sendStart(() => finish(true));
-      } catch {
-        finish(false);
-      }
-    });
-    if (acknowledged) return true;
-  }
-  return false;
-}
-
-// True when the URL belongs to a supported shop, so "Refresh this page" can act.
 export function canRefresh(url: string): boolean {
   try {
     return pickAdapter(new URL(url)) != null;
@@ -93,163 +16,208 @@ export function canRefresh(url: string): boolean {
   }
 }
 
-/** Popup note shown when the extension has no token: global-only, with how to authorize. */
-export function authNoteText(hasToken: boolean): string | null {
-  return hasToken
-    ? null
-    : "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.";
-}
-
-/** Pluralizes a count of beers (parsed cards) — the refresh result's noun, distinct from clear-cache.ts's cache-entry `entries()`. */
-export function beers(n: number): string {
-  return n === 1 ? '1 beer' : `${n} beers`;
-}
-
-// #524: "Refreshed (0 cleared)." is true and reads as failure. `cleared` is the
-// number of cache keys `refreshCards` pushed — one per parsed card on the page
-// (extension/src/content/refresh.ts) — so 0 means the adapter found no beer cards
-// on this page, NOT that the cache was already warm; a page full of already-cached
-// beers reports the card count, never zero.
-export function refreshResultText(cleared: number): string {
-  return cleared === 0
-    ? 'Nothing to refresh — no beers found on this page.'
-    : `Refreshed — ${beers(cleared)} will be rechecked.`;
-}
-
-/**
- * #518: the click handler gets three outcomes, not two — a transport failure
- * (`chrome.runtime.lastError`, e.g. the content script isn't injected on this page),
- * the content script itself reporting failure (`reply?.ok === false`, from
- * extension/src/content/main.ts's catch), and success. Collapsing the second into
- * the zero-cleared success text made a real failure read as "no beers on this page",
- * a factual claim about the shop that isn't true.
- */
-export function refreshReplyText(reply: { ok?: boolean; cleared?: number } | undefined, lastError: boolean): string {
-  if (lastError) return 'Could not reach the page — reload it and retry.';
-  if (reply?.ok === false) return 'Refresh failed — reload the page and try again.';
-  return refreshResultText(reply?.cleared ?? 0);
-}
-
-/**
- * #524: attaches aria-live AFTER init has written the initial text, so opening the
- * popup announces nothing and every later change — always a response to a click —
- * is announced once, beside the control that caused it.
- */
-export function armLiveRegions(nodes: Array<HTMLElement | null>): void {
-  for (const node of nodes) node?.setAttribute('aria-live', 'polite');
-}
-
-function el<T extends HTMLElement>(id: string): T | null {
-  return document.getElementById(id) as T | null;
-}
-
-async function initPopup(): Promise<void> {
-  const refreshBtn = el<HTMLButtonElement>('refresh');
-  const clearBtn = el<HTMLButtonElement>('clearAll');
-  const refreshStatus = el<HTMLElement>('refreshStatus');
-  if (!refreshBtn || !clearBtn || !refreshStatus) return;
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = tab?.url ?? '';
-  refreshBtn.disabled = !canRefresh(url);
-  if (refreshBtn.disabled) refreshStatus.textContent = 'Open a supported shop page to refresh it.';
-
-  const shopList = el<HTMLElement>('supportedShops');
-  if (shopList) {
-    const languages = browserLanguages(navigator);
-    const shopCount = renderSupportedShops(shopList, languages);
-    const countLabel = el<HTMLElement>('shopCount');
-    if (countLabel) countLabel.textContent = String(shopCount);
+async function getActiveTabUrl(): Promise<string | null> {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tabs[0]?.url ?? null;
+  } catch {
+    return null;
   }
+}
 
-  const authNote = el<HTMLElement>('authNote');
-  const authBlock = el<HTMLElement>('authBlock');
-  const getTokenBtn = el<HTMLButtonElement>('getToken');
-  const guideLink = el<HTMLAnchorElement>('guideLink');
+async function triggerPageRefresh(): Promise<void> {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tabId = tabs[0]?.id;
+  if (tabId != null) {
+    await chrome.tabs.sendMessage(tabId, { type: 'refresh' });
+  }
+}
+
+export function initPopup(): void {
+  const userProfileBlock = el<HTMLElement>('userProfileBlock');
+  const userAvatar = el<HTMLImageElement>('userAvatar');
+  const userName = el<HTMLElement>('userName');
+  const userStats = el<HTMLElement>('userStats');
+  const dbCountEl = el<HTMLElement>('dbCount');
+  const logoutBtn = el<HTMLButtonElement>('logoutBtn');
+
+  const loginBlock = el<HTMLElement>('loginBlock');
+  const detectSessionBtn = el<HTMLButtonElement>('detectSessionBtn');
+  const openLoginBtn = el<HTMLButtonElement>('openLoginBtn');
+  const loginError = el<HTMLElement>('loginError');
+
+  const syncSection = el<HTMLElement>('syncSection');
   const syncBtn = el<HTMLButtonElement>('syncCheckins');
   const syncStatus = el<HTMLElement>('syncStatus');
-  const header = document.querySelector<HTMLElement>('header.head');
-  const foot = document.querySelector<HTMLElement>('footer.foot');
 
-  const { token } = await getSettings();
-  const hasToken = Boolean(token);
+  const refreshBtn = el<HTMLButtonElement>('refresh');
+  const refreshStatus = el<HTMLElement>('refreshStatus');
 
-  if (authNote && authBlock && getTokenBtn && guideLink && syncBtn && syncStatus && header && foot) {
-    authNote.textContent = authNoteText(hasToken) ?? '';
-    guideLink.href = SETUP_GUIDE_URL;
-    getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
-    applyTokenState(
-      { header, authBlock, syncBtn, syncStatus, getTokenBtn, guideLink, foot },
-      tokenStateView(hasToken),
-    );
+  const shopCount = el<HTMLElement>('shopCount');
+  const supportedShops = el<HTMLElement>('supportedShops');
+
+  const clearAllBtn = el<HTMLButtonElement>('clearAll');
+  const clearStatus = el<HTMLElement>('clearStatus');
+
+  // Render supported shops
+  const count = renderSupportedShops(supportedShops, browserLanguages(navigator));
+  if (shopCount) shopCount.textContent = String(count);
+
+  // Check refresh capability for current tab
+  void getActiveTabUrl().then((url) => {
+    if (!url || !canRefresh(url)) {
+      refreshBtn.disabled = true;
+      refreshStatus.textContent = 'Not a supported shop page';
+    }
+  });
+
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
+    refreshStatus.textContent = 'Refreshing badges…';
+    try {
+      await triggerPageRefresh();
+      refreshStatus.textContent = '✓ Badges refreshed';
+    } catch {
+      refreshStatus.textContent = 'Could not refresh page';
+    } finally {
+      setTimeout(() => {
+        refreshBtn.disabled = false;
+        refreshStatus.textContent = '';
+      }, 2500);
+    }
+  });
+
+  // State update helper
+  async function refreshState() {
+    chrome.runtime.sendMessage({ type: 'auth:get-state' }, (res) => {
+      if (!res) return;
+      const { auth, hadCount } = res as { auth: AuthState; hadCount: number; catCount: number };
+      updateUIWithAuth(auth, hadCount);
+    });
   }
 
-  refreshBtn.addEventListener('click', () => {
-    if (tab?.id == null) return;
-    refreshStatus.textContent = 'Refreshing…';
-    chrome.tabs.sendMessage(tab.id, { type: 'refresh-page' }, (reply?: { ok?: boolean; cleared?: number }) => {
-      refreshStatus.textContent = refreshReplyText(reply, Boolean(chrome.runtime.lastError));
+  function updateUIWithAuth(auth: AuthState, hadCount: number) {
+    if (auth.isLoggedIn && auth.user) {
+      userProfileBlock.style.display = 'block';
+      loginBlock.style.display = 'none';
+      syncSection.style.display = 'block';
+
+      userName.textContent = auth.user.name || auth.user.username;
+      const checkinSuffix = auth.user.totalCheckins ? ` (${auth.user.totalCheckins.toLocaleString()} check-ins)` : '';
+      userStats.textContent = `@${auth.user.username} • ${auth.user.totalBeers.toLocaleString()} unique beers${checkinSuffix}`;
+
+      if (auth.user.totalBeers > 0 && hadCount < auth.user.totalBeers) {
+        dbCountEl.textContent = `${hadCount.toLocaleString()} / ${auth.user.totalBeers.toLocaleString()} beers (Sync recommended)`;
+      } else if (auth.user.totalBeers > 0 && hadCount >= auth.user.totalBeers) {
+        dbCountEl.textContent = `${hadCount.toLocaleString()} beers (✓ Fully synced)`;
+      } else {
+        dbCountEl.textContent = `${hadCount.toLocaleString()} beers`;
+      }
+
+      if (auth.user.avatar) {
+        userAvatar.src = auth.user.avatar;
+        userAvatar.style.display = 'block';
+      } else {
+        userAvatar.style.display = 'none';
+      }
+    } else {
+      userProfileBlock.style.display = 'none';
+      loginBlock.style.display = 'block';
+      syncSection.style.display = 'none';
+    }
+  }
+
+  // Initial state check
+  void refreshState();
+
+  // Login via web session
+  detectSessionBtn.addEventListener('click', async () => {
+    detectSessionBtn.disabled = true;
+    detectSessionBtn.textContent = 'Checking untappd.com session…';
+    loginError.style.display = 'none';
+
+    chrome.runtime.sendMessage({ type: 'auth:detect-web' }, (res) => {
+      detectSessionBtn.disabled = false;
+      detectSessionBtn.textContent = 'Connect via Untappd Web Session';
+
+      const auth = res?.auth as AuthState | undefined;
+      if (auth?.isLoggedIn) {
+        void refreshState();
+      } else {
+        loginError.textContent = auth?.error || 'Active untappd.com session not found. Please click "Open untappd.com to sign in" first.';
+        loginError.style.display = 'block';
+      }
     });
   });
 
-  const clearStatus = el<HTMLElement>('clearStatus');
-  if (clearStatus) wireClearButton(clearBtn, clearStatus, { count: countAll, clear: clearAll });
+  // Open official untappd login in a new browser tab
+  openLoginBtn.addEventListener('click', () => {
+    void chrome.tabs.create({ url: 'https://untappd.com/login' });
+  });
 
-  if (hasToken && syncBtn && syncStatus) {
-    const syncLabel = syncBtn.querySelector('span');
-    let latestSyncStatus: SyncStatusView | null = null;
-    const render = (s: SyncStatusView) => {
-      latestSyncStatus = s;
-      syncStatus.textContent = formatSyncStatus(s);
-      syncBtn.disabled = false;
-      if (syncLabel) syncLabel.textContent = syncButtonLabel(s);
-    };
-    const poll = () => {
-      chrome.runtime.sendMessage({ type: 'checkin-sync:status' }, (s?: SyncStatusView) => {
-        if (chrome.runtime.lastError || !s) {
-          latestSyncStatus = null;
-          syncStatus.textContent = 'Sync interrupted — tap Sync to resume.';
-          syncBtn.disabled = false;
-          if (syncLabel) syncLabel.textContent = 'Sync my check-ins';
-          return;
-        }
-        render(s);
-        if (s.running) setTimeout(poll, 1500);
-      });
-    };
-    syncBtn.addEventListener('click', async () => {
-      if (latestSyncStatus?.running) {
-        syncBtn.disabled = true;
-        syncStatus.textContent = 'Stopping…';
-        chrome.runtime.sendMessage({ type: 'checkin-sync:stop' }, () => { void chrome.runtime.lastError; });
-        return;
-      }
-      syncBtn.disabled = true;
-      syncStatus.textContent = 'Starting…';
-      // Fetching the user's feed needs the untappd.com host permission (optional,
-      // shared with enrichment). Request it in this user-gesture context so a user
-      // who never enabled enrichment can still sync. Must be the first await so the
-      // gesture isn't consumed.
-      const granted = await chrome.permissions.request({ origins: ['https://untappd.com/*'] });
-      if (!granted) {
-        syncStatus.textContent = 'Allow access to untappd.com to sync your check-ins.';
-        syncBtn.disabled = false;
-        return;
-      }
-      await requestSyncStart((callback) => {
-        chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => {
-          void chrome.runtime.lastError;
-          callback();
-        });
-      }, 1500);
-      poll();
+  // Logout
+  logoutBtn.addEventListener('click', () => {
+    logoutBtn.disabled = true;
+    chrome.runtime.sendMessage({ type: 'auth:logout' }, () => {
+      logoutBtn.disabled = false;
+      void refreshState();
     });
-    poll(); // reflect an in-progress run when the popup (re)opens
+  });
+
+  // Checkin Sync polling
+  let syncPollTimer: NodeJS.Timeout | null = null;
+
+  function pollSyncStatus() {
+    chrome.runtime.sendMessage({ type: 'checkin-sync:status' }, (res) => {
+      if (!res) return;
+      const { running, serverCount, profileTotal, complete } = res;
+
+      if (running) {
+        syncBtn.disabled = true;
+        syncBtn.textContent = 'Syncing…';
+        syncStatus.textContent = profileTotal
+          ? `Syncing… ${serverCount.toLocaleString()} / ${profileTotal.toLocaleString()}`
+          : `Syncing… ${serverCount.toLocaleString()}`;
+      } else {
+        syncBtn.disabled = false;
+        syncBtn.textContent = 'Sync my check-ins';
+        if (syncPollTimer) {
+          clearInterval(syncPollTimer);
+          syncPollTimer = null;
+        }
+        if (complete) {
+          syncStatus.textContent = `✓ Fully synced (${serverCount.toLocaleString()} beers in local DB)`;
+        }
+        void refreshState();
+      }
+    });
   }
 
-  armLiveRegions([el<HTMLElement>('syncStatus'), refreshStatus, el<HTMLElement>('clearStatus')]);
+  syncBtn.addEventListener('click', () => {
+    syncBtn.disabled = true;
+    syncStatus.textContent = 'Starting sync…';
+
+    chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => {
+      if (syncPollTimer) clearInterval(syncPollTimer);
+      syncPollTimer = setInterval(pollSyncStatus, 1500);
+      pollSyncStatus();
+    });
+  });
+
+  // Clear local DB cache
+  clearAllBtn.addEventListener('click', () => {
+    clearAllBtn.disabled = true;
+    clearStatus.textContent = 'Clearing…';
+
+    chrome.runtime.sendMessage({ type: 'cache:clear-all' }, () => {
+      clearStatus.textContent = '✓ Local database cleared';
+      clearAllBtn.disabled = false;
+      setTimeout(() => {
+        clearStatus.textContent = '';
+      }, 2500);
+      void refreshState();
+    });
+  });
 }
 
-if (typeof document !== 'undefined' && document.getElementById('refresh')) {
-  void initPopup();
-}
+document.addEventListener('DOMContentLoaded', initPopup);

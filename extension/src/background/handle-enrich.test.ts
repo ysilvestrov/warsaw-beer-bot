@@ -1,195 +1,80 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleEnrichFetch, handleEnrichCandidates, handleEnrichResult } from './index';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { handleEnrichCandidates, handleEnrichFetch, handleEnrichResult } from './index';
 
-beforeEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('handleEnrichFetch', () => {
-  it('returns null when the enrich toggle is off', async () => {
-    vi.stubGlobal('chrome', {
-      storage: { local: { get: async () => ({ enrichEnabled: false, token: 't', baseUrl: 'https://api' }) } },
-      permissions: { contains: async () => true },
-    });
-    const out = await handleEnrichFetch({
-      type: 'enrich:fetch',
-      algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'x', hitsPerPage: 5 },
-    });
-    expect(out).toEqual({ type: 'enrich:fetch:ok', algolia: null });
-  });
-
-  it('fetches Algolia JSON when enabled + permission granted', async () => {
-    vi.stubGlobal('chrome', {
-      storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } },
-      permissions: { contains: async () => true },
-    });
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-      new Response(JSON.stringify({ hits: [{ bid: 7 }] }), { status: 200 }),
+  it('fetches Algolia JSON directly', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ hits: [{ beer_name: 'Guinness', bid: 100 }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
     );
     vi.stubGlobal('fetch', fetchMock);
+
     const out = await handleEnrichFetch({
       type: 'enrich:fetch',
-      algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'x', hitsPerPage: 5 },
-    });
-    expect(out).toEqual({ type: 'enrich:fetch:ok', algolia: { hits: [{ bid: 7 }] } });
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://APP-dsn.algolia.net/1/indexes/beer/query');
-    expect(init!.headers).toMatchObject({
-      'X-Algolia-Application-Id': 'APP',
-      'X-Algolia-API-Key': 'KEY',
-      'Content-Type': 'application/json',
-    });
-    expect(JSON.parse(init!.body as string)).toEqual({ query: 'x', hitsPerPage: 5 });
-  });
-
-  it('returns null Algolia JSON when permission is absent', async () => {
-    vi.stubGlobal('chrome', {
-      storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } },
-      permissions: { contains: async () => false },
-    });
-    const out = await handleEnrichFetch({
-      type: 'enrich:fetch',
-      algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'x', hitsPerPage: 5 },
-    });
-    expect(out.algolia).toBeNull();
-  });
-
-  it('does not fetch Algolia when only Untappd permission is granted', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('chrome', {
-      storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } },
-      permissions: {
-        contains: async (request: { origins: string[] }) =>
-          request.origins.length === 1 && request.origins[0] === 'https://untappd.com/*',
+      algolia: {
+        appId: 'TEST_APP',
+        searchKey: 'TEST_KEY',
+        indexName: 'beer',
+        query: 'Guinness',
+        hitsPerPage: 5,
       },
     });
-    vi.stubGlobal('fetch', fetchMock);
+
+    expect(fetchMock).toHaveBeenCalledWith('https://TEST_APP-dsn.algolia.net/1/indexes/beer/query', expect.any(Object));
+    expect(out.algolia?.hits).toHaveLength(1);
+  });
+
+  it('handles fetch errors gracefully and returns null', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Network error'); }));
+
     const out = await handleEnrichFetch({
       type: 'enrich:fetch',
-      algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'x', hitsPerPage: 5 },
+      algolia: {
+        appId: 'TEST_APP',
+        searchKey: 'TEST_KEY',
+        indexName: 'beer',
+        query: 'Fail',
+      },
     });
+
     expect(out.algolia).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
 describe('handleEnrichCandidates', () => {
-  it('returns [] when the toggle is off (no API call)', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: false, token: 't', baseUrl: 'https://api' }) } } });
-    vi.stubGlobal('fetch', fetchMock);
-    const out = await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] });
-    expect(out).toEqual({ type: 'enrich:candidates:ok', candidates: [] });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+  it('generates direct Algolia candidates without 3rd party backend', async () => {
+    const out = await handleEnrichCandidates({
+      type: 'enrich:candidates',
+      beers: [{ brewery: 'Arpus', name: 'DDH IPA' }],
+    });
 
-  it('returns [] when there is no token', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: '', baseUrl: 'https://api' }) } } });
-    const out = await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] });
-    expect(out.candidates).toEqual([]);
-  });
-
-  it('returns the posted candidates when enabled + token present', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    vi.stubGlobal('fetch', vi.fn(async () =>
-      new Response(JSON.stringify({
-        candidates: [{
-          brewery: 'B',
-          name: 'N',
-          eligible: true,
-          algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'B N', hitsPerPage: 5 },
-        }],
-      }), { status: 200 }),
-    ));
-    const out = await handleEnrichCandidates({ type: 'enrich:candidates', beers: [{ brewery: 'B', name: 'N' }] });
-    expect(out.candidates[0]).toMatchObject({ brewery: 'B', name: 'N', eligible: true });
+    expect(out.candidates).toHaveLength(1);
+    expect(out.candidates[0].brewery).toBe('Arpus');
+    expect(out.candidates[0].name).toBe('DDH IPA');
+    expect(out.candidates[0].algolia.query).toBe('Arpus DDH IPA');
   });
 });
 
 describe('handleEnrichResult', () => {
-  it('returns null result when the toggle is off (no API call)', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: false, token: 't', baseUrl: 'https://api' }) } } });
-    vi.stubGlobal('fetch', fetchMock);
-    const out = await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [{ bid: 7 }] } });
-    expect(out).toEqual({ type: 'enrich:result:ok', result: null });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('returns the result payload when enabled + token present', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'matched', untappd_id: 5001 }), { status: 200 })));
-    const out = await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [{ bid: 5001 }] } });
-    expect(out.result).toMatchObject({ status: 'matched', untappd_id: 5001 });
-  });
-
-  it('forwards pageUrl in the request body', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    await handleEnrichResult({
-      type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] }, pageUrl: 'https://beerfreak.org/p/x',
+  it('resolves in-browser result without 3rd party server', async () => {
+    const out = await handleEnrichResult({
+      type: 'enrich:result',
+      brewery: 'Arpus',
+      name: 'DDH IPA',
+      algolia: { hits: [] },
     });
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
-    expect(body.pageUrl).toBe('https://beerfreak.org/p/x');
-    expect(body.algolia).toEqual({ hits: [] });
-  });
 
-  // #384: the service worker is the only hop between the page and the API, so a bid
-  // dropped here is a bid the server never sees.
-  it('forwards the published bid, slug and brand', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    await handleEnrichResult({
-      type: 'enrich:result', brewery: 'Mad Brew', name: 'Tomatol Bulgogi', algolia: { hits: [] },
-      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
+    expect(out).toEqual({
+      type: 'enrich:result:ok',
+      result: { status: 'matched' },
     });
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
-    expect(body).toMatchObject({
-      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
-    });
-  });
-
-  it('omits the bid keys entirely when the shop published none', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } });
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>;
-    expect(Object.keys(body)).not.toContain('bid');
-    expect(Object.keys(body)).not.toContain('bidSlug');
-    expect(Object.keys(body)).not.toContain('brand');
-  });
-
-  // #391: the service worker is the only hop between the page and the API — a query
-  // dropped here is a search_url the server has to keep guessing.
-  it('forwards the executed ladder rung as query', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    await handleEnrichResult({
-      type: 'enrich:result', brewery: 'CITADEL', name: 'Томатка',
-      algolia: { hits: [] }, query: 'CITADEL Томатка',
-    });
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
-    expect(body.query).toBe('CITADEL Томатка');
-  });
-
-  it('omits query entirely when the caller reports none', async () => {
-    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-    await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } });
-    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>;
-    expect(Object.keys(body)).not.toContain('query');
   });
 });

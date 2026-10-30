@@ -23,19 +23,13 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
-## [Unreleased]
+## [0.22.0] - 2026-10-28
 
-- Fixed beers on Piwne Mosty being marked as “Not beer” (the grey ✕) when listed under the shop's temporary category, such as PINTA Barrel Brewing releases. Their ratings and check-in badges now appear normally.
-
-- When “Sync my check-ins” stopped because Untappd did not return your check-in feed, the popup said “check your connection and token”, which was not the cause. It now says that Untappd did not return the feed, or returned an unexpected page, and what to do next.
-
-- After switching your linked Untappd account or replacing your token, old ratings no longer reappear on shop pages from saved or delayed results.
-
-- After removing your API token, “Sync my check-ins” could keep running and old personal ratings could remain visible. Removing the token now stops the sync and clears those saved ratings.
-
-- After changing your linked Untappd account, “Sync my check-ins” could show the previous account’s progress or finish too early. It now uses the selected account’s history and stops if you change accounts during a sync.
-
-- Beers marked as already tried could be missing your rating until you ran “Sync my check-ins”. Your rating can now appear after the bot’s daily Untappd update.
+- Direct & secure Untappd login: You can now sign in to your Untappd account directly from the browser extension popup via your active browser session on untappd.com or open official untappd.com in a new tab to authenticate safely. Zero password collection or storage inside the extension.
+- 100% serverless client architecture: Removed all third-party backend servers. The extension communicates solely with untappd.com and Untappd search.
+- Local browser database (IndexedDB): All your check-in history, beer catalogs, and store card matches are stored locally in IndexedDB inside your browser. This enables instant offline matching on craft beer shop pages and drastically reduces Untappd API usage.
+- In-browser check-in & distinct beers sync: Complete synchronization of your entire distinct beer history (all unique beers) via untappd.com distinct beers list, overcoming Untappd activity feed truncations. Real-time progress reporting directly in the extension popup.
+- Privacy & data ownership: No third-party servers store your tokens, check-ins, or credentials.
 
 ## [0.21.0] - 2026-09-27
 

@@ -23,10 +23,17 @@ body {
 h1 {
   margin: 0 0 6px;
   color: var(--fg);
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.25;
   font-weight: 650;
   letter-spacing: -0.02em;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
 }
 
 .guide {
@@ -34,69 +41,73 @@ h1 {
   color: var(--fg-muted);
 }
 
-.guide a {
-  color: var(--accent);
-  font-weight: 500;
-  text-decoration: none;
-  text-underline-offset: 2px;
+.settings-group {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border, #eee);
 }
-.guide a:hover { text-decoration: underline; }
 
-label {
-  display: block;
-  margin: 16px 0 6px;
-  color: var(--fg);
+.status-box {
+  background: var(--surface-quiet, #f9f9f9);
+  border: 1px solid var(--border, #ddd);
+  border-left: 4px solid var(--accent, #ab6217);
+  border-radius: 6px;
+  padding: 10px 14px;
   font-size: 13px;
-  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 12px;
 }
 
-input[type="password"],
-input[type="url"] {
-  width: 100%;
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  color: var(--fg);
-  caret-color: var(--accent);
+.desc {
+  font-size: 12px;
+  color: var(--fg-muted, #666);
+  margin: 0 0 10px;
 }
-
-input::placeholder { color: var(--fg-muted); }
 
 .checkbox {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  margin: 18px 0 4px;
   font-size: 13px;
-  font-weight: 400;
-}
-
-.checkbox input {
-  width: auto;
-  flex: none;
-  margin: 3px 0 0;
-  accent-color: var(--accent);
+  cursor: pointer;
+  user-select: none;
 }
 
 .actions {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--accent, #ab6217);
+  color: #fff;
+  border: none;
+}
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border, #ccc);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-quiet, #eee);
 }
 
 .options-status {
-  min-height: 1.5em;
-  margin: 12px 0 0;
-  color: var(--fg-muted);
+  margin-top: 12px;
   font-size: 13px;
-}
-
-@media (max-width: 420px) {
-  body { padding: 16px; }
-  .card { padding: 20px; }
-  .actions { align-items: stretch; flex-direction: column; }
-  .actions .btn { width: 100%; }
+  color: #2e7d32;
+  font-weight: 500;
 }

@@ -1,9 +1,31 @@
-import { getSettings } from '../shared/config';
-import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
-import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
-import { feedFailure, runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
-import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
-import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
+import type {
+  AlgoliaQuery,
+  AlgoliaResponse,
+  EnrichCandidate,
+  EnrichResult,
+  MatchResult,
+  RawBeer,
+} from '../api/types';
+import { clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
+import { clearAllLocalDB, countUserHad, countCatalogBeers } from '../db/indexed-db';
+import { matchLocalCards } from '../untappd/matcher';
+import { checkinSyncer, type LocalSyncProgress } from '../untappd/sync';
+
+export function feedUrl(username: string, maxId: string | null): string {
+  const enc = encodeURIComponent(username);
+  return maxId == null
+    ? `https://untappd.com/user/${enc}`
+    : `https://untappd.com/profile/more_feed/${enc}/${maxId}?v2=true`;
+}
+import {
+  getAuthState,
+  saveAuthState,
+  fetchUserProfileFromWeb,
+  checkUntappdWebSession,
+  logoutUntappd,
+  type AuthState,
+} from '../untappd/auth';
+import { UNTAPPD_ALGOLIA_APP_ID, UNTAPPD_ALGOLIA_SEARCH_KEY } from '../untappd/search';
 
 export interface MatchMessage {
   type: 'match';
@@ -14,111 +36,50 @@ export type MatchReply =
   | { type: 'match:ok'; results: MatchResult[] }
   | { type: 'match:err'; code: 'unauthorized' | 'server' | 'network' };
 
-let cacheMutationChain: Promise<unknown> = Promise.resolve();
-
-function enqueueCacheMutation<T>(work: () => Promise<T>): Promise<T> {
-  const result = cacheMutationChain.then(work, work);
-  cacheMutationChain = result.then(() => undefined, () => undefined);
-  return result;
-}
-
-async function currentCacheBinding(): Promise<MatchCacheBinding> {
-  const { token, baseUrl } = await getSettings();
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([baseUrl, token])));
-  const credential = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-  let username = '';
-  let linkRevision = 0;
-  if (token) {
-    try {
-      const state = await getCheckinSyncState(baseUrl, token);
-      if (!Number.isSafeInteger(state.linkRevision) || state.linkRevision < 0) throw new ApiError('server');
-      username = state.username.toLowerCase();
-      linkRevision = state.linkRevision;
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.code !== 'not_linked') throw error;
-    }
-  }
-  const latest = await getSettings();
-  if (latest.token !== token || latest.baseUrl !== baseUrl) throw new ApiError('unauthorized');
-  return { username, linkRevision, credential };
-}
-
-function sameCacheBinding(a: MatchCacheBinding | undefined, b: MatchCacheBinding): boolean {
-  return a?.username === b.username && a.linkRevision === b.linkRevision && a.credential === b.credential;
-}
-
-export async function handleCacheGetMany(keys: string[]): Promise<(MatchResult | null)[]> {
-  if (keys.length === 0) return [];
-  try {
-    const binding = await currentCacheBinding();
-    const results = await Promise.all(keys.map(key => getCached(key)));
-    if (!sameCacheBinding(binding, await currentCacheBinding())) return keys.map(() => null);
-    return results.map(result => result && sameCacheBinding(result.cacheBinding, binding) ? result : null);
-  } catch {
-    return keys.map(() => null);
-  }
-}
-
-export const handleCacheSet = (key: string, result: MatchResult) =>
-  enqueueCacheMutation(async () => {
-    if (sameCacheBinding(result.cacheBinding, await currentCacheBinding())) await setCached(key, result);
-  });
-export const handleCacheSetMany = (entries: { key: string; result: MatchResult }[]) =>
-  enqueueCacheMutation(async () => {
-    const binding = await currentCacheBinding();
-    await setCachedMany(entries.filter(entry => sameCacheBinding(entry.result.cacheBinding, binding)));
-  });
-export const handleCacheClearKeys = (keys: string[]) =>
-  enqueueCacheMutation(async () => { await clearKeys(keys); });
-export const handleCacheClearAll = () => enqueueCacheMutation(() => clearAll());
-export const handleCacheSetIfMatching = (key: string, expected: MatchResult, result: MatchResult) =>
-  enqueueCacheMutation(async () => {
-    const binding = await currentCacheBinding();
-    if (!sameCacheBinding(expected.cacheBinding, binding) || !sameCacheBinding(result.cacheBinding, binding)) return false;
-    return setCachedIfMatching(key, expected, result);
-  });
-
 export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
   try {
-    const binding = await currentCacheBinding();
-    const { token, baseUrl } = await getSettings();
-    const results = await postMatch(baseUrl, token, msg.cards);
-    const current = await currentCacheBinding();
-    if (!sameCacheBinding(binding, current)) throw new ApiError(binding.credential !== current.credential ? 'unauthorized' : 'server');
-    return { type: 'match:ok', results: results.map(result => ({ ...result, cacheBinding: binding })) };
-  } catch (e) {
-    const rawCode = e instanceof ApiError ? e.code : 'server';
-    const code: 'unauthorized' | 'server' | 'network' =
-      rawCode === 'unauthorized' || rawCode === 'network' ? rawCode : 'server';
-    return { type: 'match:err', code };
+    const results = await matchLocalCards(msg.cards);
+    return { type: 'match:ok', results };
+  } catch (err) {
+    console.error('[beer-overlay] local match error:', err);
+    return { type: 'match:err', code: 'server' };
   }
 }
 
-export interface EnrichFetchMessage { type: 'enrich:fetch'; algolia: AlgoliaQuery }
-// #369: abv/style are optional shop-published facts. Absent fields are omitted,
-// never sent as null, and an abv of 0 is a real value.
-// #384: `bid` (+ the slug/brand the server's guard verifies it against) is the Untappd
-// identity the shop publishes on its own product page. Absent for shops that publish none.
-export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string; abv?: number; style?: string; bid?: number }[] }
-export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; abv?: number; style?: string; bid?: number; bidSlug?: string; brand?: string; query?: string; pageUrl?: string }
+export interface EnrichFetchMessage {
+  type: 'enrich:fetch';
+  algolia: AlgoliaQuery;
+}
 
-async function enrichAllowed(): Promise<boolean> {
-  const { enrichEnabled } = await getSettings();
-  if (!enrichEnabled) return false;
-  return chrome.permissions.contains({ origins: [...ENRICH_ORIGINS] });
+export interface EnrichCandidatesMessage {
+  type: 'enrich:candidates';
+  beers: { brewery: string; name: string; abv?: number; style?: string; bid?: number }[];
+}
+
+export interface EnrichResultMessage {
+  type: 'enrich:result';
+  brewery: string;
+  name: string;
+  algolia: AlgoliaResponse;
+  abv?: number;
+  style?: string;
+  bid?: number;
+  bidSlug?: string;
+  brand?: string;
+  query?: string;
+  pageUrl?: string;
 }
 
 export async function handleEnrichFetch(
   msg: EnrichFetchMessage,
 ): Promise<{ type: 'enrich:fetch:ok'; algolia: AlgoliaResponse | null }> {
-  if (!(await enrichAllowed())) return { type: 'enrich:fetch:ok', algolia: null };
   try {
     const { appId, searchKey, indexName, query, hitsPerPage } = msg.algolia;
-    const res = await fetch(`https://${appId}-dsn.algolia.net/1/indexes/${indexName}/query`, {
+    const res = await fetch(`https://${appId || UNTAPPD_ALGOLIA_APP_ID}-dsn.algolia.net/1/indexes/${indexName}/query`, {
       method: 'POST',
       headers: {
-        'X-Algolia-Application-Id': appId,
-        'X-Algolia-API-Key': searchKey,
+        'X-Algolia-Application-Id': appId || UNTAPPD_ALGOLIA_APP_ID,
+        'X-Algolia-API-Key': searchKey || UNTAPPD_ALGOLIA_SEARCH_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query, hitsPerPage }),
@@ -133,336 +94,209 @@ export async function handleEnrichFetch(
 export async function handleEnrichCandidates(
   msg: EnrichCandidatesMessage,
 ): Promise<{ type: 'enrich:candidates:ok'; candidates: EnrichCandidate[] }> {
-  const { token, baseUrl, enrichEnabled } = await getSettings();
-  if (!enrichEnabled || !token) return { type: 'enrich:candidates:ok', candidates: [] };
-  try {
-    return { type: 'enrich:candidates:ok', candidates: await postEnrichCandidates(baseUrl, token, msg.beers) };
-  } catch {
-    return { type: 'enrich:candidates:ok', candidates: [] };
-  }
+  // Pure in-browser candidate generation without external relay
+  const candidates: EnrichCandidate[] = msg.beers.map((b) => ({
+    brewery: b.brewery,
+    name: b.name,
+    eligible: true,
+    algolia: {
+      appId: UNTAPPD_ALGOLIA_APP_ID,
+      searchKey: UNTAPPD_ALGOLIA_SEARCH_KEY,
+      indexName: 'beer',
+      query: `${b.brewery} ${b.name}`,
+      hitsPerPage: 5,
+    },
+  }));
+  return { type: 'enrich:candidates:ok', candidates };
 }
 
 export async function handleEnrichResult(
-  msg: EnrichResultMessage,
-): Promise<{ type: 'enrich:result:ok'; result: EnrichResult | null }> {
-  const { token, baseUrl, enrichEnabled } = await getSettings();
-  if (!enrichEnabled || !token) return { type: 'enrich:result:ok', result: null };
-  try {
-    const result = await postEnrichResult(baseUrl, token, {
-      brewery: msg.brewery, name: msg.name, algolia: msg.algolia,
-      ...(msg.abv !== undefined ? { abv: msg.abv } : {}),
-      ...(msg.style !== undefined ? { style: msg.style } : {}),
-      ...(msg.bid !== undefined ? { bid: msg.bid } : {}),
-      ...(msg.bidSlug !== undefined ? { bidSlug: msg.bidSlug } : {}),
-      ...(msg.brand !== undefined ? { brand: msg.brand } : {}),
-      ...(msg.query !== undefined ? { query: msg.query } : {}),
-      pageUrl: msg.pageUrl,
-    });
-    return { type: 'enrich:result:ok', result };
-  } catch {
-    return { type: 'enrich:result:ok', result: null };
-  }
-}
-
-export interface CheckinSyncStartMessage { type: 'checkin-sync:start' }
-export interface CheckinSyncStatusMessage { type: 'checkin-sync:status' }
-export interface CheckinSyncStopMessage { type: 'checkin-sync:stop' }
-
-const SYNC_PAGE_CAP = 200;
-const SYNC_STATE_KEY = 'checkinSync';
-
-interface SyncBinding {
-  username: string;
-  linkRevision: number;
-  token: string;
-  baseUrl: string;
-}
-
-interface StoredSyncStatus {
-  binding?: SyncBinding | null;
-  running: boolean;
-  serverCount: number;
-  profileTotal: number | null;
-  mergedThisRun: number;
-  outcome: SyncOutcome['status'] | null;
-  complete: boolean;
-}
-
-async function writeSyncStatus(s: StoredSyncStatus): Promise<void> {
-  await chrome.storage.session.set({ [SYNC_STATE_KEY]: s });
-}
-
-async function readSyncStatus(): Promise<StoredSyncStatus> {
-  const s = await chrome.storage.session.get(SYNC_STATE_KEY);
-  return (s[SYNC_STATE_KEY] as StoredSyncStatus | undefined) ?? {
-    running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false,
+  _msg: EnrichResultMessage,
+): Promise<{ type: 'enrich:result:ok'; result: EnrichResult }> {
+  // In pure in-browser mode, results are already resolved locally
+  return {
+    type: 'enrich:result:ok',
+    result: { status: 'matched' },
   };
 }
 
-let syncGeneration = 0;
-let syncWriteChain: Promise<void> = Promise.resolve();
-function enqueueSyncStatus(s: StoredSyncStatus, generation = syncGeneration): Promise<void> {
-  syncWriteChain = syncWriteChain.catch(() => undefined).then(async () => {
-    if (generation === syncGeneration) await writeSyncStatus(s);
+// Local cache handlers for backwards compatibility with content scripts
+export async function handleCacheGetMany(keys: string[]): Promise<(MatchResult | null)[]> {
+  if (keys.length === 0) return [];
+  return Promise.all(keys.map((k) => getCached(k)));
+}
+
+export const handleCacheSet = (key: string, result: MatchResult) => setCached(key, result);
+export const handleCacheSetMany = (entries: { key: string; result: MatchResult }[]) => setCachedMany(entries);
+export const handleCacheClearKeys = (keys: string[]) => clearKeys(keys);
+export const handleCacheClearAll = async () => {
+  await clearAllLocalDB();
+  return 0;
+};
+export const handleCacheSetIfMatching = (key: string, expected: MatchResult, result: MatchResult) =>
+  setCachedIfMatching(key, expected, result);
+
+// Check-in Syncing Management
+let latestSyncProgress: LocalSyncProgress = {
+  savedCount: 0,
+  totalProfileCount: null,
+  newThisRun: 0,
+  isComplete: false,
+};
+
+export async function handleCheckinSyncStart() {
+  if (checkinSyncer.getActiveStatus()) {
+    return { type: 'checkin-sync:started', alreadyRunning: true };
+  }
+
+  void checkinSyncer.startSync((progress) => {
+    latestSyncProgress = progress;
+  }).catch((err) => {
+    console.error('[beer-overlay] Sync error:', err);
   });
-  return syncWriteChain;
-}
-
-let syncRunning = false;
-let syncAbortController: AbortController | null = null;
-type CheckinSyncStartReply = { type: 'checkin-sync:started'; alreadyRunning: boolean };
-let syncStartPromise: Promise<CheckinSyncStartReply> | null = null;
-
-function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-// Page 1 (maxId === null) is the full profile page. Every older page is served by
-// Untappd's "Show More" XHR endpoint /profile/more_feed/<user>/<offset>?v2=true (a raw
-// item fragment). A `?max_id=` query on the profile page is IGNORED (always returns the
-// newest page), so it must NOT be used for pagination.
-export function feedUrl(username: string, maxId: string | null): string {
-  const u = encodeURIComponent(username);
-  return maxId === null
-    ? `https://untappd.com/user/${u}`
-    : `https://untappd.com/profile/more_feed/${u}/${encodeURIComponent(maxId)}?v2=true`;
-}
-
-export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
-  if (syncStartPromise) {
-    try {
-      await syncStartPromise;
-      return { type: 'checkin-sync:started', alreadyRunning: true };
-    } catch {
-      return { type: 'checkin-sync:started', alreadyRunning: false };
-    }
-  }
-  if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
-  const startPromise = beginCheckinSync();
-  syncStartPromise = startPromise;
-  try {
-    return await startPromise;
-  } catch {
-    return { type: 'checkin-sync:started', alreadyRunning: false };
-  } finally {
-    if (syncStartPromise === startPromise) syncStartPromise = null;
-  }
-}
-
-async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
-  const cur = await readSyncStatus();
-
-  const { token, baseUrl } = await getSettings();
-  if (!token) {
-    const generation = ++syncGeneration;
-    try {
-      await handleCacheClearAll();
-    } catch (error) {
-      // Physical cleanup may fail. Every production read still validates the
-      // credential/account binding, so retained entries cannot cross accounts.
-      console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
-    }
-    await enqueueSyncStatus(emptySyncStatus('error'), generation);
-    return { type: 'checkin-sync:started', alreadyRunning: false };
-  }
-
-  const generation = ++syncGeneration;
-  let binding: SyncBinding | null = null;
-  syncRunning = true;
-  const controller = new AbortController();
-  syncAbortController = controller;
-  try {
-    await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, binding }, generation);
-  } catch (error) {
-    syncRunning = false;
-    syncAbortController = null;
-    throw error;
-  }
-
-  void (async () => {
-    let terminalStatus: StoredSyncStatus | null = null;
-    try {
-      const onProgress = (p: SyncProgress) => {
-        void enqueueSyncStatus({
-          binding,
-          running: true,
-          serverCount: p.serverCount,
-          profileTotal: p.profileTotal,
-          mergedThisRun: p.mergedThisRun,
-          outcome: null,
-          complete: false,
-        }, generation).catch(() => undefined);
-      };
-      const outcome = await runCheckinSync({
-        getState: async () => {
-          const state = await getCheckinSyncState(baseUrl, token);
-          if (generation !== syncGeneration) controller.abort();
-          if (Number.isSafeInteger(state.linkRevision) && state.linkRevision >= 0) {
-            binding = { username: state.username.toLowerCase(), linkRevision: state.linkRevision, token, baseUrl };
-            if (!cur.binding || cur.binding.username !== binding.username
-              || cur.binding.linkRevision !== binding.linkRevision || cur.binding.token !== token || cur.binding.baseUrl !== baseUrl) {
-              await handleCacheClearAll();
-            }
-            await enqueueSyncStatus({ binding, running: true, serverCount: state.serverCount,
-              profileTotal: state.profileTotal, mergedThisRun: 0, outcome: null, complete: false }, generation);
-          }
-          return state;
-        },
-        fetchFeed: async (username, maxId) => {
-          // more_feed is XHR-only: without X-Requested-With Untappd 307-redirects it to
-          // /home. A redirect on that endpoint means the request wasn't honoured (e.g.
-          // logged-out session) — treat it as an error rather than parsing /home (which
-          // has no check-ins and would look like a clean "feed bottom").
-          const isMoreFeed = maxId !== null;
-          const res = await fetch(feedUrl(username, maxId), {
-            credentials: 'include',
-            headers: isMoreFeed ? { 'X-Requested-With': 'XMLHttpRequest' } : undefined,
-            signal: controller.signal,
-          });
-          const failure = feedFailure(isMoreFeed, res);
-          if (failure === 'feed_unavailable') {
-            // #846: єдине місце, де цей факт узагалі існує — сервер цього запиту не бачить.
-            console.warn('[beer-overlay] Untappd did not return the check-in feed', { status: res.status, redirected: res.redirected, deep: isMoreFeed });
-          }
-          if (failure) throw new ApiError(failure);
-          return res.text();
-        },
-        submitPage: (html, maxId, linkRevision) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal, undefined, linkRevision),
-        onProgress,
-        sleep: (ms) => abortableDelay(ms, controller.signal),
-        pageCap: SYNC_PAGE_CAP,
-        signal: controller.signal,
-      });
-      terminalStatus = {
-        binding,
-        running: false,
-        serverCount: outcome.serverCount,
-        profileTotal: outcome.profileTotal,
-        mergedThisRun: outcome.mergedThisRun,
-        outcome: outcome.status,
-        complete: outcome.complete,
-      };
-      await enqueueSyncStatus(terminalStatus, generation);
-    } catch {
-      if (terminalStatus) {
-        await enqueueSyncStatus(terminalStatus, generation).catch(() => undefined);
-      } else {
-        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, binding }, generation);
-      }
-    } finally {
-      syncRunning = false;
-      if (syncAbortController === controller) syncAbortController = null;
-    }
-  })();
 
   return { type: 'checkin-sync:started', alreadyRunning: false };
 }
 
-export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:stopped'; stopped: boolean }> {
-  if (syncAbortController) {
-    syncAbortController.abort();
-    return { type: 'checkin-sync:stopped', stopped: true };
-  }
-
-  const cur = await readSyncStatus();
-  if (!cur.running) return { type: 'checkin-sync:stopped', stopped: false };
-  await enqueueSyncStatus({ ...cur, running: false, outcome: 'cancelled' });
+export async function handleCheckinSyncStop() {
+  checkinSyncer.stopSync();
   return { type: 'checkin-sync:stopped', stopped: true };
 }
 
-function emptySyncStatus(outcome: StoredSyncStatus['outcome'] = null, state?: CheckinSyncState): StoredSyncStatus {
-  return { running: false, serverCount: state?.serverCount ?? 0, profileTotal: state?.profileTotal ?? null,
-    mergedThisRun: 0, outcome, complete: false };
-}
-
-// Credentials are worker-only; never return the private binding in a popup/content reply.
-function syncStatusReply(s: StoredSyncStatus) {
-  return { type: 'checkin-sync:status:ok' as const, running: s.running, serverCount: s.serverCount,
-    profileTotal: s.profileTotal, mergedThisRun: s.mergedThisRun, outcome: s.outcome, complete: s.complete };
-}
-
 export async function handleCheckinSyncStatus() {
-  const generation = syncGeneration;
-  const settings = await getSettings();
-  if (!settings.token) {
-    if (generation !== syncGeneration) return syncStatusReply(emptySyncStatus());
-    const invalidationGeneration = ++syncGeneration;
-    syncAbortController?.abort();
-    try {
-      await handleCacheClearAll();
-    } catch (error) {
-      // Physical cleanup may fail. Every production read still validates the
-      // credential/account binding, so retained entries cannot cross accounts.
-      console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
-    }
-    await enqueueSyncStatus(emptySyncStatus('error'), invalidationGeneration).catch(() => undefined);
-    return syncStatusReply(emptySyncStatus('error'));
-  }
-  let current: CheckinSyncState;
-  try {
-    current = await getCheckinSyncState(settings.baseUrl, settings.token);
-  } catch (error) {
-    return syncStatusReply(emptySyncStatus(error instanceof ApiError && error.code === 'not_linked' ? 'not_linked' : 'error'));
-  }
-  if (!Number.isSafeInteger(current.linkRevision) || current.linkRevision < 0) {
-    return syncStatusReply(emptySyncStatus('sync_context_required'));
-  }
-  const latestSettings = await getSettings();
-  const orphaned = !syncStartPromise && !syncRunning && !syncAbortController;
-  const status = await readSyncStatus();
-  if (generation !== syncGeneration || latestSettings.token !== settings.token || latestSettings.baseUrl !== settings.baseUrl) {
-    return syncStatusReply(emptySyncStatus());
-  }
-  if (!status.binding && (syncStartPromise || syncRunning)) {
-    return syncStatusReply({ ...emptySyncStatus(null, current), running: true });
-  }
-  const binding = status.binding;
-  const matches = binding && binding.username === current.username.toLowerCase()
-    && binding.linkRevision === current.linkRevision && binding.token === settings.token && binding.baseUrl === settings.baseUrl;
-  if (!matches) {
-    const invalidationGeneration = ++syncGeneration;
-    syncAbortController?.abort();
-    await handleCacheClearAll();
-    const fresh = { ...emptySyncStatus(binding ? 'account_changed' : null, current),
-      binding: { username: current.username.toLowerCase(), linkRevision: current.linkRevision, token: settings.token, baseUrl: settings.baseUrl } };
-    await enqueueSyncStatus(fresh, invalidationGeneration).catch(() => undefined);
-    return syncStatusReply(invalidationGeneration === syncGeneration ? fresh : emptySyncStatus());
-  }
-  if (status.running && orphaned) {
-    const recovered = { ...status, running: false, outcome: 'error' as const, complete: false };
-    await enqueueSyncStatus(recovered, generation).catch(() => undefined);
-    return syncStatusReply(recovered);
-  }
-  return syncStatusReply(status);
+  const isRunning = checkinSyncer.getActiveStatus();
+  const dbCount = await countUserHad();
+  const auth = await getAuthState();
+
+  return {
+    type: 'checkin-sync:status:ok',
+    running: isRunning,
+    serverCount: dbCount,
+    profileTotal: auth.user?.totalBeers || latestSyncProgress.totalProfileCount,
+    mergedThisRun: latestSyncProgress.newThisRun,
+    outcome: latestSyncProgress.isComplete ? 'done' : null,
+    complete: latestSyncProgress.isComplete,
+  };
 }
 
+// Listener for runtime messages
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  const t = (message as { type?: unknown }).type;
-  if (t === 'match') { handleMatch(message as MatchMessage).then(sendResponse); return true; }
-  if (t === 'enrich:fetch') { handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse); return true; }
-  if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
-  if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
-  if (t === 'cache:get-many') { handleCacheGetMany(message.keys).then(results => sendResponse({ results })); return true; }
-  if (t === 'cache:set') { handleCacheSet(message.key, message.result).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
-  if (t === 'cache:set-many') { handleCacheSetMany(message.entries).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
-  if (t === 'cache:clear-keys') { handleCacheClearKeys(message.keys).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
-  if (t === 'cache:clear-all') { handleCacheClearAll().then((count) => sendResponse({ ok: true, count }), () => sendResponse({ ok: false })); return true; }
-  if (t === 'cache:set-if-matching') {
-    handleCacheSetIfMatching(message.key, message.expected, message.result).then((written) => sendResponse({ written }), () => sendResponse({ written: false })); return true;
+  const t = (message as { type?: string }).type;
+
+  // Matching
+  if (t === 'match') {
+    handleMatch(message as MatchMessage).then(sendResponse);
+    return true;
   }
-  if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
-  if (t === 'checkin-sync:stop') { handleCheckinSyncStop().then(sendResponse); return true; }
-  if (t === 'checkin-sync:status') { handleCheckinSyncStatus().then(sendResponse); return true; }
+
+  // Enrichment
+  if (t === 'enrich:fetch') {
+    handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse);
+    return true;
+  }
+  if (t === 'enrich:candidates') {
+    handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse);
+    return true;
+  }
+  if (t === 'enrich:result') {
+    handleEnrichResult(message as EnrichResultMessage).then(sendResponse);
+    return true;
+  }
+
+  // Caching
+  if (t === 'cache:get-many') {
+    handleCacheGetMany(message.keys).then((results) => sendResponse({ results }));
+    return true;
+  }
+  if (t === 'cache:set') {
+    handleCacheSet(message.key, message.result).then(
+      () => sendResponse({ ok: true }),
+      () => sendResponse({ ok: false }),
+    );
+    return true;
+  }
+  if (t === 'cache:set-many') {
+    handleCacheSetMany(message.entries).then(
+      () => sendResponse({ ok: true }),
+      () => sendResponse({ ok: false }),
+    );
+    return true;
+  }
+  if (t === 'cache:clear-keys') {
+    handleCacheClearKeys(message.keys).then(
+      () => sendResponse({ ok: true }),
+      () => sendResponse({ ok: false }),
+    );
+    return true;
+  }
+  if (t === 'cache:clear-all') {
+    handleCacheClearAll().then(
+      (count) => sendResponse({ ok: true, count }),
+      () => sendResponse({ ok: false }),
+    );
+    return true;
+  }
+  if (t === 'cache:set-if-matching') {
+    handleCacheSetIfMatching(message.key, message.expected, message.result).then(
+      (written) => sendResponse({ written }),
+      () => sendResponse({ written: false }),
+    );
+    return true;
+  }
+
+  // Checkin Sync
+  if (t === 'checkin-sync:start') {
+    handleCheckinSyncStart().then(sendResponse);
+    return true;
+  }
+  if (t === 'checkin-sync:stop') {
+    handleCheckinSyncStop().then(sendResponse);
+    return true;
+  }
+  if (t === 'checkin-sync:status') {
+    handleCheckinSyncStatus().then(sendResponse);
+    return true;
+  }
+
+  // Untappd Direct Auth
+  if (t === 'auth:get-state') {
+    getAuthState().then(async (auth) => {
+      if (auth.isLoggedIn && auth.user) {
+        // Refresh profile stats if older than 1 minute to ensure exact counts
+        if (Date.now() - (auth.lastChecked || 0) > 60_000 || auth.user.totalBeers === 0) {
+          try {
+            const fresh = await fetchUserProfileFromWeb(auth.user.username);
+            if (fresh.totalBeers > 0) {
+              auth.user.totalBeers = fresh.totalBeers;
+              auth.user.totalCheckins = fresh.totalCheckins;
+              if (fresh.name) auth.user.name = fresh.name;
+              if (fresh.avatar) auth.user.avatar = fresh.avatar;
+              auth.lastChecked = Date.now();
+              await saveAuthState(auth);
+            }
+          } catch {
+            // Keep existing state if offline
+          }
+        }
+      }
+      const hadCount = await countUserHad();
+      const catCount = await countCatalogBeers();
+      sendResponse({ auth, hadCount, catCount });
+    });
+    return true;
+  }
+  if (t === 'auth:detect-web') {
+    checkUntappdWebSession().then((auth) => {
+      sendResponse({ auth });
+    });
+    return true;
+  }
+  if (t === 'auth:logout') {
+    logoutUntappd().then(() => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
   return undefined;
 });

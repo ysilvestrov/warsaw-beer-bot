@@ -18,8 +18,10 @@ interface BrowserLanguageSource {
   languages?: readonly string[];
 }
 
-export function browserLanguages(source: BrowserLanguageSource): readonly string[] {
-  return source.languages?.length ? source.languages : [source.language];
+export function browserLanguages(source?: Partial<BrowserLanguageSource>): readonly string[] {
+  if (source?.languages?.length) return source.languages;
+  if (source?.language) return [source.language];
+  return ['en'];
 }
 
 interface ShopDefinition {

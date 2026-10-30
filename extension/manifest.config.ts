@@ -1,9 +1,6 @@
 import { defineManifest } from '@crxjs/vite-plugin';
-import pkg from './package.json';
+import pkg from './package.json' with { type: 'json' };
 
-// Public key only; the private key (~/warsaw-beer-extension-key.pem) is kept by the
-// maintainer. Pins a stable unpacked extension id so a tester's stored token survives a
-// folder change / remove+re-add. Dev build only — CWS rejects packages that carry `key`.
 const KEY =
   'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqyZ4PALvAS9pOB6ImBCHA9T+5+8R94pTlH0NlALbbwTBbx4lIkilGB82gxXN1u/i/f7FSRhmxN4w/1b4jcl8MxqsxUrJOFg9u2dm84lwIqLN0ocjcGliZsnUFpwXBkn/23EWnPFhHtSV7OLfegPP2edMvZLCJ7yeXNZpfpDhNCdsBbQraLawY21zE+x0OpnRZ7CT2TLXyi+JtiDusaYvSN4eOnGTOAZTCBvXdrikll1zOpqkWrZ2fjryQ8A+8NGEz3eXsokG9O6jy9oK21AS+fKTmjkNCsddsbCoZm8D0m4xLnDBxxkv4LOMWGFG1MPv4gz0aXspaximsyFExL38KQIDAQAB';
 
@@ -45,28 +42,23 @@ const SHOP_MATCHES = [
   'https://*.beershop.de/*',
 ];
 
-// Enrichment + check-in sync reach Untappd and its Algolia search from the user's session.
-// Requested at runtime (optional) via the options toggle / popup Sync button.
-const ENRICH_ORIGINS = ['https://untappd.com/*', 'https://*.algolia.net/*'];
+// Direct Untappd domains and Algolia search — zero 3rd-party servers
+const UNTAPPD_ORIGINS = [
+  'https://untappd.com/*',
+  'https://*.untappd.com/*',
+  'https://api.untappd.com/*',
+  'https://*.algolia.net/*',
+];
 
 export function buildManifest(opts: { store: boolean }) {
-  // Single shape (key?: string) rather than a conditional spread, so consumers/tests can
-  // read `.key` without a union type. `key: undefined` is dropped when crx serialises the
-  // manifest to JSON, so the store build emits no key at all.
   return {
     manifest_version: 3 as const,
     name: 'Warsaw Beer Overlay',
-    description: 'Shows which beers you have already drunk + your rating on craft beer stores.',
+    description: 'Shows which beers you have already drunk + your rating on craft beer stores. Direct Untappd integration with local browser database.',
     version: pkg.version,
     icons: ICONS,
-    // storage: match cache + token/settings. activeTab: the popup reads the active tab's
-    // URL (chrome.tabs.query) and messages its content script (chrome.tabs.sendMessage)
-    // for "Refresh this page" — both covered by activeTab, so `tabs` is not needed.
-    permissions: ['storage', 'activeTab'],
-    host_permissions: ['https://beer-api.ysilvestrov-ai.uk/*'],
-    // The store build drops the broad 'https://*/*' (custom-baseUrl debugging) the dev
-    // build keeps, to avoid an "access all sites" review flag.
-    optional_host_permissions: opts.store ? ENRICH_ORIGINS : [...ENRICH_ORIGINS, 'https://*/*'],
+    permissions: ['storage', 'activeTab', 'cookies'],
+    host_permissions: UNTAPPD_ORIGINS,
     action: { default_popup: 'src/popup/popup.html', default_icon: ICONS },
     options_page: 'src/options/options.html',
     background: { service_worker: 'src/background/index.ts', type: 'module' as const },
