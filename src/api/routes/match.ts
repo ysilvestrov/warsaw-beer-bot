@@ -34,7 +34,7 @@ const MatchBody = z.object({
     .max(200),
   // #923: who is asking, for per-install accounting. Optional both ways: an old client omits it,
   // an old server strips it as an unknown key.
-  client: z.object({ version: z.string().max(64).optional(), shop: z.string().max(64).optional() }).optional(),
+  client: z.object({ version: z.string().min(1).max(64).optional(), shop: z.string().max(64).optional() }).optional(),
 });
 
 // Registers POST /match on the given app. Auth is optional here: a missing
@@ -111,22 +111,29 @@ function recordCallerLedger(
   beers: { brewery: string; name: string; abv?: number | null }[],
   results: MatchListResult[],
 ): void {
-  try {
-    const now = new Date();
-    const date = warsawDateAndHour(now).date;
-    const shop = client?.shop ?? '';
+  // Each write is independent: a locked match_misses must not cost the install its request count.
+  const attempt = <T>(what: string, fallback: T, write: () => T): T => {
+    try {
+      return write();
+    } catch (e) {
+      deps.log.warn({ err: e, what }, 'install ledger record failed');
+      return fallback;
+    }
+  };
+  const now = new Date();
+  const date = warsawDateAndHour(now).date;
+  const shop = client?.shop ?? '';
+  const recorded = attempt('misses', 0, () => {
     const misses = beers.filter((b, i) =>
       results[i].matched_beer === null && results[i].searched
       && findActiveDispositionForCard(deps.db, b.brewery, b.name, b.abv ?? null) === null);
-    const recorded = recordMisses(deps.db, { at: now.toISOString(), date, shop, cards: misses });
-    if (principal.kind === 'install') {
-      recordInstallUsage(deps.db, {
-        date, installId: principal.installId, shop,
-        matchRequests: 1, matchBeers: beers.length, matchMisses: recorded,
-      });
-      if (client?.version !== undefined) touchInstall(deps.db, principal, { date, version: client.version });
-    }
-  } catch (e) {
-    deps.log.warn({ err: e }, 'install ledger record failed');
-  }
+    return recordMisses(deps.db, { at: now.toISOString(), date, shop, cards: misses });
+  });
+  if (principal.kind !== 'install') return;
+  attempt('usage', undefined, () => recordInstallUsage(deps.db, {
+    date, installId: principal.installId, shop,
+    matchRequests: 1, matchBeers: beers.length, matchMisses: recorded,
+  }));
+  const version = client?.version;
+  if (version !== undefined) attempt('version', false, () => touchInstall(deps.db, principal, { date, version }));
 }
