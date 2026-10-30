@@ -60,13 +60,20 @@ export function findInstallByHash(db: DB, tokenHash: string): InstallRow | null 
 /**
  * Records that an install was seen today with this version. Writes only when the date or the
  * version changed, so an install costs one write a day, not one per request. Returns whether a
- * row was written.
+ * row was written. Called on the /match hot path, so it takes the same busy_timeout = 0 window as
+ * recordMatchUsage: a contended write throws at once (callers swallow it) instead of stalling.
  */
 export function touchInstall(db: DB, install: InstallRow, args: { date: string; version?: string }): boolean {
   const version = args.version ?? install.extVersion;
   if (install.lastSeenDate === args.date && version === install.extVersion) return false;
-  db.prepare('UPDATE extension_installs SET last_seen_date = ?, ext_version = ? WHERE install_id = ?')
-    .run(args.date, version, install.installId);
+  const prevBusyTimeout = db.pragma('busy_timeout', { simple: true }) as number;
+  db.pragma('busy_timeout = 0');
+  try {
+    db.prepare('UPDATE extension_installs SET last_seen_date = ?, ext_version = ? WHERE install_id = ?')
+      .run(args.date, version, install.installId);
+  } finally {
+    db.pragma(`busy_timeout = ${prevBusyTimeout}`);
+  }
   return true;
 }
 

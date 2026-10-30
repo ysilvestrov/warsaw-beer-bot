@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { openDb } from './db';
 import { migrate } from './schema';
 import {
@@ -82,6 +82,22 @@ describe('findInstallByHash / touchInstall', () => {
     expect(touchInstall(d, row, { date: DAY, version: '1' })).toBe(true);
     expect(touchInstall(d, findInstallByHash(d, 'h1')!, { date: DAY, version: '2' })).toBe(true);
     expect(findInstallByHash(d, 'h1')).toEqual({ installId: row.installId, lastSeenDate: DAY, extVersion: '2' });
+  });
+
+  it('writes with busy_timeout 0 and restores it, even when the write throws', () => {
+    const d = db();
+    registerInstall(d, { date: '2026-10-29', at: AT, version: '1', tokenHash: 'h1' });
+    const row = findInstallByHash(d, 'h1')!;
+    const before = d.pragma('busy_timeout', { simple: true });
+    const pragma = vi.spyOn(d, 'pragma');
+    touchInstall(d, row, { date: DAY });
+    expect(pragma.mock.calls.map((c) => c[0])).toEqual(['busy_timeout', 'busy_timeout = 0', `busy_timeout = ${before}`]);
+    pragma.mockRestore();
+    expect(d.pragma('busy_timeout', { simple: true })).toBe(before);
+
+    d.exec(`CREATE TRIGGER boom BEFORE UPDATE ON extension_installs BEGIN SELECT RAISE(ABORT, 'busy'); END`);
+    expect(() => touchInstall(d, findInstallByHash(d, 'h1')!, { date: '2026-10-31' })).toThrow();
+    expect(d.pragma('busy_timeout', { simple: true })).toBe(before);
   });
 });
 
