@@ -9,6 +9,9 @@ import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/
 import { cardAbv, cardText } from '../../domain/card-text';
 import { insertLegacyDisposition, closeLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 import { enrichRoute } from './enrich';
+import { setJobState } from '../../storage/job_state';
+import { warsawDateAndHour } from '../../domain/warsaw-time';
+import type { HydratedBeer } from '../../sources/untappd/search';
 import { buildSearchUrl } from '../../sources/untappd/search';
 import type { ApiDeps, ApiEnv, Principal } from '../types';
 import {
@@ -43,6 +46,10 @@ function setupAs(principal: Principal, depsOverride?: Partial<ApiDeps>) {
     await next();
   });
   enrichRoute(app, { db, env: {} as never, log, ...depsOverride });
+  if (principal.kind === 'install') {
+    db.prepare(`INSERT INTO extension_installs (install_id, token_hash, created_at, last_seen_date)
+                VALUES (?, 'h', '2026-10-30T00:00:00.000Z', '2026-10-30')`).run(principal.installId);
+  }
   return { db, app, warn };
 }
 
@@ -1637,5 +1644,144 @@ describe('POST /enrich/candidates — install token (#923 §2.5)', () => {
     expect(db.prepare('SELECT brewery, name, untappd_id FROM beers').all()).toEqual([
       { brewery: 'Nowhere Brewing', name: 'Unknown Lager', untappd_id: null },
     ]);
+  });
+});
+
+describe('POST /enrich/result — install token: verified, positive-only (#923 §2.5)', () => {
+  const PINTA = { brewery: 'Browar Pinta', name: 'Atak Chmielu', abv: 6.1 };
+  const pintaRecord: HydratedBeer = {
+    bid: 70951, beer_name: 'Atak Chmielu', brewery_name: 'Browar Pinta', style: 'IPA - American', abv: 6.1,
+    global_rating: 3.71, beer_slug: 'pinta-atak-chmielu', brewery_alias: [], alias_alt: [], rating_count: 15873,
+  };
+  // Probe 2 of the spec: a real bid relayed under a name rewritten to fit the card.
+  const BERQUELL = { brewery: 'Berquell Brewery', name: 'Erdbeer', abv: 4.2 };
+  const forgedHit = { bid: 46157, beer_name: 'Erdbeer', brewery_name: 'Berquell Brewery', type_name: 'Fruit Beer', beer_abv: 4.2, rating_score: 3.6 };
+  const bergquellRecord: HydratedBeer = {
+    bid: 46157, beer_name: 'Erdbeer Porter', brewery_name: 'Bergquell Brauerei Löbau', style: 'Porter - Other',
+    abv: 4.8, global_rating: 3.6, beer_slug: 'bergquell-erdbeer-porter', brewery_alias: [], alias_alt: [],
+  };
+  const hydrateWith = (...records: HydratedBeer[]) =>
+    vi.fn(async (bids: number[]) => new Map(bids.map((b) => [b, records.find((r) => r.bid === b) ?? null] as const)));
+  const relay = (card: object, ...hits: object[]) => ({ ...card, algolia: { hits }, pageUrl: 'https://beerfreak.pl/p/1' });
+  const usage = (db: ReturnType<typeof setup>['db']) =>
+    db.prepare('SELECT shop, enrich_results, enrich_links, enrich_rejected FROM install_usage_daily').all();
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('400 for the legacy html relay — there is nothing to re-fetch it with', async () => {
+    const { app } = setupAs(INSTALL, { hydrateByBid: hydrateWith(pintaRecord) });
+    const res = await post(app, '/enrich/result', { ...PINTA, html: '<html></html>' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'algolia_required' });
+  });
+
+  it('a forged hit is judged by the hydrated record: not_found and beers untouched', async () => {
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrateWith(bergquellRecord) });
+    const res = await post(app, '/enrich/result', relay(BERQUELL, forgedHit));
+    expect(await res.json()).toEqual({ status: 'not_found' });
+    expect(beersSnapshot(db)).toEqual([]);
+    expect(db.prepare('SELECT COUNT(*) AS c FROM enrich_failures').get()).toEqual({ c: 0 });
+  });
+
+  it('the same forged hit from a Telegram user is still trusted, as before (regression)', async () => {
+    const { app } = setupAs(USER, { hydrateByBid: hydrateWith(bergquellRecord) });
+    const res = await post(app, '/enrich/result', relay(BERQUELL, forgedHit));
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 46157 });
+  });
+
+  it('an honest hit links a new row, from search, and counts one result and one link under the shop', async () => {
+    const hydrate = hydrateWith(pintaRecord);
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrate });
+    const res = await post(app, '/enrich/result', relay(PINTA, { bid: 70951, beer_name: 'whatever', brewery_name: 'whoever' }));
+    expect(await res.json()).toEqual({ status: 'matched', untappd_id: 70951, rating_global: 3.71 });
+    expect(db.prepare('SELECT brewery, name, untappd_id, untappd_id_source FROM beers').all()).toEqual([
+      { brewery: 'Browar Pinta', name: 'Atak Chmielu', untappd_id: 70951, untappd_id_source: 'search' },
+    ]);
+    expect(usage(db)).toEqual([{ shop: 'beerfreak.pl', enrich_results: 1, enrich_links: 1, enrich_rejected: 0 }]);
+    expect(hydrate).toHaveBeenCalledTimes(1);
+  });
+
+  it('not_found leaves an existing orphan exactly as it was — no failure row, no backoff move', async () => {
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrateWith() });
+    const id = seedBeer(db, {
+      untappd_id: null, name: PINTA.name, brewery: PINTA.brewery, style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName(PINTA.name), normalized_brewery: normalizeBrewery(PINTA.brewery),
+    });
+    db.prepare(`UPDATE beers SET untappd_lookup_at = '2026-10-29T00:00:00.000Z', untappd_lookup_count = 2 WHERE id = ?`).run(id);
+    const before = beersSnapshot(db);
+    const res = await post(app, '/enrich/result', relay(PINTA, { bid: 999 }));
+    expect(await res.json()).toEqual({ status: 'not_found' });
+    expect(beersSnapshot(db)).toEqual(before);
+    expect(db.prepare('SELECT COUNT(*) AS c FROM enrich_failures').get()).toEqual({ c: 0 });
+    expect(usage(db)).toEqual([{ shop: 'beerfreak.pl', enrich_results: 1, enrich_links: 0, enrich_rejected: 0 }]);
+  });
+
+  it('a hydration failure is not_found with no write, and is tried exactly once', async () => {
+    const hydrate = vi.fn(async () => { throw new Error('algolia 503'); });
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrate });
+    const res = await post(app, '/enrich/result', relay(PINTA, { bid: 70951 }));
+    expect(await res.json()).toEqual({ status: 'not_found' });
+    expect(beersSnapshot(db)).toEqual([]);
+    expect(hydrate).toHaveBeenCalledTimes(1);
+  });
+
+  it('an open Algolia circuit answers not_found without hydrating', async () => {
+    const hydrate = hydrateWith(pintaRecord);
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrate });
+    setJobState(db, 'untappd_circuit_open_until', new Date(Date.now() + 3_600_000).toISOString());
+    expect(await (await post(app, '/enrich/result', relay(PINTA, { bid: 70951 }))).json()).toEqual({ status: 'not_found' });
+    expect(hydrate).toHaveBeenCalledTimes(0);
+    expect(beersSnapshot(db)).toEqual([]);
+  });
+
+  it('UNTAPPD_LOOKUP_ENABLED=false answers not_found without hydrating', async () => {
+    const hydrate = hydrateWith(pintaRecord);
+    const { app } = setupAs(INSTALL, { hydrateByBid: hydrate, env: { UNTAPPD_LOOKUP_ENABLED: false } as never });
+    expect(await (await post(app, '/enrich/result', relay(PINTA, { bid: 70951 }))).json()).toEqual({ status: 'not_found' });
+    expect(hydrate).toHaveBeenCalledTimes(0);
+  });
+
+  it('never runs the paid web fallback for an install, even on zero candidates', async () => {
+    const webFallback = vi.fn(async () => null);
+    const { app } = setupAs(INSTALL, { hydrateByBid: hydrateWith(), webFallback });
+    await post(app, '/enrich/result', relay(PINTA));
+    expect(webFallback).toHaveBeenCalledTimes(0);
+  });
+
+  it('ignores a shop-published bid: an existing search link is answered, never replaced', async () => {
+    const hydrate = hydrateWith(pintaRecord);
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrate });
+    seedBeer(db, {
+      untappd_id: 70951, untappd_id_source: 'search', name: PINTA.name, brewery: PINTA.brewery, style: null, abv: 6.1,
+      rating_global: 3.71, normalized_name: normalizeName(PINTA.name), normalized_brewery: normalizeBrewery(PINTA.brewery),
+    });
+    const res = await post(app, '/enrich/result', { ...relay(PINTA, { bid: 12345 }), bid: 12345, brand: 'Browar Pinta' });
+    expect(await res.json()).toEqual({ status: 'matched', untappd_id: 70951, rating_global: 3.71 });
+    expect(db.prepare('SELECT untappd_id FROM beers').all()).toEqual([{ untappd_id: 70951 }]);
+    expect(hydrate).toHaveBeenCalledTimes(0);
+  });
+
+  it('the 201st call of a Warsaw day is 429 and counted; the next day the install may enrich again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-30T12:00:00.000Z'));
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrateWith() });
+    db.prepare(`INSERT INTO install_usage_daily (date, install_id, shop, enrich_results) VALUES ('2026-10-30', ?, 'a.pl', 150), ('2026-10-30', ?, 'b.pl', 50)`)
+      .run(INSTALL.installId, INSTALL.installId);
+    const res = await post(app, '/enrich/result', relay(PINTA));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'enrich_limit' });
+    expect(db.prepare(`SELECT enrich_rejected FROM install_usage_daily WHERE shop = 'beerfreak.pl'`).get()).toEqual({ enrich_rejected: 1 });
+    // 23:30 UTC on 30 October is already the 31st in Warsaw.
+    vi.setSystemTime(new Date('2026-10-30T23:30:00.000Z'));
+    expect(warsawDateAndHour(new Date()).date).toBe('2026-10-31');
+    expect((await post(app, '/enrich/result', relay(PINTA))).status).toBe(200);
+  });
+
+  it('199 accepted calls leave one slot (the boundary)', async () => {
+    const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrateWith() });
+    db.prepare(`INSERT INTO install_usage_daily (date, install_id, shop, enrich_results) VALUES (?, ?, 'a.pl', 199)`)
+      .run(warsawDateAndHour(new Date()).date, INSTALL.installId);
+    expect((await post(app, '/enrich/result', relay(PINTA))).status).toBe(200);
+    expect((await post(app, '/enrich/result', relay(PINTA))).status).toBe(429);
   });
 });

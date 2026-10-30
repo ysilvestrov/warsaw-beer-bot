@@ -1899,7 +1899,24 @@ Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]
 ре-арму. Картка без рядка → `eligible: true` без `linked`; з рядком — та сама формула
 придатності. `bid` картки відкидається: `resolveByBid` перевіряє лише броварню, а установку не
 прив'язано до людини.
-`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`;
+
+**`/enrich/result` для токена установки — перевірка, лише позитивний запис.** Гілка
+`installEnrichResult` (`src/api/routes/enrich.ts`); Telegram-шлях не змінено.
+1. Лише форма `algolia`: `html` → `400 { error: "algolia_required" }`. `bid`/`bidSlug`/`brand`
+   ігноруються.
+2. Ліміт — 200 прийнятих викликів на установку за варшавську добу (сума
+   `install_usage_daily.enrich_results` по всіх `shop`; `shop` — hostname `pageUrl`). Слот
+   забирається атомарно до гідрації; понад ліміт — `429 { error: "enrich_limit" }` і
+   `enrich_rejected += 1`; лічильник не прочитався — `503`.
+3. Рядок картки вже злінкований → `matched` зі збереженим лінком, без запису.
+4. `UNTAPPD_LOOKUP_ENABLED=false`, відкритий брейкер Algolia (`untappd_circuit_open_until`, лише
+   читання) або нема `hydrateByBid` → `not_found`.
+5. Із релею береться лише список `bid` (≤ 15); сервер гідратує їх **один раз** на запит і проганяє
+   `lookupBeer` на гідратованих записах — без веб-фолбеку (Brave оплачує сервіс). Збій гідрації →
+   `not_found`.
+6. Лише `matched` пише: в одній транзакції `ensureBeerRow` (сирота, якщо треба) і
+   `applyLookupOutcome` (провенанс `search`), `enrich_links += 1`. Будь-що інше → `not_found` **без
+   жодного запису** — ні сироти, ні `enrich_failures`, ні бекофу.`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`;
 його `query` будується через `cleanSearchQuery(brewery,name)` і лишається серверним
 контрактом. Додатково (#391) відповідь несе опційний `algoliaNarrow` — той самий об'єкт із
 **вузькою** сходинкою драбини `searchQueryLadder` (#382); поле присутнє лише коли сходинки
