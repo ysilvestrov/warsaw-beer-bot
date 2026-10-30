@@ -19,6 +19,11 @@ import { prepareCatalog } from '../../domain/matcher';
 import { createCatalogCache, type CatalogCache } from '../../domain/catalog-cache';
 import { cardAbv, cardText } from '../../domain/card-text';
 import { insertLegacyDisposition, closeLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
+import { registerInstall } from '../../storage/extension_installs';
+import { getUsageForDate } from '../../storage/api_usage';
+import { warsawDateAndHour } from '../../domain/warsaw-time';
+import { FULL_FALLBACK_BUDGET } from '../../domain/matcher';
+import type { Principal } from '../types';
 
 function setup(log?: pino.Logger, path = ':memory:') {
   const warn = vi.fn();
@@ -338,4 +343,121 @@ test('/match restores A and keeps B and another Telegram user’s zero rating se
   expect(await result(1)).toMatchObject({ is_drunk: true, user_rating: 4 });
   expect(await result(2)).toMatchObject({ is_drunk: true, user_rating: 0 });
   db.close();
+});
+
+describe('POST /match — install accounting and the misses journal (#923)', () => {
+  function ledger() {
+    const s = setup();
+    const reg = registerInstall(s.db, {
+      date: '2026-10-29', at: '2026-10-29T09:00:00.000Z', version: '0.23.0', tokenHash: 'h',
+    }) as { installId: string };
+    const install: Principal = { kind: 'install', installId: reg.installId, lastSeenDate: '2026-10-29', extVersion: '0.23.0' };
+    function appWith(principal: Principal) {
+      const app = new Hono<ApiEnv>();
+      app.use('/match', async (c, next) => {
+        c.set('principal', principal);
+        if (principal.kind === 'user') c.set('telegramId', principal.telegramId);
+        await next();
+      });
+      matchRoute(app, { db: s.db, env: {} as never, log: { ...pino({ level: 'silent' }), warn: s.warn } as never }, createCatalogCache(s.db));
+      return app;
+    }
+    const misses = () => s.db.prepare('SELECT brewery, name, shop, seen_days FROM match_misses ORDER BY name').all();
+    const usage = () => s.db.prepare(
+      'SELECT shop, match_requests, match_beers, match_misses FROM install_usage_daily ORDER BY shop',
+    ).all();
+    return { ...s, install, appWith, misses, usage };
+  }
+
+  const found = { brewery: 'Trzech Kumpli', name: 'Pan IPAni' };
+  const missing = { brewery: 'Nowhere Brewing', name: 'Unknown Lager' };
+
+  it('an install gets byte-for-byte the anonymous answer', async () => {
+    const { appWith, appAnon, install } = ledger();
+    const body = { beers: [found, missing] };
+    const asInstall = await (await post(appWith(install), body)).text();
+    const asAnon = await (await post(appAnon(), body)).text();
+    expect(asInstall).toBe(asAnon);
+  });
+
+  it('an install journals the searched miss and counts its request under the given shop', async () => {
+    const { appWith, install, misses, usage, db } = ledger();
+    await post(appWith(install), { beers: [found, missing], client: { shop: 'beerfreak.pl' } });
+    expect(misses()).toEqual([{ brewery: 'Nowhere Brewing', name: 'Unknown Lager', shop: 'beerfreak.pl', seen_days: 1 }]);
+    expect(usage()).toEqual([{ shop: 'beerfreak.pl', match_requests: 1, match_beers: 2, match_misses: 1 }]);
+    expect(getUsageForDate(db, warsawDateAndHour(new Date()).date)).toMatchObject({
+      anonRequests: 0, authedRequests: 0, installRequests: 1,
+    });
+  });
+
+  it('without `client` the shop is the empty string', async () => {
+    const { appWith, install, usage } = ledger();
+    await post(appWith(install), { beers: [missing] });
+    expect(usage()).toEqual([{ shop: '', match_requests: 1, match_beers: 1, match_misses: 1 }]);
+  });
+
+  it('a card the fallback budget never searched is not a miss', async () => {
+    const { appWith, install, misses, usage } = ledger();
+    const searched = Array.from({ length: FULL_FALLBACK_BUDGET }, (_, i) => ({ brewery: 'Nobody', name: `Nothing ${'q'.repeat(i + 1)}` }));
+    // Letters, not digits: the normalizer drops digits, and the journal keys by the normalized name.
+    const denied = { brewery: 'Nobody Left', name: 'Never Searched' };
+    const res = await (await post(appWith(install), { beers: [...searched, denied] })).json();
+    expect(res.results.at(-1)).toMatchObject({ matched_beer: null, searched: false });
+    expect(misses()).toHaveLength(FULL_FALLBACK_BUDGET);
+    expect(misses()).not.toContainEqual(expect.objectContaining({ name: 'Never Searched' }));
+    expect(usage()).toEqual([{ shop: '', match_requests: 1, match_beers: FULL_FALLBACK_BUDGET + 1, match_misses: FULL_FALLBACK_BUDGET }]);
+  });
+
+  it('a card with an active disposition is not a miss', async () => {
+    const { appWith, install, misses, db } = ledger();
+    const old = seedBeer(db, {
+      untappd_id: null, name: 'Old Card', brewery: 'Old Brewery', style: null, abv: 6,
+      rating_global: null, normalized_name: 'old card', normalized_brewery: 'old brewery',
+    });
+    insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: 6,
+      breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(6),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const res = await (await post(appWith(install), { beers: [{ brewery: 'Old Brewery', name: 'Old Card', abv: 6 }] })).json();
+    expect(res.results[0]).toMatchObject({ matched_beer: null, searched: true });
+    expect(misses()).toEqual([]);
+  });
+
+  it('a Telegram user journals misses but has no install usage row', async () => {
+    const { appWith, misses, usage } = ledger();
+    await post(appWith({ kind: 'user', telegramId: 1 }), { beers: [missing] });
+    expect(misses()).toEqual([{ brewery: 'Nowhere Brewing', name: 'Unknown Lager', shop: '', seen_days: 1 }]);
+    expect(usage()).toEqual([]);
+  });
+
+  it('an anonymous caller writes nothing to the journal', async () => {
+    const { appAnon, misses, usage } = ledger();
+    await post(appAnon(), { beers: [missing] });
+    expect(misses()).toEqual([]);
+    expect(usage()).toEqual([]);
+  });
+
+  it('client.version updates the stored extension version', async () => {
+    const { appWith, install, db } = ledger();
+    await post(appWith(install), { beers: [found], client: { version: '0.24.0' } });
+    expect(db.prepare('SELECT ext_version FROM extension_installs').get()).toEqual({ ext_version: '0.24.0' });
+  });
+
+  it('rejects a shop longer than 64 characters (413, like every over-long field on /match)', async () => {
+    const { appWith, install, usage } = ledger();
+    expect((await post(appWith(install), { beers: [found], client: { shop: 'x'.repeat(65) } })).status).toBe(413);
+    expect(usage()).toEqual([]);
+  });
+
+  it('a failed journal write does not break the answer, and is logged', async () => {
+    const { appWith, install, appAnon, db, warn } = ledger();
+    const expected = await (await post(appAnon(), { beers: [found, missing] })).text();
+    db.exec('DROP TABLE match_misses');
+    const res = await post(appWith(install), { beers: [found, missing] });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(expected);
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ err: expect.any(Error) }), 'install ledger record failed');
+  });
 });

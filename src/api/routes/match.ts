@@ -1,11 +1,14 @@
 import type { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import type { ApiDeps, ApiEnv } from '../types';
+import type { ApiDeps, ApiEnv, Principal } from '../types';
 import type { CatalogCache } from '../../domain/catalog-cache';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer } from '../../storage/checkins';
-import { matchBeerList } from '../../domain/match-list';
+import { matchBeerList, type MatchListResult } from '../../domain/match-list';
+import { recordMisses } from '../../storage/match_misses';
+import { recordInstallUsage } from '../../storage/install_usage';
+import { touchInstall } from '../../storage/extension_installs';
 import { recordMatchUsage } from '../../storage/api_usage';
 import { findActiveDispositionForBeer, findActiveDispositionForCard } from '../../storage/legacy-orphan-dispositions';
 import { warsawDateAndHour } from '../../domain/warsaw-time';
@@ -29,6 +32,9 @@ const MatchBody = z.object({
     )
     .min(1)
     .max(200),
+  // #923: who is asking, for per-install accounting. Optional both ways: an old client omits it,
+  // an old server strips it as an unknown key.
+  client: z.object({ version: z.string().max(64).optional(), shop: z.string().max(64).optional() }).optional(),
 });
 
 // Registers POST /match on the given app. Auth is optional here: a missing
@@ -43,13 +49,15 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
     zValidator('json', MatchBody, payloadSizeValidationHook(deps) as never),
     async (c) => {
     const telegramId = c.get('telegramId') ?? null;
-    const { beers } = c.req.valid('json');
+    const principal = c.get('principal') ?? null;
+    const { beers, client } = c.req.valid('json');
 
     // Operational usage metric for the daily digest — never break the response.
     try {
       recordMatchUsage(deps.db, {
         date: warsawDateAndHour(new Date()).date,
         authed: telegramId !== null,
+        install: principal?.kind === 'install',
         beers: beers.length,
         channel: 'extension',
       });
@@ -87,7 +95,38 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
       },
       'match fallback stats',
     );
+    if (principal !== null) recordCallerLedger(deps, principal, client, beers, results);
     return c.json({ results });
     },
   );
+}
+
+// #923 §2.4: for a caller with any token, journal the cards we searched and did not find; for an
+// install, also count its traffic. Best-effort like api_usage: a failed write never breaks /match.
+// A card with an active disposition is not a miss — it was already decided not to be looked for.
+function recordCallerLedger(
+  deps: ApiDeps,
+  principal: Principal,
+  client: { version?: string; shop?: string } | undefined,
+  beers: { brewery: string; name: string; abv?: number | null }[],
+  results: MatchListResult[],
+): void {
+  try {
+    const now = new Date();
+    const date = warsawDateAndHour(now).date;
+    const shop = client?.shop ?? '';
+    const misses = beers.filter((b, i) =>
+      results[i].matched_beer === null && results[i].searched
+      && findActiveDispositionForCard(deps.db, b.brewery, b.name, b.abv ?? null) === null);
+    const recorded = recordMisses(deps.db, { at: now.toISOString(), date, shop, cards: misses });
+    if (principal.kind === 'install') {
+      recordInstallUsage(deps.db, {
+        date, installId: principal.installId, shop,
+        matchRequests: 1, matchBeers: beers.length, matchMisses: recorded,
+      });
+      if (client?.version !== undefined) touchInstall(deps.db, principal, { date, version: client.version });
+    }
+  } catch (e) {
+    deps.log.warn({ err: e }, 'install ledger record failed');
+  }
 }
