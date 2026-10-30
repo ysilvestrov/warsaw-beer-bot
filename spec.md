@@ -1281,6 +1281,19 @@ enrich-`html` — **384 Ki символів**, `brewery` і `name` —
 а попередження в лог лише коли файл є, але невалідний. Публічний commit SHA відкритого репо дозволено
 явно (спека artifact deployment §7); ні env, ні токенів, ні receipt відповідь не містить.
 
+#### `POST /installs`, `DELETE /installs/me` — установка без Telegram (#923)
+Дизайн: `docs/superpowers/specs/2026-10/2026-10-30-923-install-token-design.md`.
+
+- **`POST /installs`** — без автентифікації; тіло `{ "version": "<1–32 символи>" }`, інакше `400`.
+  Видає `201 { "install_id": "<uuid>", "token": "wbi_<64 hex>" }`; сирий токен повертається один
+  раз, у БД — лише SHA-256 (§3.16.1). Глобальна стеля — 2000 реєстрацій за варшавську добу
+  (§3.16.3): понад неї `429 { "error": "registrations_capped" }` і адмінові щонайбільше одне
+  повідомлення на добу (слот `job_state` `install_registrations_cap_alert`). IP маршрут не читає й
+  не логує — обмеження за IP стоїть перед застосунком (правило Cloudflare WAF).
+- **`DELETE /installs/me`** — лише токеном установки: `204`, установка видаляється разом зі своїм
+  `install_usage_daily` (каскад); `match_misses` лишаються — вони не належать установці. Без токена,
+  з невідомим або з Telegram-токеном — `401`. Повтор тим самим токеном — `401`.
+
 #### `POST /match` — матчинг пив
 Авторизація: `Authorization: Bearer <token>` → sha256 → `api_tokens` →
 `telegram_id` власника. Невалідний або відсутній токен → `401 { error: "unauthorized" }`.
