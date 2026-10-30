@@ -504,8 +504,8 @@ rate limiting у Cloudflare WAF на `POST /installs` (§2.1) і його пер
 3. **Брейкер читається, а не ведеться** (`isCircuitOpen`, `untappd_circuit_open_until`). Збій
    гідрації на запиті установки брейкер не відкриває — його веде крон зі своєю канаркою.
 4. **Що рахує ліміт 200:** `enrich_results` — прийняті `/enrich/result` установки (після
-   валідації, до гідрації, тож збій гідрації теж рахується); `enrich_links` — відповіді
-   `matched`; `enrich_rejected` — відмови `429`. `shop` для enrich — hostname `pageUrl`.
+   валідації, до гідрації, тож збій гідрації теж рахується); `enrich_links` — записані
+   цим викликом перевірені лінки (відповідь `matched` зі вже наявним лінком його не рахує); `enrich_rejected` — відмови `429`. `shop` для enrich — hostname `pageUrl`.
 5. **«Нові установки» в дайджесті — `install_registrations_daily.registrations` за вчора**, а не
    `created_at` (ISO UTC, різання біля півночі дало б не ту добу). Рядки дайджесту — з малої
    літери, як сусідні.

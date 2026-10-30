@@ -1716,6 +1716,23 @@ describe('POST /enrich/result â€” install token: verified, positive-only (#923 Â
     expect(usage(db)).toEqual([{ shop: 'beerfreak.pl', enrich_results: 1, enrich_links: 0, enrich_rejected: 0 }]);
   });
 
+  it('a row linked while hydration was pending keeps its link and is answered with it, counting no new link', async () => {
+    let db!: ReturnType<typeof setup>['db'];
+    const hydrate = vi.fn(async (bids: number[]) => {
+      seedBeer(db, {
+        untappd_id: 1234, name: PINTA.name, brewery: PINTA.brewery, style: null, abv: 6.1, rating_global: 3.5,
+        normalized_name: normalizeName(PINTA.name), normalized_brewery: normalizeBrewery(PINTA.brewery),
+      });
+      return new Map(bids.map((b) => [b, b === 70951 ? pintaRecord : null] as const));
+    });
+    const ctx = setupAs(INSTALL, { hydrateByBid: hydrate });
+    db = ctx.db;
+    const res = await post(ctx.app, '/enrich/result', relay(PINTA, { bid: 70951 }));
+    expect(await res.json()).toEqual({ status: 'matched', untappd_id: 1234, rating_global: 3.5 });
+    expect(db.prepare('SELECT untappd_id FROM beers').all()).toEqual([{ untappd_id: 1234 }]);
+    expect(usage(db)).toEqual([{ shop: 'beerfreak.pl', enrich_results: 1, enrich_links: 0, enrich_rejected: 0 }]);
+  });
+
   it('a hydration failure is not_found with no write, and is tried exactly once', async () => {
     const hydrate = vi.fn(async () => { throw new Error('algolia 503'); });
     const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrate });
