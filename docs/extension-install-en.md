@@ -167,9 +167,18 @@ this guide first.
    candidates. Search is limited to a few requests per page, respecting
    anti-ban limits. The browser will ask for permission to access
    `untappd.com` and `*.algolia.net` — allow it.
-   **Off** by default.
+   **Off** by default. It works without a token too, through the anonymous install below.
+5. The **"Anonymous usage statistics"** checkbox (**on** by default). Without a token, the
+   extension gets a random install ID from the server once. It isn't linked to you, the bot or
+   Untappd, and it lets "Find missing beers" work without a token. Per day and shop domain, the
+   server counts how many pages and beers were checked, how many weren't found, and how many
+   missing beers were found. Beers that weren't found are kept by brewery and name, without who
+   sent them; this also happens with a token, whatever the checkbox says. No IP address is stored,
+   and records are kept for 90 days. **Uncheck it** and the ID stops being sent at once and is
+   deleted from the server. If the server can't be reached, `Deletion not finished yet — will
+   retry.` appears and the extension finishes the deletion at the next browser start.
 
-   > **Separately from this checkbox, on Flasker.** On `flasker.com.ua` pages, the
+   > **Separately from the enrichment checkbox, on Flasker.** On `flasker.com.ua` pages, the
    > extension automatically loads the pages of all visible products in the
    > background, even without this permission. From there it reads the product
    > category, the brewery, and the Untappd link the shop publishes. This way beers
@@ -179,11 +188,11 @@ this guide first.
    > also works for imported items that Flasker labels with the generic brand
    > "Імпортне пиво" (imported beer): the extension doesn't treat that label as a
    > brewery name and instead checks the product against the published Untappd link.
-5. Click **"Save"**.
+6. Click **"Save"**.
    - If you changed the URL to a non-default one, the browser will ask for
      permission to access that host — allow it, otherwise the extension
      won't be able to reach the API.
-6. Click **"Test connection"**:
+7. Click **"Test connection"**:
    - **✅ Connected** — all good.
    - **❌ Failed (health)** — API/URL unreachable (check the address and your internet connection).
    - **❌ Failed (unauthorized)** — wrong or expired token (run `/extension` again).
@@ -307,6 +316,11 @@ Until a token is saved, the popup puts a "Not connected" block with a
 state, captioned `Add a token to sync your check-ins.`: without a token,
 syncing couldn't succeed anyway, so the extension doesn't ask for extra
 access to untappd.com only to show a connection error.
+
+With no token but an anonymous install ("Anonymous usage statistics"), the popup says **"Works
+without Telegram"** instead of "Not connected": global ratings and missing-beer search work, and
+"Get a token" stays, as a secondary button. A token is only needed for your own badges and "Sync
+my check-ins".
 
 Once you save a token (Part 3), that block disappears and "Sync my
 check-ins" becomes the main button again. The **"Read the setup guide →"**

@@ -4060,6 +4060,24 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `extension-ui.css`: light/dark токени, системний шрифт для form controls,
   контрастний `:focus-visible` ring і button tiers; в options «Save» = primary,
   «Test connection» = secondary.
+- **Анонімна установка (#923):** налаштування несуть ще `installToken` (`wbi_…`, `''` — нема),
+  `installRegistration` (галочка «Anonymous usage statistics»; увімкнена, доки її явно не
+  знято — читається як `!== false`) і `installDeletionPending`. Заголовок запиту —
+  `authToken(s) = s.token || (s.installDeletionPending ? '' : s.installToken)`: Telegram-токен
+  завжди має пріоритет, а висяче видалення знімає install-токен із запитів одразу.
+  `syncInstall` (`extension/src/background/install.ts`) спершу доводить висяче видалення
+  (`DELETE /installs/me`; `204` і `401` — видалено, мережа й `5xx` — повтор при наступному
+  запуску), потім реєструє (`POST /installs` з версією маніфесту), лише коли галочка стоїть і
+  немає жодного з токенів; якщо поки йшла реєстрація галочку зняли чи змінили сервер, щойно
+  виданий токен видаляється, а не зберігається. Service worker пробує раз на життя
+  (`onInstalled`, `onStartup`, перше повідомлення); будь-яка невдача тиха. `/match` несе
+  `client: { version, shop }`, де `shop` — hostname вкладки-відправника (довший за 64 символи
+  не надсилається: сервер відкинув би весь запит). `401` на install-токені стирає його (якщо його
+  ще не замінили); `/match` повторює ті самі картки анонімно, enrich відповідає порожньо; `401`
+  на Telegram-токені — як досі (`unauthorized`). Enrich-гейт — `enrichEnabled && authToken(s)`.
+  Прив'язка кешу бейджів лишається на Telegram-токені: відповідь установці побайтово анонімна.
+  Зняття галочки ставить `installDeletionPending` **до** запиту на сервер; `retry` показує під
+  галочкою `Deletion not finished yet — will retry.`
 - **Popup керування кешем** (toolbar `action`, дозвіл `activeTab`):
   «Refresh this page» — для активної вкладки підтримуваного магазину скидає бейджі
   видимих карток (видаляє їхні `mc2:`-записи кешу + ре-рендер живцем через
@@ -4081,7 +4099,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   перебити цей підпис. Після збереження токена блок ховається, а посилання
   «Read the setup guide →» **лишається видимим** — воно живе в підвалі перед
   «Clear all cache» і переїжджає в `#authBlock` лише коли токена немає
-  (#519, #522).
+  (#519, #522). З анонімною установкою без Telegram-токена (#923) блок лишається, але
+  `#authNote` каже «Works without Telegram — global ratings (⭐) and missing-beer search…», а
+  «Get a token» опускається в secondary; синк чекінів і далі `disabled` з тим самим підписом —
+  чекіни лише з Telegram-токеном.
 - **Popup — ієрархія подання:** порядок у DOM = порядок за важливістю **для
   поточного стану**. З токеном: «Sync my check-ins» (primary, залитий
   акцентом) → «Refresh this page» (secondary, контур) → згорнутий список
@@ -4213,12 +4234,14 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 | Дані | Куди | Коли |
 |---|---|---|
 | Токен (`/extension`) | `chrome.storage.local`; `Authorization: Bearer` лише на beer-api | завжди |
-| Назви пива/броварні (+ABV) з видимих карток | POST `beer-api/match` | на підтримуваній сторінці |
+| Анонімний install-токен (#923) | `chrome.storage.local`; `Authorization: Bearer` лише на beer-api, коли нема Telegram-токена | галочка «Anonymous usage statistics» (дефолт увімкнено) |
+| Назви пива/броварні (+ABV) з видимих карток; `client {version, shop}` | POST `beer-api/match` | на підтримуваній сторінці |
 | Кеш матчів (`mc2:`) | локально | — |
 | Enrichment (opt-in): назви orphan | beer-api `/enrich/candidates` → Algolia (сесія юзера) → beer-api `/enrich/result` | лише увімкнено, ≤20/стор. |
 | Sync check-ins (opt-in): HTML власної стрічки Untappd | beer-api `/checkins/sync` (сервер парсить пиття+оцінки) | лише по кнопці Sync |
 
-Немає аналітики/трекінгу/реклами/продажу даних. Інших мережевих призначень, окрім beer-api та
+Немає трекінгу браузингу/реклами/продажу даних; серверні лічильники викликів власного API на
+псевдонімну установку (#923, 90 днів, вимикач) описані в політиці окремим розділом. Інших мережевих призначень, окрім beer-api та
 (за згодою) Untappd+Algolia, немає. Зміна цих потоків у коді МУСИТЬ оновити і політику, і цю таблицю.
 
 ### 6.4 Дистрибуція: Chrome Web Store (#247, #267)

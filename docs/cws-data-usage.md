@@ -25,12 +25,25 @@ domains + `beer-api` + optional hosts) — paste the consolidated text from
   enrichment feature to find missing beers.
 
 ## Data collected (dashboard checkboxes)
-- **Authentication information** — YES (the user's API token).
+- **Authentication information** — YES (the user's API token, or the anonymous install token
+  the extension obtains for itself without one, #923).
 - **Website content** — YES (beer/brewery names read from shop pages, including — on Flasker
   — each product's own page fetched in the background for the same beer/brewery data; HTML
-  of the user's own Untappd check-in feed when they use Sync).
+  of the user's own Untappd check-in feed when they use Sync). The shop's domain sent with a
+  match request (#923) is the same page content: the server already receives these beers.
 - Personally identifiable info, health, financial, personal communications, location, web
   history, user activity (analytics-style) — NO.
+
+**Why «User activity» stays NO with the anonymous install token (#923, owner's decision).** The
+dashboard's «User activity» means network monitoring, clicks, mouse position, scroll or keystroke
+logging. The extension collects none of these. What the server keeps for an install is a count of
+calls to its own API: per day and shop domain, the number of match requests, beers and unmatched
+beers, and enrich calls and links, plus the extension version. These are recorded against a random
+install ID that is not tied to a person, kept 90 days, and deleted when the user switches
+«Anonymous usage statistics» off. They serve usage accounting and capacity, which is within the
+single purpose. The privacy policy describes it (section «Anonymous usage statistics»). If a reviewer
+reads it differently, the conservative fallback is to tick «User activity» — and only that
+checkbox changes.
 
 ## Required certifications
 - I do NOT sell or transfer user data to third parties (outside approved use cases) — TRUE.
