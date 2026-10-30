@@ -83,7 +83,7 @@ describe('createApiApp', () => {
     }
   });
 
-  it.each(['/checkins/sync', '/fest/state', '/mcp', '/enrich/candidates', '/enrich/result'])(
+  it.each(['/checkins/sync', '/fest/state', '/mcp'])(
     'an install token gets 403 on the user-only route %s (#923)',
     async (path) => {
       const d = deps();
@@ -97,6 +97,19 @@ describe('createApiApp', () => {
       expect(await res.json()).toEqual({ error: 'install_token_not_allowed' });
     },
   );
+
+  it('an install token is admitted to /enrich/candidates and leaves no row in beers (#923 §2.5)', async () => {
+    const d = deps();
+    registerInstall(d.db, { date: '2026-10-30', at: '2026-10-30T09:00:00.000Z', version: '1', tokenHash: hashToken('wbi_x') });
+    const res = await createApiApp(d).request('/enrich/candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer wbi_x' },
+      body: JSON.stringify({ beers: [{ brewery: 'Nowhere Brewing', name: 'Unknown Lager' }] }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).candidates[0]).toMatchObject({ eligible: true });
+    expect(d.db.prepare('SELECT COUNT(*) AS c FROM beers').get()).toEqual({ c: 0 });
+  });
 
   it('POST /match works anonymously when no token is sent (global-only)', async () => {
     const app = createApiApp(deps());

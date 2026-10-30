@@ -154,9 +154,12 @@ function pickRowByDigits(cardName: string, rows: BeerRow[], cardStyle?: string |
   return null;
 }
 
-function ensureBeerRow(
+// #923: the card's row, found by the same chain ensureBeerRow uses (alias → normalized pair →
+// digits), with no write at all. An install's /enrich/* reads through this: until a verified
+// positive result, an install leaves no trace in `beers`.
+function findBeerRow(
   db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {},
-): BeerRow & { viaAlias: boolean } {
+): (BeerRow & { viaAlias: boolean }) | null {
   const aliased = findAliasTarget(db, brewery, name, facts.abv);
   if (aliased) return { ...aliased, viaAlias: true };
   const normalized_brewery = normalizeBrewery(brewery);
@@ -173,11 +176,21 @@ function ensureBeerRow(
       : r.name.trim().toLowerCase() === name.trim().toLowerCase();
   });
   const existing = pickRowByDigits(name, candidates, facts.style, brewery);
-  if (existing) {
-    const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);
-    if (abvGained) rearmLookup(db, existing.id);
-    return { ...(abvGained || changed ? getBeer(db, existing.id)! : existing), viaAlias: false };
+  return existing ? { ...existing, viaAlias: false } : null;
+}
+
+function ensureBeerRow(
+  db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {},
+): BeerRow & { viaAlias: boolean } {
+  const found = findBeerRow(db, brewery, name, facts);
+  if (found?.viaAlias) return found;
+  if (found) {
+    const { abvGained, changed } = fillOrphanFacts(db, found.id, facts);
+    if (abvGained) rearmLookup(db, found.id);
+    return { ...(abvGained || changed ? getBeer(db, found.id)! : found), viaAlias: false };
   }
+  const normalized_brewery = normalizeBrewery(brewery);
+  const normalized_name = normalizeName(name);
   // #617: сюди доходимо, лише коли рядка з цією нормалізованою парою немає зовсім — вставка сироти.
   // #636: або коли всі рядки пари мають інші цифри; ensureOrphan тоді не знайде й сумісної сироти (порівняння рівних
   // суворіше за вибір вище), тож вставить нову.
@@ -198,6 +211,9 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     (c) => {
     const { beers } = c.req.valid('json');
     const now = new Date();
+    // #923 §2.5: an install only reads. No orphan, no facts, no re-arm, and the card's bid is
+    // dropped — resolveByBid checks only the brewery, which an install could forge.
+    const install = c.get('principal')?.kind === 'install';
     const candidates = deps.db.transaction(() =>
       beers.map((b) => {
         if (findActiveDispositionForCard(deps.db, b.brewery, b.name, b.abv ?? null)) {
@@ -209,9 +225,18 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
             ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
           };
         }
-        const row = ensureBeerRow(deps.db, b.brewery, b.name, {
-          abv: b.abv ?? undefined, style: b.style ?? undefined,
-        });
+        const facts = { abv: b.abv ?? undefined, style: b.style ?? undefined };
+        const row = install
+          ? findBeerRow(deps.db, b.brewery, b.name, facts)
+          : ensureBeerRow(deps.db, b.brewery, b.name, facts);
+        const rungs = searchQueryLadder(b.brewery, b.name);
+        const narrow = rungs.length > 1 ? rungs[0] : null;
+        const queries = {
+          algolia: algoliaQuery(deps, rungs[rungs.length - 1]),
+          ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
+        };
+        if (row === null) return { brewery: b.brewery, name: b.name, eligible: true, ...queries };
+        const bid = install ? undefined : b.bid;
         // #384: a linked row is normally done. The exception is a shop that publishes a
         // *different* Untappd id than the one we stored — then the row is a repair
         // candidate. refusesBidOverride is the same helper /enrich/result applies, so a
@@ -224,7 +249,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // What bounds it is the extension's badge cache: a card that stays a cache hit is
         // never re-offered, so a rejected bid costs one search slot per ~8h per browser.
         const contradicts =
-          b.bid !== undefined && row.untappd_id != null && row.untappd_id !== b.bid;
+          bid !== undefined && row.untappd_id != null && row.untappd_id !== bid;
         const notABeer = isNotABeer(deps.db, row.id);
         // #614: суперечливий bid на картці з аліасом стосується лише аліасу, а не провенансу канонічного
         // рядка (канонічний рядок випитого пива зазвичай 'checkin'), тож refusesBidOverride його не блокує.
@@ -245,16 +270,13 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // `algolia` keeps its meaning and a published 0.13.0 client is untouched. The
         // narrow rung travels as an extra optional field the old client ignores, and is
         // absent whenever the rungs agree (every all-Latin pair).
-        const rungs = searchQueryLadder(b.brewery, b.name);
-        const narrow = rungs.length > 1 ? rungs[0] : null;
         return {
           brewery: b.brewery,
           name: b.name,
           eligible,
           ...(!eligible && row.untappd_id != null && !contradicts &&
             !notABeer ? { linked: true } : {}),
-          algolia: algoliaQuery(deps, rungs[rungs.length - 1]),
-          ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
+          ...queries,
         };
       }),
     )();
