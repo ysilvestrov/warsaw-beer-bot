@@ -103,7 +103,7 @@ describe('handleMatch', () => {
 
     await expect(handleMatch({ type: 'match', cards })).resolves.toEqual({ type: 'match:ok', results: [{ ...orphan, cacheBinding }] });
     expect(client.postMatch).toHaveBeenCalledTimes(1);
-    expect(client.postMatch).toHaveBeenCalledWith('https://api.test', 'tok', cards);
+    expect(client.postMatch).toHaveBeenCalledWith('https://api.test', 'tok', cards, client.DEFAULT_TIMEOUT_MS, { version: '9.9.9' });
   });
 });
 

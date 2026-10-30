@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from './config';
+import { authToken, getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from './config';
 
 describe('config', () => {
   it('returns empty token + default baseUrl when nothing stored', async () => {
@@ -11,7 +11,17 @@ describe('config', () => {
   it('persists and reads back token + baseUrl', async () => {
     await setSettings({ token: 'abc', baseUrl: 'http://localhost:3000' });
     const s = await getSettings();
-    expect(s).toEqual({ token: 'abc', baseUrl: 'http://localhost:3000', enrichEnabled: false });
+    expect(s).toEqual({
+      token: 'abc', baseUrl: 'http://localhost:3000', enrichEnabled: false,
+      installToken: '', installRegistration: true, installDeletionPending: false,
+    });
+  });
+
+  it('statistics are on unless explicitly switched off', async () => {
+    await setSettings({ installRegistration: false });
+    expect((await getSettings()).installRegistration).toBe(false);
+    await setSettings({ installRegistration: true });
+    expect((await getSettings()).installRegistration).toBe(true);
   });
 
   it('falls back to default baseUrl when stored baseUrl is blank', async () => {
@@ -32,6 +42,28 @@ describe('config', () => {
     await setSettings({ enrichEnabled: true });
     expect((await getSettings()).enrichEnabled).toBe(true);
     vi.unstubAllGlobals();
+  });
+});
+
+describe('authToken', () => {
+  it('the Telegram token wins over the install token', () => {
+    expect(authToken({ token: 'tg', installToken: 'wbi_1', installDeletionPending: false })).toBe('tg');
+  });
+
+  it('the install token stands in without a Telegram token', () => {
+    expect(authToken({ token: '', installToken: 'wbi_1', installDeletionPending: false })).toBe('wbi_1');
+  });
+
+  it('a pending deletion withholds the install token at once', () => {
+    expect(authToken({ token: '', installToken: 'wbi_1', installDeletionPending: true })).toBe('');
+  });
+
+  it('a pending deletion does not touch the Telegram token', () => {
+    expect(authToken({ token: 'tg', installToken: 'wbi_1', installDeletionPending: true })).toBe('tg');
+  });
+
+  it('no token at all is anonymous', () => {
+    expect(authToken({ token: '', installToken: '', installDeletionPending: false })).toBe('');
   });
 });
 

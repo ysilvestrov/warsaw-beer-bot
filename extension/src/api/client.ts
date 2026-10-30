@@ -30,11 +30,15 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+/** #923: who is asking, for the server's per-install accounting. Never identifies a person. */
+export interface MatchClient { version: string; shop?: string }
+
 export async function postMatch(
   baseUrl: string,
   token: string,
   beers: RawBeer[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  client?: MatchClient,
 ): Promise<MatchResult[]> {
   let res: Response;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -43,7 +47,7 @@ export async function postMatch(
     res = await fetchWithTimeout(`${trimBase(baseUrl)}/match`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ beers }),
+      body: JSON.stringify(client ? { beers, client } : { beers }),
     }, timeoutMs);
   } catch {
     throw new ApiError('network');
@@ -173,6 +177,48 @@ export async function postCheckinSyncPage(
   }
   if (!res.ok) throw new ApiError('server', `status ${res.status}`);
   return (await res.json()) as CheckinSyncPageResult;
+}
+
+/** #923: registers this install and returns its token. Any refusal (429 cap, 5xx) is 'server'. */
+export async function postInstall(
+  baseUrl: string,
+  version: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${trimBase(baseUrl)}/installs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version }),
+    }, timeoutMs);
+  } catch {
+    throw new ApiError('network');
+  }
+  if (res.status !== 201) throw new ApiError('server', `status ${res.status}`);
+  const data = (await res.json()) as { token?: unknown };
+  if (typeof data.token !== 'string' || !data.token) throw new ApiError('server', 'no token');
+  return data.token;
+}
+
+/**
+ * #923: deletes this install on the server. 401 means the server no longer knows the token —
+ * there is nothing left to delete, so it counts as done. Anything else is retried later.
+ */
+export async function deleteInstall(
+  baseUrl: string,
+  token: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<'deleted' | 'retry'> {
+  try {
+    const res = await fetchWithTimeout(`${trimBase(baseUrl)}/installs/me`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }, timeoutMs);
+    return res.status === 204 || res.status === 401 ? 'deleted' : 'retry';
+  } catch {
+    return 'retry';
+  }
 }
 
 export async function getHealth(baseUrl: string, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<boolean> {

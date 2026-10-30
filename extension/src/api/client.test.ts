@@ -103,7 +103,82 @@ describe('api/client', () => {
   });
 });
 
-import { postEnrichCandidates, postEnrichResult } from './client';
+import { postEnrichCandidates, postEnrichResult, postInstall, deleteInstall } from './client';
+
+describe('postMatch client block (#923)', () => {
+  const sent = async (client?: { version: string; shop?: string }) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await postMatch('https://api.test', '', [{ brewery: 'B', name: 'N' }], 1000, client);
+    return JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+  };
+
+  it('carries the version and the shop when given', async () => {
+    expect(await sent({ version: '0.22.0', shop: 'beerfreak.pl' }))
+      .toEqual({ beers: [{ brewery: 'B', name: 'N' }], client: { version: '0.22.0', shop: 'beerfreak.pl' } });
+  });
+
+  it('leaves the body as before when no client is given', async () => {
+    expect(await sent()).toEqual({ beers: [{ brewery: 'B', name: 'N' }] });
+  });
+});
+
+describe('postInstall', () => {
+  it('posts the version without a bearer and returns the issued token', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ install_id: 'i', token: 'wbi_x' }), { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await postInstall('https://api.test/', '0.22.0')).toBe('wbi_x');
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.test/installs');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body as string)).toEqual({ version: '0.22.0' });
+  });
+
+  it('the daily cap (429) is a server error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"registrations_capped"}', { status: 429 })));
+    await expect(postInstall('https://api.test', '0.22.0')).rejects.toMatchObject({ code: 'server' });
+  });
+
+  it('a 201 without a token is a server error, never an empty token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 201 })));
+    await expect(postInstall('https://api.test', '0.22.0')).rejects.toMatchObject({ code: 'server' });
+  });
+
+  it('an unreachable server is a network error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+    await expect(postInstall('https://api.test', '0.22.0')).rejects.toMatchObject({ code: 'network' });
+  });
+});
+
+describe('deleteInstall', () => {
+  const answer = (status: number) => vi.stubGlobal('fetch', vi.fn(async () => new Response(status === 204 ? null : '{}', { status })));
+
+  it('204 is deleted, and the request is DELETE /installs/me with the token', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await deleteInstall('https://api.test', 'wbi_x')).toBe('deleted');
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.test/installs/me');
+    expect(init.method).toBe('DELETE');
+    expect(init.headers).toEqual({ Authorization: 'Bearer wbi_x' });
+  });
+
+  it('401 is deleted — the server no longer knows the token', async () => {
+    answer(401);
+    expect(await deleteInstall('https://api.test', 'wbi_x')).toBe('deleted');
+  });
+
+  it('5xx is retried later', async () => {
+    answer(503);
+    expect(await deleteInstall('https://api.test', 'wbi_x')).toBe('retry');
+  });
+
+  it('an unreachable server is retried later', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
+    expect(await deleteInstall('https://api.test', 'wbi_x')).toBe('retry');
+  });
+});
 
 describe('postEnrichCandidates', () => {
   it('posts beers and returns candidates', async () => {

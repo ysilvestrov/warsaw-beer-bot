@@ -1,6 +1,7 @@
 import { getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { getHealth, postMatch, ApiError } from '../api/client';
+import { syncInstall } from '../background/install';
 export { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 
 // Replaced at build time by Vite `define`. Undefined under Vitest (no define), hence the
@@ -22,6 +23,18 @@ export async function testConnection(baseUrl: string, token: string): Promise<Co
   } catch (e) {
     return { ok: false, reason: e instanceof ApiError ? e.code : 'server' };
   }
+}
+
+/**
+ * #923: the "Anonymous usage statistics" switch. Off marks the install for deletion before asking
+ * the server, so requests stop carrying the token at once even if the server is unreachable; the
+ * deletion is retried on the next start. On re-registers, once any pending deletion is done.
+ */
+export async function setStatisticsEnabled(on: boolean): Promise<string> {
+  await setSettings(on ? { installRegistration: true } : { installRegistration: false, installDeletionPending: true });
+  const state = await syncInstall().catch(() => 'none' as const);
+  if (state === 'deletion_pending') return 'Deletion not finished yet — will retry.';
+  return on ? 'Statistics on.' : 'Statistics off.';
 }
 
 export async function requestEnrichPermission(): Promise<boolean> {
@@ -71,6 +84,18 @@ async function initOptionsPage(): Promise<void> {
         await setSettings({ enrichEnabled: false });
         status.textContent = 'Enrichment off.';
       }
+    });
+  }
+
+  const stats = el<HTMLInputElement>('installRegistration');
+  const installStatus = el<HTMLElement>('installStatus');
+  if (stats && installStatus) {
+    stats.checked = s.installRegistration;
+    if (s.installDeletionPending) installStatus.textContent = 'Deletion not finished yet — will retry.';
+    stats.addEventListener('change', async () => {
+      stats.disabled = true;
+      installStatus.textContent = await setStatisticsEnabled(stats.checked);
+      stats.disabled = false;
     });
   }
 

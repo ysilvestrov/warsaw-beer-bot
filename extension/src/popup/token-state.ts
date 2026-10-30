@@ -27,7 +27,10 @@ export interface TokenStateNodes {
   foot: HTMLElement;
 }
 
-export function tokenStateView(hasToken: boolean): TokenStateView {
+// #923: an anonymous install token makes the extension work without Telegram, so `Get a token`
+// stops being the one thing to do and drops to the secondary tier. Check-ins still need the
+// Telegram token: sync stays disabled and captioned exactly as without any token.
+export function tokenStateView(hasToken: boolean, hasInstall = false): TokenStateView {
   return hasToken
     ? {
         authVisible: false,
@@ -40,7 +43,7 @@ export function tokenStateView(hasToken: boolean): TokenStateView {
     : {
         authVisible: true,
         syncTier: 'btn-secondary',
-        authTier: 'btn-primary',
+        authTier: hasInstall ? 'btn-secondary' : 'btn-primary',
         syncEnabled: false,
         syncCaption: 'Add a token to sync your check-ins.',
         guideHome: 'auth',

@@ -60,6 +60,30 @@ describe('tokenStateView', () => {
   });
 });
 
+describe('tokenStateView — install token, no Telegram (#923)', () => {
+  it('Get a token is offered but no longer primary; check-in sync still needs Telegram', () => {
+    expect(tokenStateView(false, true)).toEqual({
+      authVisible: true,
+      syncTier: 'btn-secondary',
+      authTier: 'btn-secondary',
+      syncEnabled: false,
+      syncCaption: 'Add a token to sync your check-ins.',
+      guideHome: 'auth',
+    });
+  });
+
+  it('with a Telegram token as well, the Telegram view stands', () => {
+    expect(tokenStateView(true, true)).toEqual({
+      authVisible: false,
+      syncTier: 'btn-primary',
+      authTier: 'btn-secondary',
+      syncEnabled: true,
+      syncCaption: '',
+      guideHome: 'foot',
+    });
+  });
+});
+
 describe('applyTokenState — no token', () => {
   it('puts the auth block directly after the header, never above it', () => {
     const n = fixture();
