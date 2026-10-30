@@ -13,6 +13,8 @@ const NUMBER_KEYS = [
   'ratingsMissing', 'ratingsChecked30d', 'snapshots', 'taps', 'usersTotal', 'usersLinked',
   'onTapDistinct', 'onTapPubs', 'newOnTap24h', 'enrichMatched24h', 'enrichFailures24h',
   'extMatchRequests', 'extMatchAnon', 'extMatchBeers', 'mcpMatchRequests', 'mcpMatchBeers',
+  'installsActive', 'installMisses', 'installEnrichLinks', 'installRegistrations',
+  'installRegistrationsRejected', 'installsEnrichCapped',
   'sealUnidentifiable', 'sealUnidentifiableReobserved', 'sealNotABeer', 'sealNotABeer7d',
   'sealRetiredFalsified', 'lockedRows', 'unlocked7d', 'verdictsOutlived7d', 'unrescuedRows',
   'unlockedUnadjudicated7d',

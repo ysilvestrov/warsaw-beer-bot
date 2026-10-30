@@ -6,6 +6,14 @@ import type { StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
 import { saveStatusSnapshot, pruneStatusSnapshots } from '../storage/status_snapshots';
 import { pruneHandlerFailures } from '../storage/handler_failures';
+import { pruneInstallLedger } from '../storage/install_prune';
+import { REGISTRATIONS_PER_DAY } from '../storage/extension_installs';
+import { ENRICH_RESULTS_PER_INSTALL_PER_DAY } from '../storage/install_usage';
+
+// #923 §2.6: install ledgers (usage, registrations, misses) keep this many Warsaw days — the period the
+// privacy policy promises; an install not seen for INSTALL_RETENTION_DAYS is deleted, its usage with it.
+const INSTALL_LEDGER_RETENTION_DAYS = 90;
+const INSTALL_RETENTION_DAYS = 180;
 import { warsawDateAndHour } from '../domain/warsaw-time';
 import { evaluateAll } from '../domain/status/evaluate';
 import { computeTrends } from '../domain/status/trends';
@@ -103,6 +111,13 @@ function buildUserLines(m: StatusMetrics, bugReportLine: string | null): string[
     ...(m.extMatchRequests > 0
       ? [`розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`]
       : []),
+    // #923 §2.6: the same "only when there was activity" convention as the neighbours.
+    ...(m.installsActive > 0
+      ? [`установки (вчора): ${group(m.installsActive)} активних · ${group(m.installRegistrations)} нових · ${group(m.installMisses)} промахів · ${group(m.installEnrichLinks)} лінків з enrich`]
+      : []),
+    ...(m.installRegistrations + m.installRegistrationsRejected + m.installsEnrichCapped > 0
+      ? [`ліміти установок (вчора): ${group(m.installRegistrations)}/${group(REGISTRATIONS_PER_DAY)} реєстрацій · ${group(m.installRegistrationsRejected)} відмов · enrich: ${group(m.installsEnrichCapped)} установок уперлись у ${ENRICH_RESULTS_PER_INSTALL_PER_DAY}`]
+      : []),
     ...(m.mcpMatchRequests > 0
       ? [`MCP /match (вчора): ${group(m.mcpMatchRequests)} запитів · ${group(m.mcpMatchBeers)} пив`]
       : []),
@@ -124,6 +139,13 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
   try {
     pruneHandlerFailures(db, `${shiftDate(dateKey, -STATUS_RULES.snapshotRetentionDays)}T00:00:00.000Z`);
   } catch { /* see above */ }
+  // #923: install ledgers keep 90 days, an unseen install 180. Same silence as above on failure.
+  try {
+    pruneInstallLedger(db, {
+      ledgerBefore: shiftDate(dateKey, -INSTALL_LEDGER_RETENTION_DAYS),
+      installsBefore: shiftDate(dateKey, -INSTALL_RETENTION_DAYS),
+    });
+  } catch { /* the next day's run retries */ }
   // The pause is a channel-health fact (🔴 Канали), so the users section shows activity only.
   const bugReportLine = opts.repo && inputs.bugReports
     ? buildBugReportLine(inputs.bugReports.summary, null, opts.repo)

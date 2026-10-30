@@ -322,6 +322,56 @@ test('the users block lists extension, MCP and bug-report activity with grouped 
   ]);
 });
 
+function seedInstallDay(db: ReturnType<typeof emptyDb>) {
+  for (const id of ['a', 'b']) {
+    db.prepare(`INSERT INTO extension_installs (install_id, token_hash, created_at, last_seen_date)
+                VALUES (?, ?, '2026-10-05T08:00:00.000Z', '2026-10-05')`).run(id, `h-${id}`);
+  }
+  db.exec(`INSERT INTO install_usage_daily (date, install_id, shop, match_requests, match_misses, enrich_links, enrich_rejected) VALUES
+    ('2026-10-05', 'a', 'a.pl', 4, 3, 1, 2),
+    ('2026-10-05', 'a', 'b.pl', 1, 1, 0, 0),
+    ('2026-10-05', 'b', 'a.pl', 2, 0, 0, 1)`);
+  db.exec(`INSERT INTO install_registrations_daily (date, registrations, rejected) VALUES ('2026-10-05', 2345, 0)`);
+}
+
+test('the users block shows the two install lines with exact numbers (#923)', async () => {
+  const db = emptyDb();
+  seedInstallDay(db);
+  const sent: string[] = [];
+  await dailyStatus({ db, log: silentLog, ...missingMonitor,
+    now: () => new Date('2026-10-06T07:00:00Z'), notifyAdmin: async (t) => { sent.push(t); } });
+  expect(usersBlock(sent[0])).toEqual([
+    'Живі користувачі',
+    '  • установки (вчора): 2 активних · 2 345 нових · 4 промахів · 1 лінків з enrich',
+    '  • ліміти установок (вчора): 2 345/2 000 реєстрацій · 0 відмов · enrich: 2 установок уперлись у 200',
+  ]);
+});
+
+test('a day with only cap refusals shows the limits line without the activity line (#923)', async () => {
+  const db = emptyDb();
+  db.exec(`INSERT INTO install_registrations_daily (date, registrations, rejected) VALUES ('2026-10-05', 0, 7)`);
+  const sent: string[] = [];
+  await dailyStatus({ db, log: silentLog, ...missingMonitor,
+    now: () => new Date('2026-10-06T07:00:00Z'), notifyAdmin: async (t) => { sent.push(t); } });
+  expect(usersBlock(sent[0])).toEqual([
+    'Живі користувачі',
+    '  • ліміти установок (вчора): 0/2 000 реєстрацій · 7 відмов · enrich: 0 установок уперлись у 200',
+  ]);
+});
+
+test('the daily run prunes install ledgers past 90 days and installs unseen for 180 (#923)', async () => {
+  const db = emptyDb();
+  db.exec(`INSERT INTO extension_installs (install_id, token_hash, created_at, last_seen_date) VALUES
+    ('stale', 'h1', '2026-01-01T00:00:00.000Z', '2026-04-08'),
+    ('live',  'h2', '2026-01-01T00:00:00.000Z', '2026-04-09')`);
+  db.exec(`INSERT INTO install_usage_daily (date, install_id, shop) VALUES ('2026-07-07', 'live', 'old.pl'), ('2026-07-08', 'live', 'kept.pl')`);
+  await dailyStatus({ db, log: silentLog, ...missingMonitor,
+    now: () => new Date('2026-10-06T07:00:00Z'), notifyAdmin: async () => {} });
+  // Warsaw 2026-10-06: minus 90 days is 2026-07-08, minus 180 is 2026-04-09.
+  expect(db.prepare('SELECT install_id FROM extension_installs').all()).toEqual([{ install_id: 'live' }]);
+  expect(db.prepare('SELECT shop FROM install_usage_daily').all()).toEqual([{ shop: 'kept.pl' }]);
+});
+
 test('no extension, MCP or report traffic leaves out the users section entirely', async () => {
   const db = emptyDb();
   const sent: string[] = [];

@@ -2,6 +2,7 @@ import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
 import { getUsageForDate } from './api_usage';
+import { installDayStats } from './install_stats';
 import { inactiveLegacyOrphanPredicate, orphanNotOnTapPredicate } from './beers';
 import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
@@ -36,6 +37,13 @@ export interface StatusMetrics {
   extMatchBeers: number;      // sum of beers, previous Warsaw day
   mcpMatchRequests: number;   // MCP match_beers tool calls, previous Warsaw day
   mcpMatchBeers: number;      // sum of beers submitted through MCP, previous Warsaw day
+  // #923 §2.6: extension installs without Telegram, previous Warsaw day (installs, not people).
+  installsActive: number;
+  installMisses: number;
+  installEnrichLinks: number;
+  installRegistrations: number;
+  installRegistrationsRejected: number;
+  installsEnrichCapped: number;
   // #377 part B. Two of these can refute the design that produced them:
   // `sealUnidentifiableReobserved` at 0 means the rows are formally back in a pool but
   // the cron never reaches them — the mechanism is dead. A high re-observed count with
@@ -115,7 +123,9 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     try { dbSizeMb = Math.round(fs.statSync(db.name).size / 1e5) / 10; } catch { dbSizeMb = null; }
   }
 
-  const usage = getUsageForDate(db, previousDate(warsawDateAndHour(now).date));
+  const yesterday = previousDate(warsawDateAndHour(now).date);
+  const usage = getUsageForDate(db, yesterday);
+  const installs = installDayStats(db, yesterday);
 
   return {
     lastScrapeHoursAgo,
@@ -243,5 +253,11 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     extMatchBeers: usage.beers,
     mcpMatchRequests: usage.mcpRequests,
     mcpMatchBeers: usage.mcpBeers,
+    installsActive: installs.active,
+    installMisses: installs.misses,
+    installEnrichLinks: installs.enrichLinks,
+    installRegistrations: installs.registrations,
+    installRegistrationsRejected: installs.registrationsRejected,
+    installsEnrichCapped: installs.enrichCapped,
   };
 }
