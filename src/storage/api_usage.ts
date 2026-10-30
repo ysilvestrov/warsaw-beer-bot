@@ -3,6 +3,8 @@ import type { DB } from './db';
 export interface DailyUsage {
   anonRequests: number;
   authedRequests: number;
+  /** /match with an install token (#923): neither anonymous nor a Telegram user. */
+  installRequests: number;
   beers: number;
   mcpRequests: number;
   mcpBeers: number;
@@ -26,9 +28,11 @@ export type UsageChannel = 'extension' | 'mcp';
 // count) instead of blocking up to the connection's 5s timeout. The original
 // timeout is restored in finally so every other writer keeps its full tolerance.
 // better-sqlite3 is synchronous, so no other statement runs during the window.
+// `install` (#923) marks an extension call made with an install token: it is counted in its own
+// column, never as anonymous or as a Telegram user — §3.16 keeps the three apart.
 export function recordMatchUsage(
   db: DB,
-  args: { date: string; authed: boolean; beers: number; channel: UsageChannel },
+  args: { date: string; authed: boolean; install?: boolean; beers: number; channel: UsageChannel },
 ): void {
   const prevBusyTimeout = db.pragma('busy_timeout', { simple: true }) as number;
   db.pragma('busy_timeout = 0');
@@ -36,19 +40,22 @@ export function recordMatchUsage(
     // `authed` is meaningless for the MCP channel — that surface has no anonymous path at
     // all — so it is deliberately not folded into the MCP counters.
     const mcp = args.channel === 'mcp';
+    const install = !mcp && args.install === true;
     db.prepare(`
-      INSERT INTO api_usage (date, anon_requests, authed_requests, beers, mcp_requests, mcp_beers)
-      VALUES (@date, @anon, @authed, @beers, @mcpRequests, @mcpBeers)
+      INSERT INTO api_usage (date, anon_requests, authed_requests, install_requests, beers, mcp_requests, mcp_beers)
+      VALUES (@date, @anon, @authed, @install, @beers, @mcpRequests, @mcpBeers)
       ON CONFLICT(date) DO UPDATE SET
-        anon_requests   = anon_requests   + excluded.anon_requests,
-        authed_requests = authed_requests + excluded.authed_requests,
-        beers           = beers           + excluded.beers,
-        mcp_requests    = mcp_requests    + excluded.mcp_requests,
-        mcp_beers       = mcp_beers       + excluded.mcp_beers
+        anon_requests    = anon_requests    + excluded.anon_requests,
+        authed_requests  = authed_requests  + excluded.authed_requests,
+        install_requests = install_requests + excluded.install_requests,
+        beers            = beers            + excluded.beers,
+        mcp_requests     = mcp_requests     + excluded.mcp_requests,
+        mcp_beers        = mcp_beers        + excluded.mcp_beers
     `).run({
       date: args.date,
-      anon: mcp ? 0 : (args.authed ? 0 : 1),
-      authed: mcp ? 0 : (args.authed ? 1 : 0),
+      anon: mcp || install ? 0 : (args.authed ? 0 : 1),
+      authed: mcp || install ? 0 : (args.authed ? 1 : 0),
+      install: install ? 1 : 0,
       beers: mcp ? 0 : args.beers,
       mcpRequests: mcp ? 1 : 0,
       mcpBeers: mcp ? args.beers : 0,
@@ -60,15 +67,16 @@ export function recordMatchUsage(
 
 export function getUsageForDate(db: DB, date: string): DailyUsage {
   const row = db.prepare(
-    `SELECT anon_requests, authed_requests, beers, mcp_requests, mcp_beers
+    `SELECT anon_requests, authed_requests, install_requests, beers, mcp_requests, mcp_beers
        FROM api_usage WHERE date = ?`,
   ).get(date) as {
-    anon_requests: number; authed_requests: number; beers: number;
+    anon_requests: number; authed_requests: number; install_requests: number; beers: number;
     mcp_requests: number; mcp_beers: number;
   } | undefined;
   return {
     anonRequests: row?.anon_requests ?? 0,
     authedRequests: row?.authed_requests ?? 0,
+    installRequests: row?.install_requests ?? 0,
     beers: row?.beers ?? 0,
     mcpRequests: row?.mcp_requests ?? 0,
     mcpBeers: row?.mcp_beers ?? 0,

@@ -1100,6 +1100,57 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 52,
+    // Extension installs without Telegram (spec 2026-10-30-923-install-token-design.md §1). An
+    // install is a second token kind in its own table, so no api_tokens lookup can ever return one
+    // as a person. install_registrations_daily is the global cap's counter: it never shrinks when an
+    // install is deleted, or register → delete loops would walk around the cap. match_misses is a
+    // journal of cards /match searched and did not find — deliberately NOT orphans in beers, which
+    // the enrich cron would spend lookup quota on. Expand-only.
+    sql: `
+      CREATE TABLE IF NOT EXISTS extension_installs (
+        install_id     TEXT PRIMARY KEY,
+        token_hash     TEXT NOT NULL UNIQUE,
+        created_at     TEXT NOT NULL,
+        last_seen_date TEXT NOT NULL,
+        ext_version    TEXT,
+        telegram_id    INTEGER REFERENCES user_profiles(telegram_id) ON DELETE SET NULL
+      );
+      CREATE TABLE IF NOT EXISTS install_usage_daily (
+        date            TEXT NOT NULL,
+        install_id      TEXT NOT NULL REFERENCES extension_installs(install_id) ON DELETE CASCADE,
+        shop            TEXT NOT NULL DEFAULT '',
+        match_requests  INTEGER NOT NULL DEFAULT 0,
+        match_beers     INTEGER NOT NULL DEFAULT 0,
+        match_misses    INTEGER NOT NULL DEFAULT 0,
+        enrich_results  INTEGER NOT NULL DEFAULT 0,
+        enrich_links    INTEGER NOT NULL DEFAULT 0,
+        enrich_rejected INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (date, install_id, shop)
+      );
+      CREATE INDEX IF NOT EXISTS idx_install_usage_install ON install_usage_daily (install_id);
+      CREATE TABLE IF NOT EXISTS install_registrations_daily (
+        date          TEXT PRIMARY KEY,
+        registrations INTEGER NOT NULL DEFAULT 0,
+        rejected      INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS match_misses (
+        normalized_brewery TEXT NOT NULL,
+        normalized_name    TEXT NOT NULL,
+        brewery            TEXT NOT NULL,
+        name               TEXT NOT NULL,
+        abv                REAL,
+        shop               TEXT NOT NULL DEFAULT '',
+        first_seen_at      TEXT NOT NULL,
+        last_seen_at       TEXT NOT NULL,
+        last_seen_date     TEXT NOT NULL,
+        seen_days          INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (normalized_brewery, normalized_name)
+      );
+      ALTER TABLE api_usage ADD COLUMN install_requests INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
