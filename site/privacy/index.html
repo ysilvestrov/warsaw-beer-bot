@@ -31,7 +31,7 @@
   </head>
   <body>
     <h1>Warsaw Beer Overlay — Privacy Policy</h1>
-    <p class="updated">Last updated: 8 July 2026</p>
+    <p class="updated">Last updated: 31 October 2026</p>
 
     <p>
       Warsaw Beer Overlay ("the extension") is a browser extension that shows, on supported
@@ -82,6 +82,25 @@
       press it, no Untappd data is read.
     </p>
 
+    <h2>Anonymous usage statistics (on by default, can be switched off)</h2>
+    <p>
+      Without a bot token, the extension asks <code>beer-api.ysilvestrov-ai.uk</code> once for a random
+      install ID and keeps it in your browser. It is not linked to you, your bot account or your
+      Untappd account; it lets the extension use "Find missing beers via Untappd" without the bot,
+      and lets the server count usage. Per day and per shop domain, the server records how many
+      pages and beers were checked, how many could not be matched, and how many missing beers were
+      found, plus the extension version. Beers that could not be matched are kept by brewery and
+      name (with the shop domain), without who sent them — this also happens with a bot token,
+      whatever the switch says. The server does not store your IP address. These records are kept
+      for 90 days; an install ID unused for 180 days is deleted.
+    </p>
+    <p>
+      To switch this off, uncheck "Anonymous usage statistics" in the extension's options: the
+      install ID stops being sent at once and is deleted from the server (retried at the next browser
+      start if the server cannot be reached). Without the install ID and without a bot token, the
+      extension shows global ratings only and records nothing.
+    </p>
+
     <h2>Storage and retention</h2>
     <p>
       Your token and the match cache are stored locally in your browser until you remove the token,
@@ -93,7 +112,8 @@
 
     <h2>What the extension does NOT do</h2>
     <ul>
-      <li>No analytics, telemetry, or tracking of your browsing.</li>
+      <li>No tracking of your browsing: only beers on supported shop pages, which are sent for
+        matching anyway, are counted — never other sites, clicks or history.</li>
       <li>No advertising and no advertising identifiers.</li>
       <li>No selling or sharing of your data with third parties.</li>
       <li>No network requests other than to <code>beer-api.ysilvestrov-ai.uk</code> and — only if
@@ -102,7 +122,9 @@
 
     <h2>Your controls</h2>
     <ul>
-      <li>Remove your token in the extension's options to stop all API requests.</li>
+      <li>Remove your token in the extension's options to stop sending it with API requests.</li>
+      <li>Uncheck "Anonymous usage statistics" in the options to delete the install ID and stop
+        usage counting.</li>
       <li>"Clear all cache" in the popup removes locally cached match data.</li>
       <li>Leave "Find missing beers via Untappd" off (or uncheck it) to disable enrichment.</li>
       <li>Simply never press "Sync my check-ins" to avoid reading your Untappd feed.</li>

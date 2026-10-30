@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+- “Find missing beers via Untappd” now works without a bot token: the extension gets a random, anonymous install ID for it, and the popup says “Works without Telegram”. The new “Anonymous usage statistics” option on the options page lets you switch this off at any time, which also deletes the ID from the server.
+
 - Fixed beers on Piwne Mosty being marked as “Not beer” (the grey ✕) when listed under the shop's temporary category, such as PINTA Barrel Brewing releases. Their ratings and check-in badges now appear normally.
 
 - When “Sync my check-ins” stopped because Untappd did not return your check-in feed, the popup said “check your connection and token”, which was not the cause. It now says that Untappd did not return the feed, or returned an unexpected page, and what to do next.

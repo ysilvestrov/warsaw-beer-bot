@@ -26,10 +26,11 @@
       </label>
       <p class="checkbox-note">
         Without a Telegram token, this lets the extension find missing beers for you. The server
-        keeps a random install ID and, per day: how many pages were checked, which beers (brewery and
-        name) it could not match, and the shop's domain. No browsing history, no IP address, nothing
-        that identifies you; kept for 90 days. Turning it off deletes the install ID. With a Telegram
-        token, beers it could not match are recorded either way.
+        keeps a random install ID and, per day and shop domain, how many pages and beers were checked
+        and how many could not be matched. Beers it could not match are kept by brewery and name,
+        without who sent them. No browsing history, no IP address, nothing that identifies you; kept
+        for 90 days. Turning it off deletes the install ID. With a Telegram token, beers it could not
+        match are recorded either way.
       </p>
       <p id="installStatus" class="options-status" aria-live="polite"></p>
 
