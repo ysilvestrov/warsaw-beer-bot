@@ -691,6 +691,7 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 | `anon_requests` | INTEGER | NOT NULL DEFAULT 0 | `/match` без токена (анонім) за добу |
 | `authed_requests` | INTEGER | NOT NULL DEFAULT 0 | `/match` з валідним токеном за добу |
 | `beers` | INTEGER | NOT NULL DEFAULT 0 | сума `beers[]` у запитах за добу |
+| `install_requests` | INTEGER | NOT NULL DEFAULT 0 | v52. `/match` з токеном установки (`wbi_…`, §3.16.1) за добу; ні в `anon_requests`, ні в `authed_requests` не потрапляє |
 | `mcp_requests` | INTEGER | NOT NULL DEFAULT 0 | виклики тули `match_beers` через `/mcp` за добу |
 | `mcp_beers` | INTEGER | NOT NULL DEFAULT 0 | сума `beers[]` у MCP-викликах за добу |
 
@@ -703,6 +704,38 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 змінивши те, що вона рахує (розширення ПЛЮС агентів), і виявити підміну не було б
 звідки: число просто виросло б. Для MCP-каналу `authed` не має сенсу взагалі — у
 `/mcp` анонімного шляху немає, — тож у `mcp_*` він не згортається.
+
+### 3.16.1 `extension_installs` — установки розширення без Telegram (v52, #923)
+| Поле | Тип | Правило |
+|---|---|---|
+| `install_id` | TEXT | PK, `randomUUID()` |
+| `token_hash` | TEXT NOT NULL UNIQUE | SHA-256 сирого токена `wbi_…`; сирий токен сервер не зберігає |
+| `created_at` | TEXT NOT NULL | ISO UTC реєстрації |
+| `last_seen_date` | TEXT NOT NULL | варшавська дата останнього запиту; пишеться лише при зміні дати чи версії |
+| `ext_version` | TEXT NULL | версія розширення з реєстрації або запиту |
+| `telegram_id` | INTEGER NULL | FK → `user_profiles` `ON DELETE SET NULL`; зарезервовано для прив'язки (#926), ядро не пише |
+
+Видалення установки каскадом прибирає її `install_usage_daily`; `match_misses` не належать
+установці й лишаються.
+
+### 3.16.2 `install_usage_daily` — облік установки за добу й крамницею (v52)
+PK `(date, install_id, shop)`; `install_id` FK з CASCADE; індекс `idx_install_usage_install`.
+Лічильники `match_requests`, `match_beers`, `match_misses`, `enrich_results`, `enrich_links`,
+`enrich_rejected` (INTEGER NOT NULL DEFAULT 0); `shop` — хост крамниці від клієнта, `''` якщо не
+передано. Колонки `enrich_*` створено наперед — ядро їх не пише. Запис best-effort із
+`busy_timeout = 0`, як `api_usage`.
+
+### 3.16.3 `install_registrations_daily` — стеля реєстрацій (v52)
+`date` (варшавська, PK), `registrations`, `rejected`. Стеля — 2000 реєстрацій за добу; перевірка
+й вставка — одна `IMMEDIATE`-транзакція. Лічильник **ніколи не зменшується**: видалення установки
+не повертає місця, тож цикл «реєстрація → видалення» стелю не обходить.
+
+### 3.16.4 `match_misses` — журнал промахів `/match` (v52)
+PK `(normalized_brewery, normalized_name)` — нормалізатори матчера, тож переписана інакше картка
+лягає в той самий рядок. Сирі `brewery`, `name`, `shop` — з першої появи; `abv` — перше відоме
+значення (`COALESCE`). `first_seen_at`/`last_seen_at` — ISO UTC; `seen_days` зростає на 1, лише
+коли варшавська `last_seen_date` змінилася. Пишеться для запитів із будь-яким токеном (не для
+аноніма); окрема таблиця, не сироти: промах — це «не знайшли», а не провал енричу.
 
 ### 3.17 `bug_report_drafts` — чернетки скарг (v38)
 | Поле | Тип | Правило |
@@ -772,6 +805,8 @@ user_profiles 1───* checkin_sync_state (telegram_id, account_key, CASCADE)
 user_profiles 1───* checkin_coverage (telegram_id, CASCADE)
 user_profiles 1───* untappd_had     (telegram_id)
 user_profiles 1───* api_tokens      (telegram_id, CASCADE; ротація тримає 1 активний)
+user_profiles 1───* extension_installs (telegram_id, SET NULL; v52)
+extension_installs 1───* install_usage_daily (install_id, CASCADE)
 bug_reports   1───* bug_report_media  (report_id, CASCADE)
 beers         1───* checkins         (beer_id)
 beers         1───* untappd_had      (beer_id, CASCADE)
@@ -835,6 +870,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 49 | `fests.target_name_patterns` (JSON-масив, `'[]'`, CHECK) — Target за назвою |
 | 50 | `fest_glass_removed` (team_id, glass_no, queue_id, removed_at) — номери й `id` рядків скасованих келихів; ідемпотентна |
 | 51 | `fest_presence` (team_id, telegram_id, kind `start`/`end`, at) — явні початок і кінець дня учасника; `fest_glass_marks` (queue_id → `fest_queue` каскадом, telegram_id, marked_at) — власні відмітки `☑️`; ідемпотентна |
+| 52 | `extension_installs`, `install_usage_daily`, `install_registrations_daily`, `match_misses` (§3.16.1–3.16.4) і `api_usage.install_requests` — токен установки без Telegram і журнал промахів (#923). Expand-only: нові таблиці й колонка з `DEFAULT`; без бекфілу, ідемпотентна |
 
 **Сумісність для відкату лише коду (дизайн `2026-10-11-wbb-image-deployment-design.md` §6).** Попередній реліз мусить працювати на БД, яку лишив новий: після його міграцій, стартових перетворень і записів. Тому зміни схеми двокрокові: **expand** (нова таблиця, колонка nullable чи з `DEFAULT`, індекс) — у будь-якому релізі; **contract** (`DROP`, `RENAME`, перебудова таблиці, `UPDATE`/`DELETE` наявних рядків) — лише коли реліз, що перестав користуватися старою формою, став settled; перейменування = додати → писати в обидва → прибрати, щонайменше два релізи. Зміна формату чи сенсу даних, які код пише (нове значення enum, новий JSON), — теж contract, навіть без SQL: PR несе цільовий тест сумісності або мітку `rollback:unsafe`. PR з міткою `migration:contract` чи `rollback:unsafe` мусить мати `[deploy:hold]` і мітку `deploy:hold`. Лінтер `scripts/migrations/contract-lint.ts` (другий крок workflow `deploy-hold`) читає SQL міграцій, новіших за базу PR, і вимагає цих міток на contract-ключових словах поза коментарями й літералами: `DROP`, `RENAME`, `UPDATE`, `DELETE`, `REPLACE INTO`, `INSERT OR REPLACE`, `CREATE UNIQUE INDEX` (перебудову таблиці ловлять її `DROP`/`RENAME`; `INSERT … SELECT` сам по собі — сид нової таблиці, не contract). FK-дії `ON DELETE`/`ON UPDATE` і подія тригера (`AFTER DELETE ON …`, `BEFORE UPDATE OF … ON …`) не рахуються; те, що виконує тіло тригера, — рахується. Він — сигнал для рев'ю, не доказ сумісності: зміни даних у TypeScript він не бачить.
 
