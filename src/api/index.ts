@@ -78,7 +78,8 @@ export function createApiApp(deps: ApiAppDeps): Hono<ApiEnv> {
     '/enrich/result',
     postPayloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES),
   );
-  app.use('/enrich/*', authMiddleware(deps.db));
+  // #923: installs are admitted; the routes read-only / verify for them (spec #923 §2.5).
+  app.use('/enrich/*', authMiddleware(deps.db, { allowInstall: true }));
   enrichRoute(app, deps);
 
   app.use(

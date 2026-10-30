@@ -10,7 +10,7 @@ import { cardAbv, cardText } from '../../domain/card-text';
 import { insertLegacyDisposition, closeLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 import { enrichRoute } from './enrich';
 import { buildSearchUrl } from '../../sources/untappd/search';
-import type { ApiDeps, ApiEnv } from '../types';
+import type { ApiDeps, ApiEnv, Principal } from '../types';
 import {
   BEER_TEXT_LIMIT_CHARS,
   ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
@@ -29,6 +29,26 @@ function setup(depsOverride?: Partial<ApiDeps>) {
   enrichRoute(app, { db, env: {} as never, log, ...depsOverride });
   return { db, app, warn, info };
 }
+
+// #923: the same route with a principal set, as authMiddleware({ allowInstall }) leaves it.
+function setupAs(principal: Principal, depsOverride?: Partial<ApiDeps>) {
+  const db = openDb(':memory:');
+  migrate(db);
+  const warn = vi.fn();
+  const log = { ...pino({ level: 'silent' }), warn, info: vi.fn() } as never;
+  const app = new Hono<ApiEnv>();
+  app.use('*', async (c, next) => {
+    c.set('principal', principal);
+    if (principal.kind === 'user') c.set('telegramId', principal.telegramId);
+    await next();
+  });
+  enrichRoute(app, { db, env: {} as never, log, ...depsOverride });
+  return { db, app, warn };
+}
+
+const INSTALL: Principal = { kind: 'install', installId: 'i-1', lastSeenDate: '2026-10-30', extVersion: '1' };
+const USER: Principal = { kind: 'user', telegramId: 1 };
+const beersSnapshot = (db: ReturnType<typeof setup>['db']) => db.prepare('SELECT * FROM beers ORDER BY id').all();
 
 function post(app: Hono<ApiEnv>, path: string, body: unknown) {
   return app.request(path, {
@@ -1555,4 +1575,67 @@ test('#664 unnumbered LAB card does not take a linked LAB8 row', async () => {
     { name: 'LAB Porter', untappd_id: null, untappd_id_source: null },
   ]);
   db.close();
+});
+
+describe('POST /enrich/candidates — install token (#923 §2.5)', () => {
+  const madBrew = (db: ReturnType<typeof setup>['db'], over: Record<string, unknown> = {}) => seedBeer(db, {
+    untappd_id: null, name: 'Tomatol Bulgogi', brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
+    normalized_name: normalizeName('Tomatol Bulgogi'), normalized_brewery: normalizeBrewery('Mad Brew'),
+    ...over,
+  } as never);
+
+  it('200 invented cards leave beers and enrich_failures exactly as they were', async () => {
+    const { app, db } = setupAs(INSTALL);
+    madBrew(db);
+    const before = beersSnapshot(db);
+    const beers = Array.from({ length: 200 }, (_, i) => ({ brewery: `Forger ${'z'.repeat(i + 1)}`, name: `Fake ${'q'.repeat(i + 1)}`, abv: 5 }));
+    const res = await post(app, '/enrich/candidates', { beers });
+    expect(res.status).toBe(200);
+    expect((await res.json()).candidates).toHaveLength(200);
+    expect(beersSnapshot(db)).toEqual(before);
+    expect(db.prepare('SELECT COUNT(*) AS c FROM enrich_failures').get()).toEqual({ c: 0 });
+  });
+
+  it('an existing orphan keeps its facts and its backoff — the card ABV is not written, nothing re-armed', async () => {
+    const { app, db } = setupAs(INSTALL);
+    const id = madBrew(db);
+    db.prepare(`UPDATE beers SET untappd_lookup_at = '2026-10-29T00:00:00.000Z', untappd_lookup_count = 3 WHERE id = ?`).run(id);
+    await post(app, '/enrich/candidates', { beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 4.2, style: 'Gose' }] });
+    expect(db.prepare('SELECT abv, style, untappd_lookup_at, untappd_lookup_count FROM beers WHERE id = ?').get(id)).toEqual({
+      abv: null, style: null, untappd_lookup_at: '2026-10-29T00:00:00.000Z', untappd_lookup_count: 3,
+    });
+  });
+
+  it('a card with no row is eligible, without `linked`; a linked row answers linked', async () => {
+    const { app, db } = setupAs(INSTALL);
+    madBrew(db, { untappd_id: 6648348, untappd_id_source: 'search', rating_global: 4.06 });
+    const res = await post(app, '/enrich/candidates', { beers: [
+      { brewery: 'Nowhere Brewing', name: 'Unknown Lager' },
+      { brewery: 'Mad Brew', name: 'Tomatol Bulgogi' },
+    ] });
+    const [none, linked] = (await res.json()).candidates;
+    expect(none).toMatchObject({ eligible: true });
+    expect(none).not.toHaveProperty('linked');
+    expect(linked).toMatchObject({ eligible: false, linked: true });
+  });
+
+  it('a card bid that contradicts the stored link is ignored for an install, honoured for a Telegram user', async () => {
+    const asInstall = setupAs(INSTALL);
+    madBrew(asInstall.db, { untappd_id: 6648348, untappd_id_source: 'search', rating_global: 4.06 });
+    const asUser = setupAs(USER);
+    madBrew(asUser.db, { untappd_id: 6648348, untappd_id_source: 'search', rating_global: 4.06 });
+    const card = { beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 111 }] };
+    expect((await (await post(asInstall.app, '/enrich/candidates', card)).json()).candidates[0])
+      .toMatchObject({ eligible: false, linked: true });
+    expect((await (await post(asUser.app, '/enrich/candidates', card)).json()).candidates[0])
+      .toMatchObject({ eligible: true });
+  });
+
+  it('a Telegram user still gets an orphan for an unknown card (regression)', async () => {
+    const { app, db } = setupAs(USER);
+    await post(app, '/enrich/candidates', { beers: [{ brewery: 'Nowhere Brewing', name: 'Unknown Lager' }] });
+    expect(db.prepare('SELECT brewery, name, untappd_id FROM beers').all()).toEqual([
+      { brewery: 'Nowhere Brewing', name: 'Unknown Lager', untappd_id: null },
+    ]);
+  });
 });
