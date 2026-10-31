@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { join } from 'node:path';
+import { sharedCoreAlias } from './shared-core.config';
 
 const testTmp = process.env.WBB_TEST_TMPDIR;
 if (!testTmp) {
@@ -8,6 +9,7 @@ if (!testTmp) {
 
 export default defineConfig({
   cacheDir: join(testTmp, 'vite-cache'),
+  resolve: { alias: sharedCoreAlias },
   test: {
     environment: 'jsdom',
     globals: true,
