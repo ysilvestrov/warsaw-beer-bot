@@ -1,0 +1,171 @@
+{
+  "checkins": [
+    {
+      "checkin_id": "1578245453",
+      "bid": 6421621,
+      "beer_name": "Emberwood",
+      "brewery_name": "Põhjala",
+      "user_rating": 4.5,
+      "checkin_at": "Mon, 15 Jun 2026 19:25:26 +0000",
+      "venue": "Os. Górczewska 200",
+      "venue_id": 9448532,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1578231855",
+      "bid": 4933,
+      "beer_name": "Best Extra Stout",
+      "brewery_name": "Coopers",
+      "user_rating": 3.5,
+      "checkin_at": "Mon, 15 Jun 2026 18:19:33 +0000",
+      "venue": "Os. Górczewska 200",
+      "venue_id": 9448532,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1578224019",
+      "bid": 6214005,
+      "beer_name": "Karl Friedrich Kali Kirss",
+      "brewery_name": "Saku Õlletehas",
+      "user_rating": 3.5,
+      "checkin_at": "Mon, 15 Jun 2026 17:37:29 +0000",
+      "venue": "Os. Górczewska 200",
+      "venue_id": 9448532,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1578218159",
+      "bid": 6647823,
+      "beer_name": "Non-Alcoholic Czech Pils / Nealko 5° Extra Hořká",
+      "brewery_name": "Moon Lark Brewery",
+      "user_rating": 4,
+      "checkin_at": "Mon, 15 Jun 2026 17:06:26 +0000",
+      "venue": "Os. Górczewska 200",
+      "venue_id": 9448532,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577501144",
+      "bid": 5423687,
+      "beer_name": "Hazy IPA (MBC)",
+      "brewery_name": "Palatum",
+      "user_rating": 4.2,
+      "checkin_at": "Sat, 13 Jun 2026 12:06:44 +0000",
+      "venue": "Willa Ogrodników",
+      "venue_id": 12359853,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577350490",
+      "bid": 6599426,
+      "beer_name": "DISCO BONG BONG RYE FRUIT SOUR",
+      "brewery_name": "서울브루어리ㅣSEOUL BREWERY",
+      "user_rating": 3.8,
+      "checkin_at": "Fri, 12 Jun 2026 21:23:39 +0000",
+      "venue": "PINTA Warszawa Craft Beer & Food",
+      "venue_id": 10592162,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577349937",
+      "bid": 6748324,
+      "beer_name": "Top-tier",
+      "brewery_name": "Nepo Brewing",
+      "user_rating": 4.2,
+      "checkin_at": "Fri, 12 Jun 2026 21:22:25 +0000",
+      "venue": "PINTA Warszawa Craft Beer & Food",
+      "venue_id": 10592162,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577333058",
+      "bid": 6655583,
+      "beer_name": "Patience 5th Anniversary (2026)",
+      "brewery_name": "PINTA Barrel Brewing",
+      "user_rating": 4.9,
+      "checkin_at": "Fri, 12 Jun 2026 20:46:34 +0000",
+      "venue": "Hopito Chmielna",
+      "venue_id": 11769928,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577329184",
+      "bid": 6533724,
+      "beer_name": "Dropsy",
+      "brewery_name": "Sadyba",
+      "user_rating": 3.9,
+      "checkin_at": "Fri, 12 Jun 2026 20:38:55 +0000",
+      "venue": "Hopito Chmielna",
+      "venue_id": 11769928,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577315325",
+      "bid": 17427,
+      "beer_name": "Lvivske Porter (Львівське Портер)",
+      "brewery_name": "Carlsberg Ukraine",
+      "user_rating": 4,
+      "checkin_at": "Fri, 12 Jun 2026 20:14:08 +0000",
+      "venue": "Hopito Chmielna",
+      "venue_id": 11769928,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577305648",
+      "bid": 6671151,
+      "beer_name": "Green Fury",
+      "brewery_name": "Browar Stu Mostów",
+      "user_rating": 4.1,
+      "checkin_at": "Fri, 12 Jun 2026 19:57:17 +0000",
+      "venue": "Hopito Chmielna",
+      "venue_id": 11769928,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577302563",
+      "bid": 5828405,
+      "beer_name": "Stary Sad 2023",
+      "brewery_name": "Cydr Chyliczki",
+      "user_rating": 4,
+      "checkin_at": "Fri, 12 Jun 2026 19:51:45 +0000",
+      "venue": "Hopito Chmielna",
+      "venue_id": 11769928,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577255517",
+      "bid": 6584367,
+      "beer_name": "La Tomatina Originale vol.3",
+      "brewery_name": "White Crow Brew Dept",
+      "user_rating": 4.6,
+      "checkin_at": "Fri, 12 Jun 2026 18:30:34 +0000",
+      "venue": "White Crow Craft Beer & Kitchen",
+      "venue_id": 12617758,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577247607",
+      "bid": 6728427,
+      "beer_name": "Funky On Tour: Islay",
+      "brewery_name": "Funky Fluid",
+      "user_rating": 4.5,
+      "checkin_at": "Fri, 12 Jun 2026 18:15:33 +0000",
+      "venue": "Offside",
+      "venue_id": 12767316,
+      "author": "ysilvestrov"
+    },
+    {
+      "checkin_id": "1577238079",
+      "bid": 6728184,
+      "beer_name": "Cool Jumper",
+      "brewery_name": "FUERST WIACEK Berlin",
+      "user_rating": 3.7,
+      "checkin_at": "Fri, 12 Jun 2026 17:57:01 +0000",
+      "venue": "White Crow Craft Beer & Kitchen",
+      "venue_id": 12617758,
+      "author": "ysilvestrov"
+    }
+  ],
+  "nextMaxId": "1577238079",
+  "profileTotal": 12407
+}

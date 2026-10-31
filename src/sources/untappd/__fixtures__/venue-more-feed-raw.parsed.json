@@ -1,0 +1,39 @@
+{
+  "checkins": [
+    {
+      "checkin_id": "1559318905",
+      "bid": 6604039,
+      "beer_name": "Essence",
+      "brewery_name": "PINTA Barrel Brewing",
+      "user_rating": null,
+      "checkin_at": "Tue, 31 Mar 2026 12:14:19 +0000",
+      "venue": "Warszawski Festiwal Piwa",
+      "venue_id": 11142155,
+      "author": "Bierfluenzer"
+    },
+    {
+      "checkin_id": "1559318837",
+      "bid": 6646560,
+      "beer_name": "Eureka",
+      "brewery_name": "Browar Łańcut",
+      "user_rating": null,
+      "checkin_at": "Tue, 31 Mar 2026 12:13:15 +0000",
+      "venue": "Warszawski Festiwal Piwa",
+      "venue_id": 11142155,
+      "author": "Bierfluenzer"
+    },
+    {
+      "checkin_id": "1559318775",
+      "bid": 5716461,
+      "beer_name": "Igłolód",
+      "brewery_name": "Browar Spółdzielczy",
+      "user_rating": null,
+      "checkin_at": "Tue, 31 Mar 2026 12:12:08 +0000",
+      "venue": "Warszawski Festiwal Piwa",
+      "venue_id": 11142155,
+      "author": "Bierfluenzer"
+    }
+  ],
+  "nextMaxId": "1559318775",
+  "profileTotal": null
+}
