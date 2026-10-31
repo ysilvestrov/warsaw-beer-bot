@@ -1,0 +1,44 @@
+import { describe, it, expect } from 'vitest';
+import { openDb } from './db';
+import { migrate } from './schema';
+import { ensureProfile } from './user_profiles';
+import { addCoverage, coverageFor } from './checkin_coverage';
+import { mergeRange, type CoverageRange } from '../shared/checkin-sync/coverage';
+
+// #924: the extension keeps coverage in IndexedDB through the pure mergeRange, the server keeps
+// it in SQLite through addCoverage. Both must claim exactly the same coverage, or local mode
+// would skip or re-walk different parts of the feed. Two independent implementations compared
+// step by step on seeded random walks; coverage.test.ts pins the rule itself.
+function prng(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 2 ** 32;
+  };
+}
+
+describe('mergeRange vs addCoverage', () => {
+  it('agree after every step of 500 random sequences', () => {
+    const rand = prng(924);
+    const mismatches: string[] = [];
+    for (let seq = 0; seq < 500; seq++) {
+      const db = openDb(':memory:');
+      migrate(db);
+      ensureProfile(db, 1);
+      let pure: CoverageRange[] = [];
+      const steps = 1 + Math.floor(rand() * 12);
+      for (let step = 0; step < steps; step++) {
+        const a = 1 + Math.floor(rand() * 400);
+        const b = a + Math.floor(rand() * 40);
+        addCoverage(db, 1, a, b);
+        pure = mergeRange(pure, a, b);
+        const sql = coverageFor(db, 1);
+        if (JSON.stringify(sql) !== JSON.stringify(pure)) {
+          mismatches.push(`seq ${seq} step ${step} +${a}..${b}: sql ${JSON.stringify(sql)} pure ${JSON.stringify(pure)}`);
+        }
+      }
+      db.close();
+    }
+    expect(mismatches).toEqual([]);
+  });
+});

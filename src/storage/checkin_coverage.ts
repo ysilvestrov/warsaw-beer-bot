@@ -1,10 +1,8 @@
 import type { DB } from './db';
 import { getHistoryOwner } from './history-owner';
+import type { CoverageRange } from '../shared/checkin-sync/coverage';
 
-export interface CoverageRange {
-  from_id: number;
-  to_id: number;
-}
+export type { CoverageRange } from '../shared/checkin-sync/coverage';
 
 // #587: покриття чекінів — це об'єднання діапазонів, кожен з яких доводить сама сторінка
 // фіду: фрагмент, запитаний із курсором M, повертає ВСЕ, що лежить нижче M до найстарішого
