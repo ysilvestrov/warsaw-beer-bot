@@ -55,7 +55,10 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   } catch (e) {
     if (deps.signal?.aborted) return finish('cancelled');
     const code = errCode(e);
-    return finish(code === 'not_linked' ? 'not_linked' : 'error');
+    // #924: local mode learns the session and the database owner here, before any page:
+    // no signed-in untappd.com user, or another one than the database belongs to.
+    if (code === 'not_linked' || code === 'no_session' || code === 'account_changed') return finish(code);
+    return finish('error');
   }
   if (!Number.isSafeInteger(state.linkRevision) || state.linkRevision < 0) return finish('sync_context_required');
   serverCount = state.serverCount;
