@@ -1,8 +1,8 @@
 # Локальна база чекінів для анонімного режиму розширення
 
 Дата: 2026-10-31
-Статус: чернетка
-Spec-review: —
+Статус: чекає на затвердження
+Spec-review: codex @ f65c0ff — 4 findings: 4 fixed, 0 rejected
 
 **Issue:** GH #924 (серія: #923 токен установки — змерджено; #934 синк і віджет прогресу; #925 імпорт експорту Untappd; #926 прив'язка до Telegram; поштовх — PR #922)
 
@@ -136,6 +136,7 @@ Spec-review: —
 | `src/shared/checkin-sync/guards.ts` | `checkPage(page, maxId, oldestKnown)` | виноситься з `routes/checkins.ts` |
 | `src/shared/checkin-sync/coverage.ts` | `mergeRange`, `rangeContaining` над масивом діапазонів | чиста версія `storage/checkin_coverage.ts` |
 | `src/shared/checkin-sync/conclude.ts` | `conclude({count, profileTotal, ranges, oldest})` | виноситься з `routes/checkins.ts` |
+| `src/shared/checkin-sync/checkin-at.ts` | `canonicalCheckinAt` | переноситься з `storage/checkins.ts` (там лишається реекспорт) |
 
 Старі `src/sources/untappd/checkin-feed.ts` і `block.ts` стають `export * from '../../shared/…'`.
 Двадцять серверних споживачів (`refresh-untappd`, `fest-*`, `import-checkins` тощо) не
@@ -214,9 +215,25 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
   будь-що поза IndexedDB, тож транзакція не автозакриється посередині.
 - Найстаріший id — курсор на ключі `checkin_id` не годиться, бо ключі рядкові. Тому
   `meta.oldestId` (число) оновлюється в тій самій транзакції, що й записи.
-- **Злиття чекіна** повторює серверне (`mergeCheckin`): новий — додається; відомий — оновлюються
-  `user_rating` і `checkin_at` зі сторінки, якщо вони не `null`.
-- **Очищення** — `deleteDatabase('wbb-local')`. Після цього індекс у пам'яті скидається, і ✅
+- **Злиття чекіна** повторює серверне `mergeCheckin`. Новий чекін додається. У відомому
+  `bid`, `user_rating` і `checkin_at` **замінюються** значеннями зі сторінки, зокрема й `null`:
+  рейтинг, який людина прибрала на Untappd, зникає й локально. `checkin_at` нормалізується тією
+  самою `canonicalCheckinAt`, що на сервері; вона переїжджає в `src/shared/`.
+- **Покоління бази.** `meta.generation` — ціле число, яке береться з лічильника
+  `localDbGeneration` у `chrome.storage.local`. Лічильник живе поза базою, тож переживає
+  `deleteDatabase`, і кожна нова база отримує нове число.
+  - `getState` віддає це число як `linkRevision`.
+  - `runCheckinSync` уже передає `linkRevision` у кожен `submitPage`.
+  - `submitPage` звіряє його з `meta.generation` **всередині** своєї транзакції запису. Розбіжність
+    дає `account_changed` без жодного запису.
+  - Це той самий захист від пізнього запису, що серверна ревізія прив'язки.
+- **Очищення:**
+  1. обірвати поточний синк (`AbortController`, який уже є в `runCheckinSync`);
+  2. збільшити `localDbGeneration`;
+  3. `deleteDatabase('wbb-local')`.
+
+  Сторінка акаунта A, що «зависла» в мережі під час очищення, після цього не запишеться в базу
+  акаунта B. Навіть якщо обрив не встиг, її покоління вже старе. Індекс у пам'яті скидається, і ✅
   зникають на наступному читанні.
 
 Квота: 12 000 чекінів × ~150 байт ≈ 2 MB — далеко від меж IndexedDB.
@@ -229,12 +246,14 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
 #### 4.1 `getState` (локальний)
 
 1. `fetch('https://untappd.com/', {credentials: 'include'})` → `sessionUsername(html)`.
-   Немає імені → помилка з кодом `no_session` (у `runCheckinSync` додається мапінг `no_session` на
-   етапі `getState`; сьогодні там лише `not_linked` і `error`).
+   Немає імені → помилка з кодом `no_session`.
 2. `meta.username` порожній → база нова, власником стає це ім'я. Інше ім'я → `account_changed`.
-3. Повертає `{ username, linkRevision: 0, serverCount: count, profileTotal: meta.profileTotal,
-   deepest_max_id: null, complete: false }`. `linkRevision: 0` — константа: у локальному режимі
-   зміна власника ловиться в п. 2, а не ревізією прив'язки.
+3. Повертає `{ username, linkRevision: meta.generation, serverCount: count, profileTotal:
+   meta.profileTotal, deepest_max_id: null, complete: false }`.
+
+На етапі `getState` у `runCheckinSync` розширюється мапінг помилок. Сьогодні там зберігається лише
+`not_linked`, усе інше стає `error`. Тепер так само зберігаються `no_session` і `account_changed`.
+Без цього стан «Інший акаунт — очистити?» (§6) був би недосяжним.
 
 #### 4.2 `submitPage` (локальний)
 
@@ -264,9 +283,14 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
   Правило дослівно повторює `match-list.ts` (рядки з `drunkSet`). Крок 4 матчера (конфлікт bid →
   `fuzzy`) дає ❓ і без нашого коду, бо він теж приходить як `source: 'fuzzy'`.
 - **Де накладається:** у `handleMatch` (свіжа відповідь) і `handleCacheGetMany` (з кешу).
-- **Що потрапляє в кеш:** у локальному режимі `handleCacheSet*` перед записом повертають поля
+- **Що потрапляє в кеш.** У локальному режимі `handleCacheSet*` перед записом повертають поля
   `is_drunk`, `drunk_uncertain`, `user_rating` до анонімних значень (`false`, `false`, `null`). Так
   кеш лишається анонімною відповіддю, а свіжий синк одразу видно без інвалідації.
+- **Умовний запис** `handleCacheSetIfMatching` нормалізує так само **обидва** аргументи:
+  `expected` і нову відповідь. `setCachedIfMatching` порівнює весь об'єкт через `JSON.stringify`,
+  а контент-скрипт передає як `expected` показаний, тобто накладений, результат. Без нормалізації
+  `expected` порівняння провалювалось би на кожному пиві, яке людина пила, і оновлення після enrich
+  не записувалося б.
 
 ### 6. Інтерфейс (периферійний PR)
 
@@ -294,6 +318,8 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
 | Злиття діапазонів = серверне | `coverage` | Тест паритету `mergeRange` проти SQL `addCoverage` на випадкових послідовностях (§Тестування, 2) |
 | `caughtUp` («роботи немає») | відповідь `submitPage` | Лічильник **і** один діапазон — те саме правило, що на сервері. Це не твердження про дно стрічки: його не довести, і в UI воно не показується як 100 % (#934) |
 | Власник бази — акаунт сесії | `meta.username` | Посилання «My Profile» у навігації сторінки сесії (§Проби, 4). Інше ім'я зупиняє синк до будь-якого запису |
+| Сторінка належить поточній базі | запис сторінки | `meta.generation` звіряється з `linkRevision` синку всередині транзакції запису; лічильник поколінь переживає очищення (§3) |
+| Рейтинг чекіна — поточний | `checkins.user_rating` | Заміна значенням зі сторінки, включно з `null`, — як серверний `mergeCheckin` |
 | ✅ локально = ✅ сервера для пив з чекінами | накладання §5 | Те саме правило `exact`/`fuzzy` (код `match-list.ts`); `beers.untappd_id UNIQUE` (схема); синк пише чекін у рядок за bid (`upsertBeerByBid`). Рядки зі зміненим bid: верхня межа 4,9 %, правдоподібно 0,19 % (§Проби, 2) |
 | У локальному режимі історія не йде на сервер | мережа | Тест: у режимі `local` повний синк і `/match` не роблять жодного запиту на `/checkins/*`, а тіло `/match` має ті самі поля, що й анонімне |
 | «Очистити» прибирає все | IndexedDB | Тест: після очищення всі три сховища порожні, індекс скинуто, накладання дає анонімну відповідь |
@@ -361,8 +387,17 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
 6. **Накладання ✅.** `exact` + у базі → ✅ і рейтинг; `fuzzy` + у базі → ❓, без рейтингу; не в
    базі → анонімна відповідь; `untappd_id: null` → анонімна; режим `linked` → без змін (той самий
    об'єкт).
-7. **Кеш.** У режимі `local` запис у кеш повертає анонімні значення полів; читання накладає знову;
-   синк між записом і читанням видно без інвалідації.
+7. **Кеш.**
+   - У режимі `local` запис у кеш повертає полям анонімні значення, а читання накладає їх знову.
+   - Синк, що стався між записом і читанням, видно без інвалідації.
+   - `handleCacheSetIfMatching` з накладеним `expected` (`fuzzy` на випите пиво, тобто
+     `drunk_uncertain: true`) записує нову відповідь, якщо закешована анонімна не змінилася.
+10. **Пізня сторінка після очищення.** Сторінка, подана з поколінням бази, якої вже немає, дає
+    `account_changed` і не пише нічого: ні в стару базу, ні в нову.
+11. **Рейтинг прибрано.** Відомий чекін з рейтингом 4.5 і та сама сторінка вже без рейтингу →
+    `user_rating: null`, і накладання більше не показує рейтинг.
+12. **Помилки `getState`.** `account_changed` і `no_session` на етапі `getState` доходять до
+    `SyncOutcome.status` як є, а не як `error`.
 8. **Мережа в локальному режимі.** Повний синк на 3 сторінки й `/match` — жодного запиту на
    `/checkins/*`.
 9. **Очищення.** Після «Очистити» три сховища порожні, `meta` немає, наступний `getState` створює
@@ -373,7 +408,7 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
 - **PR 1 — ядро:**
   - `src/shared/` і перехід роуту на нього;
   - сховище IndexedDB, локальні `getState`/`submitPage`, `sessionUsername`;
-  - тести 1–5, 8, 9.
+  - тести 1–5, 8–12.
 
   Мердж = деплой сервера. Зовні нічого не змінюється: без токена кнопка синку в popup ще веде на
   `not_linked`.
@@ -398,3 +433,7 @@ conclude({ count, profileTotal, ranges, oldest }) → { caughtUp: boolean; nextC
 
 | № | Перевірка | Рішення | Причина / що змінено |
 |---|---|---|---|
+| 1 | Очищення бази пропускає пізню сторінку старого акаунта в базу нового | Виправлено | Покоління бази з лічильника поза базою. Синк передає його як `linkRevision`, а `submitPage` звіряє в транзакції запису. Очищення обриває синк і збільшує лічильник (§3, §4.1, тест 10) |
+| 2 | Прибраний на Untappd рейтинг лишається локально | Виправлено | Злиття замінює `bid`, `user_rating`, `checkin_at` значеннями сторінки, включно з `null`, як серверний `mergeCheckin`. `canonicalCheckinAt` переїжджає в `src/shared/` (§3, тест 11) |
+| 3 | `account_changed` на етапі `getState` перетворюється на `error`, і стан з очищенням недосяжний | Виправлено | Мапінг помилок `getState` зберігає `no_session` і `account_changed` (§4.1, тест 12) |
+| 4 | Нормалізований кеш ламає умовний запис `setCachedIfMatching` | Виправлено | `handleCacheSetIfMatching` нормалізує й `expected`, і нову відповідь (§5, тест 7) |
