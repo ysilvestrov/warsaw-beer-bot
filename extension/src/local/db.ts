@@ -127,18 +127,28 @@ export async function allCheckins(): Promise<LocalCheckin[]> {
   return done(db.transaction(CHECKINS, 'readonly').objectStore(CHECKINS).getAll()) as Promise<LocalCheckin[]>;
 }
 
+let clearing: Promise<void> = Promise.resolve();
+
 // Clear: stop the running sync, move to a new generation, then delete. A page that was in flight
 // still carries the old generation and is refused even if the abort did not reach it in time.
-export async function clearLocalDb(abortSync: () => void = () => undefined): Promise<void> {
-  abortSync();
-  await chrome.storage.local.set({ [GENERATION_KEY]: (await currentGeneration()) + 1 });
-  const db = await opened?.catch(() => null);
-  db?.close();
-  opened = null;
-  await new Promise<void>((resolve, reject) => {
-    const req = indexedDB.deleteDatabase(LOCAL_DB_NAME);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-    req.onblocked = () => resolve(); // other connections close on versionchange; deletion completes after them
+// Clears run one after another (the generation is a read-modify-write), and only the background
+// service worker calls this, so the chain covers every caller.
+export function clearLocalDb(abortSync: () => void = () => undefined): Promise<void> {
+  const run = clearing.then(async () => {
+    abortSync();
+    await chrome.storage.local.set({ [GENERATION_KEY]: (await currentGeneration()) + 1 });
+    const db = await opened?.catch(() => null);
+    db?.close();
+    opened = null;
+    await new Promise<void>((resolve, reject) => {
+      const req = indexedDB.deleteDatabase(LOCAL_DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      // Blocked is not done: the old data is still there. Our own connections close on
+      // versionchange; resolve only when the deletion has actually happened.
+      req.onblocked = () => undefined;
+    });
   });
+  clearing = run.catch(() => undefined);
+  return run;
 }

@@ -116,6 +116,33 @@ describe('clearing the local database', () => {
   });
 });
 
+describe('clearLocalDb completion (AI review on PR #936)', () => {
+  it('does not report a clear while another connection still blocks the deletion', async () => {
+    const local = deps(signedIn('bob'));
+    const { linkRevision } = await local.getState();
+    await local.submitPage(feedPageOf([600]), null, linkRevision);
+    // A connection that ignores versionchange, as a long-lived other context could.
+    const other = await new Promise<IDBDatabase>((resolve) => {
+      const req = indexedDB.open('wbb-local');
+      req.onsuccess = () => resolve(req.result);
+    });
+    let settled = false;
+    const clear = clearLocalDb().then(() => { settled = true; });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(settled).toBe(false);
+    other.close();
+    await clear;
+    expect(settled).toBe(true);
+    expect(await allCheckins()).toEqual([]);
+  });
+
+  it('gives two clears started together two different generations', async () => {
+    const start = await currentGeneration();
+    await Promise.all([clearLocalDb(), clearLocalDb()]);
+    expect(await currentGeneration()).toBe(start + 2);
+  });
+});
+
 describe('a getState in flight across Clear (cross-review finding 1)', () => {
   it('does not re-create the old owner in the new database', async () => {
     let answer: ((html: string) => void) | undefined;
