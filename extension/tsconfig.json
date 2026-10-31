@@ -10,7 +10,14 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["chrome", "vitest/globals", "node"]
+    "types": ["chrome", "vitest/globals", "node"],
+    // #924: ../src/shared/ is typechecked here too; its packages resolve to this package's copies
+    // (the extension's CI leg has no root node_modules).
+    "paths": {
+      "cheerio": ["./node_modules/cheerio"],
+      "domhandler": ["./node_modules/domhandler"]
+    }
   },
-  "include": ["src", "tests", "scripts", "manifest.config.ts", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "tests", "scripts", "manifest.config.ts", "vite.config.ts", "vitest.config.ts", "shared-core.config.ts", "../src/shared"],
+  "exclude": ["../src/shared/**/*.test.ts"]
 }
