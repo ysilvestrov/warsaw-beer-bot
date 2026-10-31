@@ -1,0 +1,39 @@
+{
+  "checkins": [
+    {
+      "checkin_id": "1600770333",
+      "bid": 5703496,
+      "beer_name": "Summer Leftover",
+      "brewery_name": "La Jungle",
+      "user_rating": 4.3,
+      "checkin_at": "Fri, 11 Sep 2026 20:45:58 +0000",
+      "venue": "Warszawski Festiwal Piwa",
+      "venue_id": 11142155,
+      "author": "bockje"
+    },
+    {
+      "checkin_id": "1573215662",
+      "bid": 5995292,
+      "beer_name": "Saison Sauvage Cerise Rhubarbe",
+      "brewery_name": "La Jungle",
+      "user_rating": 4,
+      "checkin_at": "Tue, 26 May 2026 00:11:50 +0000",
+      "venue": "Warszawski Festiwal Piwa",
+      "venue_id": 11142155,
+      "author": "bockje"
+    },
+    {
+      "checkin_id": "1562430582",
+      "bid": 4000001,
+      "beer_name": "Some Beer",
+      "brewery_name": "Some Brewery",
+      "user_rating": null,
+      "checkin_at": "12 Apr 26",
+      "venue": "Warszawski Festiwal Piwa",
+      "venue_id": 11142155,
+      "author": "Piwny_John"
+    }
+  ],
+  "nextMaxId": "1562430582",
+  "profileTotal": null
+}
