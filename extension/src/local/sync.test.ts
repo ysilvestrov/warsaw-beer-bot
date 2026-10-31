@@ -116,6 +116,38 @@ describe('clearing the local database', () => {
   });
 });
 
+describe('a getState in flight across Clear (cross-review finding 1)', () => {
+  it('does not re-create the old owner in the new database', async () => {
+    let answer: ((html: string) => void) | undefined;
+    const pending = localSyncDeps({ fetchText: () => new Promise<string>((resolve) => { answer = resolve; }) }).getState();
+    // The session request is in flight (so the generation was already read) when Clear runs.
+    await vi.waitFor(() => expect(answer).toBeTypeOf('function'));
+    await clearLocalDb();
+    answer!(signedIn('bob'));
+    await expect(pending).rejects.toMatchObject({ code: 'account_changed' });
+    expect(await meta()).toBeNull();
+    expect((await deps(signedIn('alice')).getState()).username).toBe('alice');
+  });
+
+  it('replaces an owner record left at an older generation with no check-ins', async () => {
+    const stale = await currentGeneration();
+    await inPageTx((tx) => tx.putMeta({ username: 'bob', generation: stale, profileTotal: null, oldestId: null, updatedAt: 'x' }));
+    await chrome.storage.local.set({ localDbGeneration: stale + 1 });
+    const state = await deps(signedIn('alice')).getState();
+    expect(state).toMatchObject({ username: 'alice', linkRevision: stale + 1 });
+    expect(await meta()).toMatchObject({ username: 'alice', generation: stale + 1 });
+  });
+
+  it('still refuses an older-generation owner that holds check-ins', async () => {
+    const local = deps(signedIn('bob'));
+    const { linkRevision } = await local.getState();
+    await local.submitPage(feedPageOf([600]), null, linkRevision);
+    await chrome.storage.local.set({ localDbGeneration: linkRevision + 1 });
+    await expect(deps(signedIn('alice')).getState()).rejects.toMatchObject({ code: 'account_changed' });
+    expect((await allCheckins()).length).toBe(1);
+  });
+});
+
 describe('runCheckinSync over local deps', () => {
   const walk = (home: string, pages: Record<string, string>, fetchSpy: (url: string) => void) => {
     const fetchText = async (url: string) => { fetchSpy(url); return home; };
