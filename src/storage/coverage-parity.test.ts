@@ -21,23 +21,24 @@ describe('mergeRange vs addCoverage', () => {
   it('agree after every step of 500 random sequences', () => {
     const rand = prng(924);
     const mismatches: string[] = [];
+    // One database; each sequence is its own user, so coverage starts empty without a re-migrate.
+    const db = openDb(':memory:');
+    migrate(db);
     for (let seq = 0; seq < 500; seq++) {
-      const db = openDb(':memory:');
-      migrate(db);
-      ensureProfile(db, 1);
+      const user = seq + 1;
+      ensureProfile(db, user);
       let pure: CoverageRange[] = [];
       const steps = 1 + Math.floor(rand() * 12);
       for (let step = 0; step < steps; step++) {
         const a = 1 + Math.floor(rand() * 400);
         const b = a + Math.floor(rand() * 40);
-        addCoverage(db, 1, a, b);
+        addCoverage(db, user, a, b);
         pure = mergeRange(pure, a, b);
-        const sql = coverageFor(db, 1);
+        const sql = coverageFor(db, user);
         if (JSON.stringify(sql) !== JSON.stringify(pure)) {
           mismatches.push(`seq ${seq} step ${step} +${a}..${b}: sql ${JSON.stringify(sql)} pure ${JSON.stringify(pure)}`);
         }
       }
-      db.close();
     }
     expect(mismatches).toEqual([]);
   });
