@@ -49,7 +49,7 @@ const USER_RE = /^\/user\/([^/?#]+)/;
 const VENUE_ID_RE = /^\/v\/[^/]+\/(\d+)/;
 
 // The author is the p.text anchor marked a.user; fall back to the first /user/ link there.
-function authorFrom($: cheerio.CheerioAPI, row: cheerio.Cheerio<Element>): string | null {
+function authorFrom(row: cheerio.Cheerio<Element>): string | null {
   const anchor = row.find('p.text a.user[href^="/user/"]').first();
   const href = (anchor.length ? anchor : row.find('p.text a[href^="/user/"]').first()).attr('href') ?? '';
   const m = href.match(USER_RE);
@@ -142,7 +142,7 @@ export function parseCheckinFeedPage(html: string): CheckinFeedPage {
     const venueIdMatch = (venueLink.attr('href') ?? '').match(VENUE_ID_RE);
     const venue_id = venueIdMatch ? parseInt(venueIdMatch[1], 10) : null;
 
-    checkins.push({ checkin_id, bid, beer_name, brewery_name, user_rating, checkin_at, venue, venue_id, author: authorFrom($, row) });
+    checkins.push({ checkin_id, bid, beer_name, brewery_name, user_rating, checkin_at, venue, venue_id, author: authorFrom(row) });
   });
 
   const profileTotal = parseProfileTotal($);
