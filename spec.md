@@ -2247,6 +2247,15 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 (§3.14). Повертає `{ merged, alreadyKnown, pageSize, nextMaxId, nextCursor, profileTotal,
 serverCount, complete }` (`complete` — застаріле поле проводу, завжди `false`).
 
+**Спільні правила (#924).** Правила сторінки й висновку живуть у `src/shared/checkin-sync/`:
+- `checkPage` — валідація курсора, порожня сторінка, `oldest_above_cursor`, `page_contains_cursor`;
+- `coverageSpan` — діапазон, який доводить сторінка;
+- `conclude` — `caughtUp` і `nextCursor`.
+
+Разом з парсером `src/shared/untappd/checkin-feed.ts` їх використовує й локальний режим
+розширення. Маршрут лишає за собою читання й записи. Поведінку описано нижче, і вона та сама
+для обох. Таблиця сценаріїв `src/shared/checkin-sync/scenarios.ts` проганяється на обох шляхах.
+
 **Прив’язка сторінки (#611).** `linkRevision` — безпечне невід’ємне ціле число.
 Перед будь-якими змінами каталогу, історії чи покриття сервер перевіряє ревізію
 в одній immediate-транзакції з записами й побудовою відповіді. Запізніла ревізія,
