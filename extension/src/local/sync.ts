@@ -25,12 +25,20 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
   const now = () => (env.now ?? (() => new Date()))().toISOString();
 
   async function getState(): Promise<CheckinSyncState> {
+    // The generation is taken BEFORE the session request and checked again after it: a Clear
+    // that happened while the request was in flight must not let this call re-create the old
+    // owner in the new database (cross-review of PR 1, finding 1).
+    const generation = await currentGeneration();
     const username = sessionUsername(await env.fetchText(UNTAPPD_HOME));
     if (username === null) throw new ApiError('no_session');
-    const generation = await currentGeneration();
+    if ((await currentGeneration()) !== generation) throw new ApiError('account_changed');
     return inPageTx(async (tx) => {
       let meta = await tx.meta();
-      if (meta === null) {
+      // A meta of an older generation without a single check-in can only be a leftover of the
+      // narrow window between that second check and this transaction: submitPage never writes a
+      // stale generation, so nothing but the owner record can be in it. It is replaced, not obeyed.
+      const leftover = meta !== null && meta.generation < generation && (await tx.count()) === 0;
+      if (meta === null || leftover) {
         meta = { username, generation, profileTotal: null, oldestId: null, updatedAt: now() };
         await tx.putMeta(meta);
       } else if (meta.username !== username || meta.generation !== generation) {

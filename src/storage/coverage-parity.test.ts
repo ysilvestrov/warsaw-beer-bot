@@ -20,7 +20,10 @@ function prng(seed: number): () => number {
 describe('mergeRange vs addCoverage', () => {
   it('agree after every step of 500 random sequences', () => {
     const rand = prng(924);
-    const mismatches: string[] = [];
+    // Every step is recorded, matching or not, and compared in one assertion: no branch on the
+    // result under test (CLAUDE.md testing rule (b)).
+    const sqlSteps: string[] = [];
+    const pureSteps: string[] = [];
     // One database; each sequence is its own user, so coverage starts empty without a re-migrate.
     const db = openDb(':memory:');
     migrate(db);
@@ -34,12 +37,11 @@ describe('mergeRange vs addCoverage', () => {
         const b = a + Math.floor(rand() * 40);
         addCoverage(db, user, a, b);
         pure = mergeRange(pure, a, b);
-        const sql = coverageFor(db, user);
-        if (JSON.stringify(sql) !== JSON.stringify(pure)) {
-          mismatches.push(`seq ${seq} step ${step} +${a}..${b}: sql ${JSON.stringify(sql)} pure ${JSON.stringify(pure)}`);
-        }
+        const label = `seq ${seq} step ${step} +${a}..${b}`;
+        sqlSteps.push(`${label}: ${JSON.stringify(coverageFor(db, user))}`);
+        pureSteps.push(`${label}: ${JSON.stringify(pure)}`);
       }
     }
-    expect(mismatches).toEqual([]);
+    expect(sqlSteps).toEqual(pureSteps);
   });
 });
