@@ -38,6 +38,7 @@ const store = new Map<string, unknown>();
     onAlarm: { addListener: vi.fn() },
   },
   permissions: { contains: vi.fn(async () => false) },
+  action: { setBadgeText: vi.fn(async () => {}), setBadgeBackgroundColor: vi.fn(async () => {}) },
   runtime: {
     onMessage: { addListener: vi.fn() },
     onInstalled: { addListener: vi.fn() },

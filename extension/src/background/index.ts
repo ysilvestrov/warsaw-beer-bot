@@ -261,9 +261,30 @@ function enqueueSyncStatusPatch(next: (cur: StoredSyncStatus) => StoredSyncStatu
   syncWriteChain = syncWriteChain.catch(() => undefined).then(async () => {
     if (generation !== syncGeneration) return;
     const s = next(await readSyncStatus());
-    if (s) await writeSyncStatus(s);
+    if (s) {
+      await writeSyncStatus(s);
+      await applySyncBadge(s);
+    }
   });
   return syncWriteChain;
+}
+
+// #934 §5: the badge follows the stored status — '!' while a silent check left more new check-ins
+// than its budget pulls in. Derived, so a worker start restores it from the same record.
+const BADGE_COLOR = '#b45309';
+async function applySyncBadge(s: StoredSyncStatus): Promise<void> {
+  const text = s.outcome === 'gap' && !s.running ? '!' : '';
+  try {
+    if (text) await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+    await chrome.action.setBadgeText({ text });
+  } catch (error) {
+    // The badge is display only: a failed call must not fail the status write.
+    console.warn('[beer-overlay] sync badge update failed', error);
+  }
+}
+
+export async function restoreSyncBadge(): Promise<void> {
+  await applySyncBadge(await readSyncStatus());
 }
 
 let syncRunning = false;
@@ -546,10 +567,15 @@ function emptySyncStatus(outcome: StoredSyncStatus['outcome'] = null, state?: Ch
     mergedThisRun: 0, outcome, complete: false };
 }
 
-// Credentials are worker-only; never return the private binding in a popup/content reply.
-function syncStatusReply(s: StoredSyncStatus) {
-  return { type: 'checkin-sync:status:ok' as const, running: s.running, serverCount: s.serverCount,
-    profileTotal: s.profileTotal, mergedThisRun: s.mergedThisRun, outcome: s.outcome, complete: s.complete };
+// Credentials are worker-only; never return the private binding in a popup/content reply — only the
+// linked username, for "Sign in as <username>".
+// #934: a stored intent reads as running — between two steps the record briefly says `capped`,
+// which the person must not see as a finished sync.
+function syncStatusReply(s: StoredSyncStatus, intentStored = false) {
+  return { type: 'checkin-sync:status:ok' as const, running: s.running || intentStored, serverCount: s.serverCount,
+    profileTotal: s.profileTotal, mergedThisRun: s.mergedThisRun, outcome: s.outcome, complete: s.complete,
+    caughtUp: s.caughtUp === true, gapMissing: s.gapMissing ?? null, pausedUntil: s.pausedUntil ?? null,
+    quiet: s.quiet === true, username: s.binding?.username ?? null };
 }
 
 async function hasSyncIntent(): Promise<boolean> {
@@ -603,13 +629,14 @@ export async function handleCheckinSyncStatus() {
     await enqueueSyncStatus(fresh, invalidationGeneration).catch(() => undefined);
     return syncStatusReply(invalidationGeneration === syncGeneration ? fresh : emptySyncStatus());
   }
+  const intentStored = await hasSyncIntent();
   // #934: a running status with a stored intent is not an orphan — the watchdog continues it.
-  if (status.running && orphaned && !(await hasSyncIntent())) {
+  if (status.running && orphaned && !intentStored) {
     const recovered = { ...status, running: false, outcome: 'error' as const, complete: false };
     await enqueueSyncStatus(recovered, generation).catch(() => undefined);
     return syncStatusReply(recovered);
   }
-  return syncStatusReply(status);
+  return syncStatusReply(status, intentStored);
 }
 
 // #934: the check alarm keeps its period across worker restarts — created only when missing.
@@ -629,6 +656,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 // Every worker start: an intent a dead worker left behind continues from the first page.
 void syncScheduler.resume();
+// Chrome keeps no badge text across browser starts: the stored status brings it back.
+void restoreSyncBadge();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void ensureInstall();

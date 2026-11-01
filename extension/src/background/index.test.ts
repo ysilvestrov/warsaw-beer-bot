@@ -3,7 +3,7 @@ import * as cacheStore from '../cache/store';
 import { afterEach, beforeEach, describe, it, expect, vi, type Mock } from 'vitest';
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
-  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleMatch,
+  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleMatch, restoreSyncBadge,
 } from './index';
 import { setSettings } from '../shared/config';
 import { CHECK_ALARM, INTENT_KEY, WATCHDOG_ALARM } from './sync-scheduler';
@@ -19,6 +19,8 @@ const localStore = new Map<string, unknown>();
 // A signed-in profile page: the step checks the session on page one (#934).
 const signedIn = (name: string) => `<html><a data-href=":user/profile" href="/user/${name}">My Profile</a></html>`;
 const FEED = signedIn('bob');
+// #934: the scheduler's verdict fields of a status reply for a record that carries none.
+const NO_VERDICT = { caughtUp: false, gapMissing: null, pausedUntil: null, quiet: false };
 
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto);
@@ -360,27 +362,28 @@ describe('#611 cached sync reports', () => {
     await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
       is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
     expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-      serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false });
+      serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false,
+      ...NO_VERDICT, username: current.username });
     expect(await getCached('old-personal')).toBe(null);
   });
   it('retains a verified report without exposing credentials in the popup reply', async () => {
     await chrome.storage.local.set({ checkinSync: completed });
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'BOB', linkRevision: 1, deepest_max_id: null, serverCount: 100, profileTotal: null, complete: false });
     expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-      serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome: 'done', complete: true });
+      serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome: 'done', complete: true, ...NO_VERDICT, username: 'bob' });
   });
   it('cannot establish a cached completion when current state is unavailable', async () => {
     await chrome.storage.local.set({ checkinSync: completed });
     vi.spyOn(client, 'getCheckinSyncState').mockRejectedValue(new Error('offline'));
     expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-      serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, ...NO_VERDICT, username: null });
   });
   it('discards an old report without a binding', async () => {
     const { binding: _binding, ...legacy } = completed;
     await chrome.storage.local.set({ checkinSync: legacy });
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'bob', linkRevision: 1, deepest_max_id: null, serverCount: 12, profileTotal: null, complete: false });
     expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-      serverCount: 12, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+      serverCount: 12, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, ...NO_VERDICT, username: 'bob' });
   });
   it('does not reuse a report after credentials change, even with the same username and revision', async () => {
     await chrome.storage.local.set({ checkinSync: completed });
@@ -408,7 +411,7 @@ test('a delayed status validation does not replace a completed run with an obsol
   await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ outcome: 'done' }));
   releaseValidation(state);
   expect(await reading).toEqual({ type: 'checkin-sync:status:ok', running: false,
-    serverCount: 13, profileTotal: 13, mergedThisRun: 1, outcome: 'done', complete: true });
+    serverCount: 13, profileTotal: 13, mergedThisRun: 1, outcome: 'done', complete: true, ...NO_VERDICT, username: 'bob' });
 });
 
 test('queued progress and a terminal reply from A cannot restore A after a verified switch to B', async () => {
@@ -426,7 +429,7 @@ test('queued progress and a terminal reply from A cannot restore A after a verif
     profileTotal: 100, serverCount: 100, complete: false } as never);
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false });
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false, ...NO_VERDICT, username: 'other' });
   expect(localStore.get('checkinSync')).toMatchObject({ binding: { username: 'other', linkRevision: 2 }, serverCount: 0, complete: false });
 });
 
@@ -473,7 +476,7 @@ test('clearing credentials invalidates cached personal data and aborts an active
   const signal = fetchFeed.mock.calls[0][1].signal!;
   await setSettings({ token: '' });
   expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, ...NO_VERDICT, username: null });
   const aborted = signal.aborted;
   const cached = await getCached('old-personal');
   resolveFeed(new Response('<html></html>'));
@@ -533,7 +536,7 @@ test('a cache removal failure still returns and persists a no-token status reply
   await setSettings({ token: '' });
   vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache storage failed'));
   expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, ...NO_VERDICT, username: null });
   expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
     mergedThisRun: 0, outcome: 'error', complete: false });
 });
@@ -726,6 +729,67 @@ describe('#934 scheduler wiring', () => {
     onStartup();
     await new Promise((r) => setTimeout(r, 0));
     expect(chrome.alarms.create).not.toHaveBeenCalledWith(CHECK_ALARM, expect.anything());
+  });
+
+  it('the status reply carries the stored verdict and the linked username, never the token', async () => {
+    localStore.set('checkinSync', { running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0, outcome: 'gap',
+      complete: false, gapMissing: 12, binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } });
+    expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false, serverCount: 88,
+      profileTotal: 100, mergedThisRun: 0, outcome: 'gap', complete: false,
+      caughtUp: false, gapMissing: 12, pausedUntil: null, quiet: false, username: 'bob' });
+
+    localStore.set('checkinSync', { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 0, outcome: 'blocked',
+      complete: true, caughtUp: true, pausedUntil: '2026-11-02T00:00:00.000Z', quiet: true,
+      binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ caughtUp: true, gapMissing: null,
+      pausedUntil: '2026-11-02T00:00:00.000Z', quiet: true });
+  });
+
+  it('a capped record reads as running while an intent is stored, and as finished without one', async () => {
+    const binding = { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' };
+    localStore.set('checkinSync', { running: false, serverCount: 5000, profileTotal: 12407, mergedThisRun: 0, outcome: 'capped', complete: false, binding });
+    localStore.set(INTENT_KEY, { id: 'a', kind: 'manual', startedAt: new Date().toISOString(), silentPagesUsed: 0 });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ running: true, outcome: 'capped' });
+    localStore.delete(INTENT_KEY);
+    expect(await handleCheckinSyncStatus()).toMatchObject({ running: false, outcome: 'capped' });
+  });
+
+  it('a gap lights the amber badge and the next step start clears it', async () => {
+    const setBadgeText = vi.mocked(chrome.action.setBadgeText);
+    setBadgeText.mockClear();
+    const binding = { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' };
+    localStore.set('checkinSync', { running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0, outcome: 'gap', complete: false, gapMissing: 12, binding });
+    await restoreSyncBadge();
+    expect(setBadgeText.mock.calls).toEqual([[{ text: '!' }]]);
+    expect(chrome.action.setBadgeBackgroundColor).toHaveBeenCalledWith({ color: '#b45309' });
+
+    let releaseFeed!: () => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { releaseFeed = () => resolve(new Response(FEED)); })));
+    vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
+      merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: null, nextCursor: null, profileTotal: 100, serverCount: 100, complete: false,
+    });
+    await handleCheckinSyncStart();
+    expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
+    releaseFeed();
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
+    expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
+    expect(setBadgeText.mock.calls.filter(([d]) => d.text === '!')).toHaveLength(1);
+  });
+
+  it('a worker start with a finished sync in storage shows no badge', async () => {
+    localStore.set('checkinSync', { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 0, outcome: 'done', complete: true });
+    await restoreSyncBadge();
+    expect(chrome.action.setBadgeText).toHaveBeenLastCalledWith({ text: '' });
+  });
+
+  it('a failing badge call does not fail the status write', async () => {
+    vi.mocked(chrome.action.setBadgeText).mockRejectedValueOnce(new Error('no action'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    localStore.set('checkinSync', { running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0, outcome: 'done', complete: false });
+    await setSettings({ token: '' });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: 'error' });
+    expect(localStore.get('checkinSync')).toMatchObject({ outcome: 'error' });
+    expect(console.warn).toHaveBeenCalledWith('[beer-overlay] sync badge update failed', expect.any(Error));
   });
 
   it('a browser-start check without the untappd.com permission sends nothing', async () => {
