@@ -35,6 +35,8 @@ export function formatSyncStatus(s: SyncStatusView): string {
     // Не «nothing was saved»: сторінки, прийняті до відмови, уже збережені.
     case 'page_rejected': return `Untappd returned an unexpected page, so the sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''} — try again later, or use /import in the bot.`;
     case 'error': return 'Sync failed — check your connection and token, then retry.';
+    // #934: тихий синк зупинився — бракує більше, ніж уміщає бюджет; віджет обв'язки замінить цей рядок.
+    case 'gap': return `${s.profileTotal !== null ? `${Math.max(0, s.profileTotal - s.serverCount)} new check-ins` : 'New check-ins'} — press Sync.`;
     case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     case 'done':

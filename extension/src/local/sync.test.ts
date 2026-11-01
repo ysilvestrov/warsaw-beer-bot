@@ -200,7 +200,7 @@ describe('runCheckinSync over local deps', () => {
       '590': feedPageOf([580, 570]),
       '570': feedPageOf([560, 550]),
     }, (u) => urls.push(u));
-    expect(out).toEqual({ status: 'done', complete: true, serverCount: 6, profileTotal: 6, mergedThisRun: 6 });
+    expect(out).toEqual({ status: 'done', complete: true, serverCount: 6, profileTotal: 6, mergedThisRun: 6, caughtUp: true });
     expect(urls).toEqual([
       UNTAPPD_HOME,
       'https://untappd.com/user/bob',

@@ -174,14 +174,14 @@ describe('#611 binding-aware runner', () => {
     const out = await runCheckinSync(baseDeps({ getState: async () => ({
       username: 'bob', linkRevision, deepest_max_id: null, complete: false, serverCount: 100, profileTotal: 100,
     } as unknown as CheckinSyncState), fetchFeed, submitPage }));
-    expect(out).toEqual({ status: 'sync_context_required', complete: false, serverCount: 0, profileTotal: null, mergedThisRun: 0 });
+    expect(out).toEqual({ status: 'sync_context_required', complete: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, caughtUp: false });
     expect(fetchFeed).not.toHaveBeenCalled(); expect(submitPage).not.toHaveBeenCalled();
   });
   it.each(['account_changed', 'sync_context_required'] as const)('stops on %s without claiming completed sync from old counts', async code => {
     const submitPage = vi.fn().mockResolvedValueOnce(page({ merged: 5, serverCount: 100, profileTotal: 100, nextCursor: '500' }))
       .mockRejectedValueOnce(Object.assign(new Error(code), { code }));
     const out = await runCheckinSync(baseDeps({ submitPage }));
-    expect(out).toEqual({ status: code, complete: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5 });
+    expect(out).toEqual({ status: code, complete: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5, caughtUp: false });
     expect(submitPage).toHaveBeenCalledTimes(2);
   });
 
@@ -204,7 +204,7 @@ describe('#611 binding-aware runner', () => {
       return page({ merged: 15, serverCount: 165, profileTotal: 8200, nextCursor: '400' });
     };
     const out = await runCheckinSync(baseDeps({ submitPage }));
-    expect(out).toEqual({ status: 'page_rejected', complete: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 15 });
+    expect(out).toEqual({ status: 'page_rejected', complete: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 15, caughtUp: false });
   });
 
   it('keeps a network failure of the feed request a plain error', async () => {
