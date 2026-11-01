@@ -9,7 +9,7 @@ import { mergeCheckin, countCheckins, checkinExists, oldestCheckinId } from '../
 import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
 import { addCoverage, coverageFor } from '../../storage/checkin_coverage';
 import { checkPage, coverageSpan } from '../../shared/checkin-sync/guards';
-import { conclude } from '../../shared/checkin-sync/conclude';
+import { conclude, isCaughtUp } from '../../shared/checkin-sync/conclude';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { parseCheckinFeedPage } from '../../sources/untappd/checkin-feed';
 import { isBlockPage } from '../../sources/untappd/block';
@@ -35,13 +35,16 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     if (!username) return c.json({ error: 'not_linked' }, 409);
     const owner = getHistoryOwner(deps.db, telegramId);
     const state = getSyncState(deps.db, telegramId, owner.accountKey);
+    const serverCount = countCheckins(deps.db, telegramId, owner.accountKey);
     return c.json({
       username,
       linkRevision: owner.linkRevision,
       deepest_max_id: state.deepest_max_id,
       complete: state.complete,
-      serverCount: countCheckins(deps.db, telegramId, owner.accountKey),
-      profileTotal: null,
+      serverCount,
+      // #934: збережена загальна кількість і «історія повна» — для віджета popup.
+      profileTotal: state.profile_total,
+      caughtUp: isCaughtUp({ count: serverCount, profileTotal: state.profile_total, ranges: coverageFor(deps.db, telegramId, owner.accountKey) }),
     });
   })());
 
@@ -86,15 +89,19 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       return refuse(verdict.status, verdict.code, { reason: verdict.reason, pageSize, hasCursor });
     }
     if (verdict.kind === 'empty') {
+      const storedTotal = getSyncState(deps.db, telegramId, owner.accountKey).profile_total;
+      const serverCount = countCheckins(deps.db, telegramId, owner.accountKey);
       return c.json({
         merged: 0,
         alreadyKnown: 0,
         pageSize: 0,
         nextMaxId: null,
         nextCursor: null,
-        profileTotal: page.profileTotal ?? getSyncState(deps.db, telegramId, owner.accountKey).profile_total,
-        serverCount: countCheckins(deps.db, telegramId, owner.accountKey),
+        profileTotal: page.profileTotal ?? storedTotal,
+        serverCount,
         complete: false,
+        // #934: порожня сторінка нічого не записує — відповідь каже про покриття, яке вже є.
+        caughtUp: isCaughtUp({ count: serverCount, profileTotal: storedTotal, ranges: coverageFor(deps.db, telegramId, owner.accountKey) }),
       });
     }
 
@@ -140,7 +147,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
 
     const serverCount = countCheckins(deps.db, telegramId, owner.accountKey);
     const state = getSyncState(deps.db, telegramId, owner.accountKey);
-    const { nextCursor } = conclude({
+    const { nextCursor, caughtUp } = conclude({
       count: serverCount,
       profileTotal: state.profile_total,
       ranges: coverageFor(deps.db, telegramId, owner.accountKey),
@@ -156,6 +163,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       profileTotal: page.profileTotal,
       serverCount,
       complete: false,
+      caughtUp,
     });
     }).immediate(),
   );

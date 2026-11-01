@@ -39,7 +39,7 @@ describe('POST /checkins/sync — shared scenarios (#924)', () => {
       });
       const body = await res.json() as Record<string, unknown>;
       answers.push(res.status === 200
-        ? { status: 200, nextCursor: body.nextCursor, merged: body.merged, alreadyKnown: body.alreadyKnown, serverCount: body.serverCount }
+        ? { status: 200, nextCursor: body.nextCursor, merged: body.merged, alreadyKnown: body.alreadyKnown, serverCount: body.serverCount, caughtUp: body.caughtUp }
         : { status: res.status, error: body.error });
     }
     expect(answers).toEqual(scenario.steps.map((s) => s.expect));

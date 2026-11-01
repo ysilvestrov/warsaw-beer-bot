@@ -119,6 +119,30 @@ describe('GET /checkins/sync/state', () => {
     });
   });
 
+  // #934: the popup's tick reads these two fields; before, the state always said profileTotal: null.
+  it('reports the stored profile total and caughtUp once count and one coverage range agree', async () => {
+    const { app } = setup();
+    const page = await post(app, '/checkins/sync', { html: feedPage('100', 43, 'B Beer', 'B Brewery'), linkRevision: 1 }, RAW_TOKEN);
+    expect(await page.json()).toMatchObject({ serverCount: 1, profileTotal: 1, nextCursor: null, caughtUp: true });
+    expect(await (await get(app, '/checkins/sync/state', RAW_TOKEN)).json())
+      .toMatchObject({ serverCount: 1, profileTotal: 1, caughtUp: true });
+  });
+
+  it('is not caught up while the count is below the stored profile total', async () => {
+    const { app } = setup();
+    const page = await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 1 }, RAW_TOKEN);
+    expect(await page.json()).toMatchObject({ serverCount: 1, profileTotal: 3, caughtUp: false });
+    expect(await (await get(app, '/checkins/sync/state', RAW_TOKEN)).json())
+      .toMatchObject({ serverCount: 1, profileTotal: 3, caughtUp: false });
+  });
+
+  it('answers an empty page with caughtUp from the coverage already proven', async () => {
+    const { app } = setup();
+    await post(app, '/checkins/sync', { html: feedPage('100', 43, 'B Beer', 'B Brewery'), linkRevision: 1 }, RAW_TOKEN);
+    const empty = await post(app, '/checkins/sync', { html: PAGE_BOTTOM, maxId: '100', linkRevision: 1 }, RAW_TOKEN);
+    expect(await empty.json()).toMatchObject({ pageSize: 0, nextCursor: null, serverCount: 1, profileTotal: 1, caughtUp: true });
+  });
+
   it('returns 409 not_linked when the profile has no username', async () => {
     const { app } = setup();
     const res = await get(app, '/checkins/sync/state', RAW_TOKEN_NO_USER);
@@ -570,7 +594,7 @@ describe('#611 sync binding', () => {
     setUntappdUsername(db, TELEGRAM_ID, 'BOB');
     const state = await get(app, '/checkins/sync/state', RAW_TOKEN);
     expect(await state.json()).toEqual({ username: 'BOB', linkRevision: 1, deepest_max_id: null,
-      complete: false, serverCount: 0, profileTotal: null });
+      complete: false, serverCount: 0, profileTotal: null, caughtUp: false });
     expect((await post(app, '/checkins/sync', { html: PAGE_ONE }, RAW_TOKEN)).status).toBe(200);
     expect((await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 1 }, RAW_TOKEN)).status).toBe(200);
     setUntappdUsername(db, TELEGRAM_ID, 'other');
@@ -594,7 +618,7 @@ describe('#611 sync binding', () => {
     try {
       const res = await get(app, '/checkins/sync/state', RAW_TOKEN);
       expect(await res.json()).toEqual({ username: 'bob', linkRevision: 1, deepest_max_id: '555',
-        complete: false, serverCount: 1, profileTotal: null });
+        complete: false, serverCount: 1, profileTotal: 3, caughtUp: false });
       expect(original(other, TELEGRAM_ID)?.untappd_username).toBe('other');
     } finally {
       spy.mockRestore(); other.close(); db.close(); rmSync(dir, { recursive: true, force: true });
@@ -617,7 +641,7 @@ test('feed A → B → A restores proven coverage, rejects delayed/ABA pages and
   expect(await b.json()).toMatchObject({ serverCount: 1, profileTotal: 1, nextCursor: null });
   setUntappdUsername(db, 1, 'bob');
   expect(await (await get(app, '/checkins/sync/state', RAW_TOKEN)).json()).toMatchObject({
-    username: 'bob', linkRevision: 3, serverCount: 1, profileTotal: null, deepest_max_id: '555' });
+    username: 'bob', linkRevision: 3, serverCount: 1, profileTotal: 3, deepest_max_id: '555' });
   const aba = await post(app, '/checkins/sync', { html: PAGE_BOTTOM, linkRevision: 1 }, RAW_TOKEN);
   expect(aba.status).toBe(409); expect(await aba.json()).toEqual({ error: 'account_changed' });
   setUntappdUsername(db, 2, 'bob');

@@ -5,6 +5,16 @@ export interface SyncConclusion {
   nextCursor: string | null;
 }
 
+// #934: «історія повна» — лічильник досяг загальної кількості І покриття є одним суцільним
+// діапазоном. Те саме правило зупиняє обхід у `conclude` і стоїть за «✓» у popup.
+export function isCaughtUp(state: {
+  count: number;
+  profileTotal: number | null;
+  ranges: readonly CoverageRange[];
+}): boolean {
+  return state.profileTotal !== null && state.count >= state.profileTotal && state.ranges.length === 1;
+}
+
 // #924: where the walk steps next, decided the same way on the server and in local mode.
 // Moved verbatim from routes/checkins.ts.
 export function conclude(state: {
@@ -18,9 +28,7 @@ export function conclude(state: {
   // не досить: `profile_total` міг ЗМЕНШИТИСЯ (користувач видалив чекін на Untappd,
   // наш рядок лишився) — тому коротке замикання вимагає ще й того, щоб покриття
   // було одним суцільним діапазоном: якщо дір нема, то й іти нікуди.
-  const caughtUp = state.profileTotal !== null
-    && state.count >= state.profileTotal
-    && state.ranges.length === 1;
+  const caughtUp = isCaughtUp(state);
   const covering = rangeContaining(state.ranges, state.oldest);
   const nextCursor: string | null = caughtUp ? null : String(covering?.from_id ?? state.oldest);
 

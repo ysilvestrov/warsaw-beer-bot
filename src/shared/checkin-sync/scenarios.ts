@@ -26,7 +26,7 @@ export function feedPageOf(ids: number[], opts: { total?: number; rating?: numbe
 export const EMPTY_PAGE = '<html><body></body></html>';
 
 export type StepExpect =
-  | { status: 200; nextCursor: string | null; merged: number; alreadyKnown: number; serverCount: number }
+  | { status: 200; nextCursor: string | null; merged: number; alreadyKnown: number; serverCount: number; caughtUp: boolean }
   | { status: 400; error: 'bad_cursor' }
   | { status: 422; error: 'no_session' };
 
@@ -43,8 +43,8 @@ export interface SyncScenario {
   coverage: CoverageRange[];
 }
 
-const ok = (nextCursor: string | null, merged: number, alreadyKnown: number, serverCount: number): StepExpect =>
-  ({ status: 200, nextCursor, merged, alreadyKnown, serverCount });
+const ok = (nextCursor: string | null, merged: number, alreadyKnown: number, serverCount: number, caughtUp = false): StepExpect =>
+  ({ status: 200, nextCursor, merged, alreadyKnown, serverCount, caughtUp });
 
 export const SYNC_SCENARIOS: SyncScenario[] = [
   {
@@ -79,7 +79,7 @@ export const SYNC_SCENARIOS: SyncScenario[] = [
   },
   {
     name: 'stops the walk when the counts agree and coverage is one range',
-    steps: [{ html: feedPageOf([600, 590, 580], { total: 3 }), maxId: null, expect: ok(null, 3, 0, 3) }],
+    steps: [{ html: feedPageOf([600, 590, 580], { total: 3 }), maxId: null, expect: ok(null, 3, 0, 3, true) }],
     coverage: [{ from_id: 580, to_id: 600 }],
   },
   {

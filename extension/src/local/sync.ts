@@ -7,7 +7,7 @@ import { sessionUsername } from '../../../src/shared/untappd/session-user';
 import { canonicalCheckinAt } from '../../../src/shared/checkin-sync/checkin-time';
 import { checkPage, coverageSpan } from '../../../src/shared/checkin-sync/guards';
 import { mergeRange } from '../../../src/shared/checkin-sync/coverage';
-import { conclude } from '../../../src/shared/checkin-sync/conclude';
+import { conclude, isCaughtUp } from '../../../src/shared/checkin-sync/conclude';
 import { currentGeneration, inPageTx, type LocalMeta } from './db';
 
 export const UNTAPPD_HOME = 'https://untappd.com/';
@@ -44,13 +44,15 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
       } else if (meta.username !== username || meta.generation !== generation) {
         throw new ApiError('account_changed');
       }
+      const serverCount = await tx.count();
       return {
         username,
         linkRevision: meta.generation,
         deepest_max_id: null,
         complete: false,
-        serverCount: await tx.count(),
+        serverCount,
         profileTotal: meta.profileTotal,
+        caughtUp: isCaughtUp({ count: serverCount, profileTotal: meta.profileTotal, ranges: await tx.ranges() }),
       };
     });
   }
@@ -69,6 +71,7 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
         throw new ApiError(verdict.code === 'no_session' ? 'no_session' : 'page_rejected', verdict.reason);
       }
       if (verdict.kind === 'empty') {
+        const serverCount = await tx.count();
         return {
           merged: 0,
           alreadyKnown: 0,
@@ -76,8 +79,9 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
           nextMaxId: null,
           nextCursor: null,
           profileTotal: page.profileTotal ?? meta.profileTotal,
-          serverCount: await tx.count(),
+          serverCount,
           complete: false,
+          caughtUp: isCaughtUp({ count: serverCount, profileTotal: meta.profileTotal, ranges: await tx.ranges() }),
         };
       }
 
@@ -111,7 +115,7 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
       await tx.putMeta(next);
 
       const serverCount = await tx.count();
-      const { nextCursor } = conclude({ count: serverCount, profileTotal: next.profileTotal, ranges, oldest: verdict.oldest });
+      const { nextCursor, caughtUp } = conclude({ count: serverCount, profileTotal: next.profileTotal, ranges, oldest: verdict.oldest });
       return {
         merged,
         alreadyKnown,
@@ -121,6 +125,7 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
         profileTotal: page.profileTotal,
         serverCount,
         complete: false,
+        caughtUp,
       };
     });
   }

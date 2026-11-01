@@ -17,7 +17,7 @@ const meta = () => inPageTx((tx) => tx.meta());
 async function answerOf(run: () => Promise<CheckinSyncPageResult>): Promise<StepExpect> {
   try {
     const r = await run();
-    return { status: 200, nextCursor: r.nextCursor, merged: r.merged, alreadyKnown: r.alreadyKnown, serverCount: r.serverCount };
+    return { status: 200, nextCursor: r.nextCursor, merged: r.merged, alreadyKnown: r.alreadyKnown, serverCount: r.serverCount, caughtUp: r.caughtUp };
   } catch (e) {
     // The server client's mapping (api/client.ts): 400 bad_cursor → page_rejected, 422 → no_session.
     if (e instanceof ApiError && e.code === 'page_rejected') return { status: 400, error: 'bad_cursor' };
@@ -44,7 +44,7 @@ describe('local submitPage — shared scenarios (#924)', () => {
 describe('local getState', () => {
   it('makes the session user the owner of a new database, at the current generation', async () => {
     const state = await deps(signedIn('Bob')).getState();
-    expect(state).toEqual({ username: 'bob', linkRevision: await currentGeneration(), deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
+    expect(state).toEqual({ username: 'bob', linkRevision: await currentGeneration(), deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null, caughtUp: false });
     expect(await meta()).toEqual({ username: 'bob', generation: await currentGeneration(), profileTotal: null, oldestId: null, updatedAt: '2026-10-31T12:00:00.000Z' });
   });
 

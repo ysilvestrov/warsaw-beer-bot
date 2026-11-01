@@ -86,6 +86,8 @@ export interface CheckinSyncState {
   complete: boolean;
   serverCount: number;
   profileTotal: number | null;
+  /** #934: історія повна (лічильник ≥ загальної і одне покриття). Старий сервер поля не шле — читай як false. */
+  caughtUp?: boolean;
 }
 
 export interface CheckinSyncPageResult {
@@ -98,4 +100,6 @@ export interface CheckinSyncPageResult {
   profileTotal: number | null;
   serverCount: number;
   complete: boolean;
+  /** #934: див. CheckinSyncState.caughtUp. */
+  caughtUp?: boolean;
 }
