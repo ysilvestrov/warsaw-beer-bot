@@ -668,7 +668,7 @@ const alarmsGet = chrome.alarms.get as unknown as Mock<() => Promise<chrome.alar
 
 describe('#934 scheduler wiring', () => {
   it('the watchdog continues an intent a dead worker left, from the first page, to the end', async () => {
-    localStore.set(INTENT_KEY, { kind: 'manual', startedAt: '2026-11-01T10:00:00.000Z', silentPagesUsed: 0 });
+    localStore.set(INTENT_KEY, { id: 'a', kind: 'manual', startedAt: new Date().toISOString(), silentPagesUsed: 0 });
     permissionsContains.mockResolvedValue(true);
     const fetchMock = vi.fn(async (_url: string) => new Response(FEED, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -679,6 +679,32 @@ describe('#934 scheduler wiring', () => {
     await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['https://untappd.com/user/bob']);
     await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
+  });
+
+  it('pressing Sync during a silent step turns it into a manual one without a second run', async () => {
+    permissionsContains.mockResolvedValue(true);
+    let releaseFeed!: () => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { releaseFeed = () => resolve(new Response(FEED)); }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
+      merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: null, nextCursor: null, profileTotal: 100, serverCount: 12, complete: false,
+    });
+    onAlarm({ name: CHECK_ALARM });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(await handleCheckinSyncStart()).toEqual({ type: 'checkin-sync:started', alreadyRunning: true });
+    expect(localStore.get(INTENT_KEY)).toMatchObject({ kind: 'manual' });
+    releaseFeed();
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
+  });
+
+  it('dropping an intent for a gone token leaves no ✓ of the previous run next to not_linked', async () => {
+    localStore.set('checkinSync', { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome: 'done',
+      complete: true, caughtUp: true, binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } });
+    localStore.set(INTENT_KEY, { id: 'a', kind: 'manual', startedAt: new Date().toISOString(), silentPagesUsed: 0 });
+    await setSettings({ token: '' });
+    onAlarm({ name: WATCHDOG_ALARM });
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ outcome: 'not_linked' }));
+    expect(localStore.get('checkinSync')).not.toHaveProperty('caughtUp');
   });
 
   it('a signed-out first page stops the step as no_session without sending it', async () => {

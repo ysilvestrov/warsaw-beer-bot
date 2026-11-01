@@ -22,10 +22,15 @@ export const PAUSE_KEY = 'syncPause';
 export const CHECKS_KEY = 'syncChecks';
 
 export interface SyncIntent {
+  /** A fresh id per start: settling one intent never removes another written meanwhile. */
+  id: string;
   kind: 'manual' | 'silent';
   startedAt: string;
   silentPagesUsed: number;
 }
+
+/** An intent older than this is a leftover (a rollback and a later upgrade), not a wish. */
+export const INTENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface SchedulerStore {
   get<T>(key: string): Promise<T | undefined>;
@@ -49,6 +54,8 @@ export interface SchedulerReport {
   pausedUntil: string | null;
   /** A silent check found no session: a calm hint, no badge. */
   quiet: boolean;
+  /** false — the intent was dropped without a step in this worker (resume found no token). */
+  afterStep: boolean;
 }
 
 export interface SchedulerDeps {
@@ -56,6 +63,7 @@ export interface SchedulerDeps {
   alarms: { create: (name: string, periodInMinutes: number) => Promise<void>; clear: (name: string) => Promise<void> };
   now: () => Date;
   runStep: (req: StepRequest) => Promise<SyncOutcome>;
+  newId?: () => string;
   clearMatchCache: () => Promise<void>;
   hasUntappdPermission: () => Promise<boolean>;
   hasToken: () => Promise<boolean>;
@@ -88,6 +96,16 @@ export function createSyncScheduler(deps: SchedulerDeps) {
   let controller: AbortController | null = null;
   // The last intent this instance read or wrote: afterPage is synchronous.
   let current: SyncIntent | null = null;
+  const newId = deps.newId ?? (() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+
+  // Every read-modify-write of the intent runs in this chain: storage has no transactions, and a
+  // start, a budget reservation and a settle must not interleave inside one worker.
+  let intentChain: Promise<unknown> = Promise.resolve();
+  function withIntent<T>(work: (cur: SyncIntent | null) => Promise<T>): Promise<T> {
+    const run = intentChain.then(async () => work(await readIntent()));
+    intentChain = run.catch(() => undefined);
+    return run;
+  }
 
   const readIntent = async () => (current = (await deps.store.get<SyncIntent>(INTENT_KEY)) ?? null);
   async function writeIntent(i: SyncIntent): Promise<void> {
@@ -95,14 +113,19 @@ export function createSyncScheduler(deps: SchedulerDeps) {
     current = i;
     await deps.alarms.create(WATCHDOG_ALARM, 1);
   }
-  async function clearIntent(): Promise<void> {
+  async function removeIntent(): Promise<void> {
     await deps.store.remove(INTENT_KEY);
     current = null;
     await deps.alarms.clear(WATCHDOG_ALARM);
   }
+  /** Removes the intent only if it is still `id`; true when nothing else is wanted now. */
+  const clearIntent = (id: string) => withIntent(async (cur) => {
+    if (cur && cur.id !== id) return false;
+    await removeIntent();
+    return true;
+  });
 
-  async function beforeFetch(): Promise<boolean> {
-    const i = await readIntent();
+  const beforeFetch = () => withIntent(async (i) => {
     if (!i) return false;
     if (i.kind === 'manual') return true;
     if (i.silentPagesUsed >= SILENT_BUDGET) return false;
@@ -110,32 +133,42 @@ export function createSyncScheduler(deps: SchedulerDeps) {
     // the page counted, so a restart cannot spend more than the budget.
     await writeIntent({ ...i, silentPagesUsed: i.silentPagesUsed + 1 });
     return true;
-  }
+  });
 
   function afterPage(res: CheckinSyncPageResult): 'continue' | 'stop' {
     if (!current || current.kind === 'manual') return 'continue';
     return pagesNeeded(res.profileTotal, res.serverCount) > SILENT_BUDGET - current.silentPagesUsed ? 'stop' : 'continue';
   }
 
-  async function settle(outcome: SyncOutcome, kind: SyncIntent['kind']): Promise<void> {
-    const gap = outcome.status === 'gap' || (outcome.status === 'capped' && kind === 'silent');
+  async function settle(outcome: SyncOutcome, intent: SyncIntent): Promise<void> {
+    const kind = intent.kind;
+    const missing = outcome.profileTotal !== null ? Math.max(0, outcome.profileTotal - outcome.serverCount) : null;
+    // A silent budget spent on a coverage hole, with the counts equal, is no news for the person:
+    // only a count gap is a gap (badge, "N new check-ins").
+    const gap = outcome.status === 'gap' || (outcome.status === 'capped' && kind === 'silent' && missing !== null && missing > 0);
     let pausedUntil: string | null = null;
     if (outcome.status === 'blocked') {
       pausedUntil = nextLocalMidnight(deps.now()).toISOString();
       await deps.store.set(PAUSE_KEY, { until: pausedUntil });
     }
-    await clearIntent();
+    // A start written while this step ran has its own id and stays: the loop runs it next.
+    if (!(await clearIntent(intent.id))) return;
     await deps.onReport({
       outcome: gap ? { ...outcome, status: 'gap' } : outcome,
       kind,
-      gapMissing: gap && outcome.profileTotal !== null ? Math.max(0, outcome.profileTotal - outcome.serverCount) : null,
+      gapMissing: gap ? missing : null,
       pausedUntil,
       quiet: outcome.status === 'no_session' && kind === 'silent',
+      afterStep: true,
     });
   }
 
   function loop(): Promise<void> {
-    loopPromise ??= runLoop().finally(() => { loopPromise = null; });
+    loopPromise ??= runLoop().finally(() => {
+      loopPromise = null;
+      // An intent written after the loop's last read but before it ended is not left to the watchdog.
+      void deps.store.get<SyncIntent>(INTENT_KEY).then((i) => { if (i && !loopPromise) void loop(); }, () => undefined);
+    });
     return loopPromise;
   }
 
@@ -160,12 +193,11 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       const after = await readIntent();
       if (!after) {
         // Stop removed the intent while the step ran.
-        await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, gapMissing: null, pausedUntil: null, quiet: false });
-        return;
+        await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: true });
+        continue;
       }
       if (outcome.status === 'capped' && after.kind === 'manual') continue;
-      await settle(outcome, after.kind);
-      return;
+      await settle(outcome, after);
     }
   }
 
@@ -175,15 +207,17 @@ export function createSyncScheduler(deps: SchedulerDeps) {
     async startManual(): Promise<{ alreadyRunning: boolean }> {
       const alreadyRunning = loopPromise !== null;
       await deps.store.remove(PAUSE_KEY);
-      const i = await readIntent();
-      await writeIntent(i ? { ...i, kind: 'manual' } : { kind: 'manual', startedAt: deps.now().toISOString(), silentPagesUsed: 0 });
+      // A new id even over a running silent intent: a settle of the silent one keeps this start.
+      await withIntent((i) => writeIntent({ id: newId(), kind: 'manual', startedAt: i?.startedAt ?? deps.now().toISOString(), silentPagesUsed: i?.silentPagesUsed ?? 0 }));
       void loop();
       return { alreadyRunning };
     },
 
     async stop(): Promise<boolean> {
-      const had = (await readIntent()) !== null || loopPromise !== null;
-      await clearIntent();
+      const had = await withIntent(async (i) => {
+        await removeIntent();
+        return i !== null;
+      }) || loopPromise !== null;
       controller?.abort();
       return had;
     },
@@ -202,7 +236,12 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       if (count >= MAX_CHECKS_PER_DAY) return 'daily_limit';
       // Counted before the request, like the budget.
       await deps.store.set(CHECKS_KEY, { date: today, count: count + 1 });
-      await writeIntent({ kind: 'silent', startedAt: now.toISOString(), silentPagesUsed: 0 });
+      const started = await withIntent(async (i) => {
+        if (i) return false;
+        await writeIntent({ id: newId(), kind: 'silent', startedAt: now.toISOString(), silentPagesUsed: 0 });
+        return true;
+      });
+      if (!started) return 'running';
       void loop();
       return 'started';
     },
@@ -215,10 +254,14 @@ export function createSyncScheduler(deps: SchedulerDeps) {
         await deps.alarms.clear(WATCHDOG_ALARM);
         return;
       }
+      if (!(deps.now().getTime() - Date.parse(i.startedAt) < INTENT_MAX_AGE_MS)) {
+        await clearIntent(i.id);
+        return;
+      }
       const token = await deps.hasToken();
       if (!token || !(await deps.hasUntappdPermission())) {
-        await clearIntent();
-        await deps.onReport({ outcome: emptyOutcome(token ? 'error' : 'not_linked'), kind: i.kind, gapMissing: null, pausedUntil: null, quiet: false });
+        if (!(await clearIntent(i.id))) return;
+        await deps.onReport({ outcome: emptyOutcome(token ? 'error' : 'not_linked'), kind: i.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: false });
         return;
       }
       await loop();

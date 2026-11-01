@@ -123,6 +123,25 @@ describe('manual sync', () => {
     expect((t.store.data.get(INTENT_KEY) as SyncIntent).kind).toBe('manual');
   });
 
+  // #934 review: a press that lands while the previous intent settles is not wiped out by that settle.
+  it('keeps and runs a manual start written while a silent intent settles', async () => {
+    const base = memoryStore();
+    let t!: ReturnType<typeof setup>;
+    const store = { ...base, set: async (k: string, v: unknown) => {
+      await base.set(k, v);
+      if (k === PAUSE_KEY) await t.scheduler.startManual();
+    } };
+    const runStep = vi.fn()
+      .mockResolvedValueOnce(outcome('blocked'))
+      .mockResolvedValueOnce(outcome('done', { serverCount: 5, profileTotal: 5 }));
+    t = setup({ runStep }, store as never);
+    await t.scheduler.check();
+    await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(2));
+    await t.scheduler.idle();
+    expect(t.reports.map((r) => [r.kind, r.outcome.status])).toEqual([['manual', 'done']]);
+    expect(base.data.has(INTENT_KEY)).toBe(false);
+  });
+
   it('stop drops the intent, reports cancelled, and the watchdog restores nothing', async () => {
     const runStep = vi.fn((req: StepRequest) => new Promise<SyncOutcome>((resolve) => {
       req.signal.addEventListener('abort', () => resolve(outcome('cancelled')));
@@ -196,6 +215,13 @@ describe('silent sync budget', () => {
     await t.scheduler.idle();
     expect(feed.steps).toEqual([9]);
     expect(t.reports.map((r) => r.outcome.status)).toEqual(['done']);
+  });
+
+  it('a silent budget spent on a coverage hole with equal counts is no gap', async () => {
+    const t = setup({ runStep: async () => outcome('capped', { serverCount: 100, profileTotal: 100 }) });
+    await t.scheduler.check();
+    await t.scheduler.idle();
+    expect(t.reports).toEqual([expect.objectContaining({ gapMissing: null, outcome: expect.objectContaining({ status: 'capped' }) })]);
   });
 
   it('a silent no_session is quiet', async () => {
@@ -276,6 +302,24 @@ describe('check conditions', () => {
 });
 
 describe('resume', () => {
+  it('drops an intent older than a day without a request or a report', async () => {
+    const intent: SyncIntent = { id: 'a', kind: 'manual', startedAt: new Date(2026, 9, 31, 11, 59).toISOString(), silentPagesUsed: 0 };
+    const runStep = vi.fn(async () => outcome('done'));
+    const t = setup({ runStep }, memoryStore({ [INTENT_KEY]: intent }));
+    await t.scheduler.resume();
+    expect(runStep).toHaveBeenCalledTimes(0);
+    expect(t.reports).toEqual([]);
+    expect(t.store.data.has(INTENT_KEY)).toBe(false);
+  });
+
+  it('continues an intent just under a day old', async () => {
+    const intent: SyncIntent = { id: 'a', kind: 'manual', startedAt: new Date(2026, 9, 31, 12, 1).toISOString(), silentPagesUsed: 0 };
+    const runStep = vi.fn(async () => outcome('done'));
+    const t = setup({ runStep }, memoryStore({ [INTENT_KEY]: intent }));
+    await t.scheduler.resume();
+    expect(runStep).toHaveBeenCalledTimes(1);
+  });
+
   it('without an intent only drops a stale watchdog', async () => {
     const runStep = vi.fn(async () => outcome('done'));
     const t = setup({ runStep });
@@ -286,17 +330,17 @@ describe('resume', () => {
   });
 
   it('drops an intent whose token is gone, as not_linked', async () => {
-    const intent: SyncIntent = { kind: 'manual', startedAt: '2026-11-01T10:00:00.000Z', silentPagesUsed: 0 };
+    const intent: SyncIntent = { id: 'a', kind: 'manual', startedAt: new Date(2026, 10, 1, 10, 0).toISOString(), silentPagesUsed: 0 };
     const runStep = vi.fn(async () => outcome('done'));
     const t = setup({ runStep, hasToken: async () => false }, memoryStore({ [INTENT_KEY]: intent }));
     await t.scheduler.resume();
     expect(runStep).toHaveBeenCalledTimes(0);
-    expect(t.reports.map((r) => r.outcome.status)).toEqual(['not_linked']);
+    expect(t.reports).toEqual([expect.objectContaining({ afterStep: false, outcome: expect.objectContaining({ status: 'not_linked' }) })]);
     expect(t.store.data.has(INTENT_KEY)).toBe(false);
   });
 
   it('drops an intent whose untappd.com permission is gone, as error', async () => {
-    const intent: SyncIntent = { kind: 'silent', startedAt: '2026-11-01T10:00:00.000Z', silentPagesUsed: 2 };
+    const intent: SyncIntent = { id: 'a', kind: 'silent', startedAt: new Date(2026, 10, 1, 10, 0).toISOString(), silentPagesUsed: 2 };
     const t = setup({ hasUntappdPermission: async () => false }, memoryStore({ [INTENT_KEY]: intent }));
     await t.scheduler.resume();
     expect(t.reports.map((r) => r.outcome.status)).toEqual(['error']);

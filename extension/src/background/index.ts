@@ -324,7 +324,8 @@ const syncScheduler = createSyncScheduler({
 // not know (gap instead of capped, the pause, a quiet hint), and a terminal write the step lost.
 async function reportSyncIntent(r: SchedulerReport): Promise<void> {
   const o = r.outcome;
-  const generation = reportGeneration ?? syncGeneration;
+  // A report without a step in this worker is about the current state, not an older step's.
+  const generation = r.afterStep ? reportGeneration ?? syncGeneration : syncGeneration;
   reportGeneration = null;
   await enqueueSyncStatusPatch((cur) => {
     const next: StoredSyncStatus = { ...cur };
@@ -332,6 +333,8 @@ async function reportSyncIntent(r: SchedulerReport): Promise<void> {
     if (cur.running || cur.outcome !== o.status) {
       Object.assign(next, { running: false, outcome: o.status, serverCount: o.serverCount, profileTotal: o.profileTotal,
         mergedThisRun: o.mergedThisRun, complete: o.complete });
+      // A replaced outcome takes nothing of the old record's verdict along (no ✓ on not_linked).
+      delete next.caughtUp; delete next.gapMissing; delete next.pausedUntil; delete next.quiet;
       changed = true;
     }
     if (o.caughtUp) { next.caughtUp = true; changed = true; }
@@ -351,7 +354,12 @@ export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
       return { type: 'checkin-sync:started', alreadyRunning: false };
     }
   }
-  if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
+  if (syncRunning) {
+    // #934: a silent step is in flight — the press turns it into a manual intent, so the budget no
+    // longer stops it. The step goes on; no second run starts.
+    await syncScheduler.startManual().catch(() => undefined);
+    return { type: 'checkin-sync:started', alreadyRunning: true };
+  }
   const startPromise = startManualSync();
   syncStartPromise = startPromise;
   try {
@@ -376,7 +384,13 @@ async function startManualSync(): Promise<CheckinSyncStartReply> {
     pendingStartAck = null;
     throw error;
   }
-  return ack;
+  // The loop this start joined may already be past its step: its end answers the press then.
+  const settled = syncScheduler.idle().then((): CheckinSyncStartReply => ({ type: 'checkin-sync:started', alreadyRunning: true }));
+  try {
+    return await Promise.race([ack, settled]);
+  } finally {
+    pendingStartAck = null;
+  }
 }
 
 // #934: one step of the scheduler — the #611 run as it was: status, binding, cache invalidation.
