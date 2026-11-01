@@ -380,9 +380,10 @@ Supporter.
     open untappd.com (the link is right there), sign in and press **Sync**. If
     this happened during a quiet check, the popup only suggests **"Sign in to
     untappd.com to keep ✅ fresh"**, with no badge.
-  - **"Another Untappd account is signed in"** — the browser is signed in to a
-    different Untappd account than the one linked in the bot; the line below
-    says which one to sign in as (**"Sign in as …"**).
+  - **"Untappd account changed"** — the browser is signed in to a different
+    Untappd account than the one linked in the bot, or you have just re-linked
+    in the bot; the line below says which one to sign in as (**"Sign in as …,
+    then Sync"**) — sign in and press **Sync**.
 
 ---
 

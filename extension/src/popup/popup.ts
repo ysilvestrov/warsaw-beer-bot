@@ -87,9 +87,13 @@ export function syncWidgetView(s: SyncStatusView, now: Date): SyncWidgetView {
         detail: s.pausedUntil !== null && Date.parse(s.pausedUntil) > now.getTime() ? 'Resumes tomorrow' : null,
         action: start('Try now'),
       });
+    // Two causes land here: the browser is signed in to another account, or the bot was re-linked
+    // (the worker then stores account_changed until the next sync). The label fits both, and Sync
+    // stays — after signing in, the person must not wait for the next quiet check.
     case 'account_changed':
-      return view('Another Untappd account is signed in', {
-        detail: s.username !== null ? `Sign in as ${s.username}` : 'Sign in to the linked account', link: untappd,
+      return view('Untappd account changed', {
+        detail: s.username !== null ? `Sign in as ${s.username}, then Sync` : 'Sign in to the linked account, then Sync',
+        link: untappd, action: start('Sync'),
       });
     case 'not_linked': return view('Link Untappd in the bot', { detail: 'Send /link to the bot' });
     case 'sync_context_required': return view('Update the extension');

@@ -252,7 +252,7 @@ interface SyncIntent {
 | `no_session` (тихий) | `Sign in to untappd.com to keep ✅ fresh` | — | посилання на untappd.com |
 | `no_session` (ручний) | `Paused: sign in to untappd.com` | p | посилання + **Sync** |
 | `blocked` | `Paused: Untappd is limiting requests` | p | `Resumes tomorrow` · **Try now** |
-| `account_changed` | `Another Untappd account is signed in` | — | `Sign in as <username>` |
+| `account_changed` | `Untappd account changed` | — | `Sign in as <username>, then Sync` · посилання + **Sync** (рев'ю обв'язки: сюди веде й перепривʼязка в боті, і без кнопки людина чекала б тихої перевірки) |
 | `not_linked` | `Link Untappd in the bot` | — | `/link` |
 | `sync_context_required` | `Update the extension` | — | — |
 | `feed_unavailable` | `Untappd did not return your feed` | p | **Retry** |

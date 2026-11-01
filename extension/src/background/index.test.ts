@@ -783,6 +783,8 @@ describe('#934 scheduler wiring', () => {
   });
 
   it('creates the 6-hourly check alarm on browser start only when it is missing', async () => {
+    // Without the permission the check onStartup fires sends nothing and outlives no test.
+    permissionsContains.mockResolvedValue(false);
     vi.mocked(chrome.alarms.create).mockClear();
     alarmsGet.mockResolvedValueOnce(undefined);
     onStartup();

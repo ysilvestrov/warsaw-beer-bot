@@ -107,10 +107,10 @@ describe('syncWidgetView', () => {
   });
   it('account_changed names the linked account', () => {
     expect(syncWidgetView({ ...base, outcome: 'account_changed', username: 'bob' }, NOW)).toEqual({ ...none,
-      label: 'Another Untappd account is signed in', detail: 'Sign in as bob', link: untappd });
+      label: 'Untappd account changed', detail: 'Sign in as bob, then Sync', link: untappd, action: { kind: 'start', label: 'Sync' } });
   });
   it('account_changed without a known username asks for the linked account', () => {
-    expect(syncWidgetView({ ...base, outcome: 'account_changed' }, NOW).detail).toBe('Sign in to the linked account');
+    expect(syncWidgetView({ ...base, outcome: 'account_changed' }, NOW).detail).toBe('Sign in to the linked account, then Sync');
   });
   it('not_linked points to /link', () => {
     expect(syncWidgetView({ ...base, outcome: 'not_linked' }, NOW)).toEqual({ ...none,
@@ -260,7 +260,7 @@ describe('initPopup', () => {
     // jsdom without a <body> for popup.ts to query.
     document.body.innerHTML = html.split('<body>')[1].split('</body>')[0];
     const sendMessage = vi.fn((m: { type?: string }, callback?: (r?: object) => void) => {
-      if (statusReply && m?.type === 'checkin-sync:status') callback?.(statusReply);
+      callback?.(statusReply);
     });
     const chromeStub = globalThis.chrome as unknown as Record<string, unknown>;
     await (chromeStub.storage as { local: { set(o: object): Promise<void> } }).local.set({ token });
@@ -279,7 +279,7 @@ describe('initPopup', () => {
     const syncBtn = document.getElementById('syncCheckins') as HTMLButtonElement;
     expect(syncBtn.disabled).toBe(true);
     expect(document.getElementById('syncStatus')?.textContent).toBe('Add a token to sync your check-ins.');
-    expect(sendMessage.mock.calls.some(([m]) => m?.type === 'checkin-sync:status')).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalledWith({ type: 'checkin-sync:status' }, expect.any(Function));
   });
 
   it('without a token: the auth block leads and the guide sits inside it (#519, #522)', async () => {
@@ -304,7 +304,7 @@ describe('initPopup', () => {
     const reply = { type: 'checkin-sync:status:ok', running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0,
       outcome: 'gap', complete: false, caughtUp: false, gapMissing: 12, pausedUntil: null, quiet: false, username: 'bob' };
     const { sendMessage } = await bootPopup('tok', reply);
-    expect(sendMessage.mock.calls.some(([m]) => m?.type === 'checkin-sync:status')).toBe(true);
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'checkin-sync:status' }, expect.any(Function));
     expect(document.getElementById('syncLabel')?.textContent).toBe('12 new check-ins');
     expect(document.getElementById('syncBar')?.getAttribute('aria-valuenow')).toBe('88');
     expect((document.getElementById('syncBar') as HTMLElement).hidden).toBe(false);
@@ -329,7 +329,7 @@ describe('initPopup', () => {
     const { sendMessage } = await bootPopup('tok');
     const syncBtn = document.getElementById('syncCheckins') as HTMLButtonElement;
     expect(syncBtn.classList.contains('btn-primary')).toBe(true);
-    expect(sendMessage.mock.calls.some(([m]) => m?.type === 'checkin-sync:status')).toBe(true);
+    expect(sendMessage).toHaveBeenCalledWith({ type: 'checkin-sync:status' }, expect.any(Function));
   });
 });
 
