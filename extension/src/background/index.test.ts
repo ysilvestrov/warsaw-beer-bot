@@ -1,6 +1,6 @@
 import { webcrypto } from 'node:crypto';
 import * as cacheStore from '../cache/store';
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi, type Mock } from 'vitest';
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
   handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleMatch,
@@ -662,11 +662,14 @@ test('restoring identical credentials reuses only the unchanged account, while b
 // #934: the scheduler's wiring in the worker. The listeners are the ones index.ts registered at import.
 const onAlarm = vi.mocked(chrome.alarms.onAlarm.addListener).mock.calls[0][0] as (a: { name: string }) => void;
 const onStartup = vi.mocked(chrome.runtime.onStartup.addListener).mock.calls[0][0] as () => void;
+// The promise forms index.ts uses; @types/chrome types the callback overloads first.
+const permissionsContains = chrome.permissions.contains as unknown as Mock<() => Promise<boolean>>;
+const alarmsGet = chrome.alarms.get as unknown as Mock<() => Promise<chrome.alarms.Alarm | undefined>>;
 
 describe('#934 scheduler wiring', () => {
   it('the watchdog continues an intent a dead worker left, from the first page, to the end', async () => {
     localStore.set(INTENT_KEY, { kind: 'manual', startedAt: '2026-11-01T10:00:00.000Z', silentPagesUsed: 0 });
-    vi.mocked(chrome.permissions.contains).mockResolvedValue(true);
+    permissionsContains.mockResolvedValue(true);
     const fetchMock = vi.fn(async (_url: string) => new Response(FEED, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
@@ -688,19 +691,19 @@ describe('#934 scheduler wiring', () => {
 
   it('creates the 6-hourly check alarm on browser start only when it is missing', async () => {
     vi.mocked(chrome.alarms.create).mockClear();
-    vi.mocked(chrome.alarms.get).mockResolvedValueOnce(undefined);
+    alarmsGet.mockResolvedValueOnce(undefined);
     onStartup();
     await vi.waitFor(() => expect(chrome.alarms.create).toHaveBeenCalledWith(CHECK_ALARM, { periodInMinutes: 360 }));
 
     vi.mocked(chrome.alarms.create).mockClear();
-    vi.mocked(chrome.alarms.get).mockResolvedValueOnce({ name: CHECK_ALARM, scheduledTime: 0, periodInMinutes: 360 });
+    alarmsGet.mockResolvedValueOnce({ name: CHECK_ALARM, scheduledTime: 0, periodInMinutes: 360 });
     onStartup();
     await new Promise((r) => setTimeout(r, 0));
     expect(chrome.alarms.create).not.toHaveBeenCalledWith(CHECK_ALARM, expect.anything());
   });
 
   it('a browser-start check without the untappd.com permission sends nothing', async () => {
-    vi.mocked(chrome.permissions.contains).mockResolvedValue(false);
+    permissionsContains.mockResolvedValue(false);
     const fetchMock = vi.fn(async () => new Response(FEED));
     vi.stubGlobal('fetch', fetchMock);
     onStartup();
