@@ -72,16 +72,17 @@ export function localSyncDeps(env: LocalSyncEnv): Pick<CheckinSyncDeps, 'getStat
       }
       if (verdict.kind === 'empty') {
         const serverCount = await tx.count();
+        const profileTotal = page.profileTotal ?? meta.profileTotal;
         return {
           merged: 0,
           alreadyKnown: 0,
           pageSize: 0,
           nextMaxId: null,
           nextCursor: null,
-          profileTotal: page.profileTotal ?? meta.profileTotal,
+          profileTotal,
           serverCount,
           complete: false,
-          caughtUp: isCaughtUp({ count: serverCount, profileTotal: meta.profileTotal, ranges: await tx.ranges() }),
+          caughtUp: isCaughtUp({ count: serverCount, profileTotal, ranges: await tx.ranges() }),
         };
       }
 

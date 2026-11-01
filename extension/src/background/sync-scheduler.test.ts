@@ -179,6 +179,32 @@ describe('manual sync', () => {
     expect(t.store.data.has(INTENT_KEY)).toBe(false);
   });
 
+  // #934 PR review: a press between the end of a silent step and the loop's next read.
+  it('a Sync pressed right after a silent step ended with a gap runs as manual', async () => {
+    let t!: ReturnType<typeof setup>;
+    const runStep = vi.fn()
+      .mockResolvedValueOnce(outcome('gap', { serverCount: 50, profileTotal: 500, mergedThisRun: 25 }))
+      .mockResolvedValueOnce(outcome('done', { serverCount: 500, profileTotal: 500 }));
+    // The cache clear runs between the step and the loop's read of the intent.
+    t = setup({ runStep, clearMatchCache: async () => { await t.scheduler.startManual(); } });
+    await t.scheduler.check();
+    await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(2));
+    await t.scheduler.idle();
+    expect(t.reports.map((r) => [r.kind, r.outcome.status])).toEqual([['manual', 'done']]);
+  });
+
+  // #934 PR review: a worker death between the two must not lose the verdict.
+  it('stores the verdict while the intent still stands', async () => {
+    const store = memoryStore();
+    const seen: boolean[] = [];
+    const t = setup({ runStep: async () => outcome('done', { serverCount: 5, profileTotal: 5, caughtUp: true }),
+      onReport: async () => { seen.push(store.data.has(INTENT_KEY)); } }, store);
+    await t.scheduler.startManual();
+    await t.scheduler.idle();
+    expect(seen).toEqual([true]);
+    expect(store.data.has(INTENT_KEY)).toBe(false);
+  });
+
   it('a step that threw ends as error and drops the intent', async () => {
     const t = setup({ runStep: async () => { throw new Error('boom'); } });
     await t.scheduler.startManual();
@@ -357,6 +383,35 @@ describe('resume', () => {
     const t = setup({ runStep: async () => outcome('done', { serverCount: 5, profileTotal: 5 }) }, memoryStore({ [INTENT_KEY]: intent }));
     await t.scheduler.resume();
     expect(t.clearMatchCache).toHaveBeenCalledTimes(1);
+  });
+
+  // #934 PR review: resume and the browser-start check run together at worker start.
+  it('a resume that saw no intent does not clear the watchdog a concurrent check just set', async () => {
+    const base = memoryStore();
+    let open!: () => void;
+    const opened = new Promise<void>((r) => { open = r; });
+    let first = true;
+    const store = { ...base, get: async <T,>(k: string) => {
+      const v = await base.get<T>(k);
+      if (k === INTENT_KEY && first) { first = false; await opened; }
+      return v;
+    } };
+    const t = setup({ runStep: never }, store as never);
+    const resumed = t.scheduler.resume();
+    const checked = t.scheduler.check();
+    await new Promise((r) => setTimeout(r, 0));
+    open();
+    await resumed;
+    expect(await checked).toBe('started');
+    expect(t.alarms.has(WATCHDOG_ALARM)).toBe(true);
+  });
+
+  // #934 PR review: an old silent intent must not make a fresh press expire early.
+  it('a manual start over an older intent starts its own day', async () => {
+    const intent: SyncIntent = { id: 'a', kind: 'silent', startedAt: new Date(2026, 9, 31, 13, 0).toISOString(), silentPagesUsed: 3 };
+    const t = setup({ runStep: never }, memoryStore({ [INTENT_KEY]: intent }));
+    await t.scheduler.startManual();
+    expect(t.store.data.get(INTENT_KEY)).toMatchObject({ kind: 'manual', startedAt: new Date(2026, 10, 1, 12, 0, 0).toISOString() });
   });
 
   it('without an intent only drops a stale watchdog', async () => {

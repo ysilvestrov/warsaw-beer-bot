@@ -151,15 +151,20 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       pausedUntil = nextLocalMidnight(deps.now()).toISOString();
       await deps.store.set(PAUSE_KEY, { until: pausedUntil });
     }
-    // A start written while this step ran has its own id and stays: the loop runs it next.
-    if (!(await clearIntent(intent.id))) return;
-    await deps.onReport({
-      outcome: gap ? { ...outcome, status: 'gap' } : outcome,
-      kind,
-      gapMissing: gap ? missing : null,
-      pausedUntil,
-      quiet: outcome.status === 'no_session' && kind === 'silent',
-      afterStep: true,
+    await withIntent(async (cur) => {
+      // A start written while this step ran has its own id and stays: the loop runs it next.
+      if (cur && cur.id !== intent.id) return;
+      // The verdict is stored before the intent goes: a worker that dies between the two re-runs the
+      // step from the intent, instead of leaving a finished sync without its ✓, gap or pause.
+      await deps.onReport({
+        outcome: gap ? { ...outcome, status: 'gap' } : outcome,
+        kind,
+        gapMissing: gap ? missing : null,
+        pausedUntil,
+        quiet: outcome.status === 'no_session' && kind === 'silent',
+        afterStep: true,
+      });
+      await removeIntent();
     });
   }
 
@@ -197,7 +202,9 @@ export function createSyncScheduler(deps: SchedulerDeps) {
         await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: true });
         continue;
       }
-      if (outcome.status === 'capped' && after.kind === 'manual') continue;
+      // capped and gap are budget verdicts: a manual intent — also one pressed after the silent step
+      // ended, before this read — owes them nothing and runs on.
+      if ((outcome.status === 'capped' || outcome.status === 'gap') && after.kind === 'manual') continue;
       await settle(outcome, after);
     }
   }
@@ -209,7 +216,8 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       const alreadyRunning = loopPromise !== null;
       await deps.store.remove(PAUSE_KEY);
       // A new id even over a running silent intent: a settle of the silent one keeps this start.
-      await withIntent((i) => writeIntent({ id: newId(), kind: 'manual', startedAt: i?.startedAt ?? deps.now().toISOString(), silentPagesUsed: i?.silentPagesUsed ?? 0 }));
+      // A fresh press is a fresh request: its age starts now, so the day limit cannot expire it early.
+      await withIntent((i) => writeIntent({ id: newId(), kind: 'manual', startedAt: deps.now().toISOString(), silentPagesUsed: i?.silentPagesUsed ?? 0 }));
       void loop();
       return { alreadyRunning };
     },
@@ -250,11 +258,12 @@ export function createSyncScheduler(deps: SchedulerDeps) {
     /** Worker start and the watchdog alarm: continue an intent nobody is running. */
     async resume(): Promise<void> {
       if (loopPromise) return;
-      const i = await readIntent();
-      if (!i) {
-        await deps.alarms.clear(WATCHDOG_ALARM);
-        return;
-      }
+      // In the chain: a check that writes its intent (and watchdog) meanwhile is not undone by this clear.
+      const i = await withIntent(async (cur) => {
+        if (!cur) await deps.alarms.clear(WATCHDOG_ALARM);
+        return cur;
+      });
+      if (!i) return;
       if (!(deps.now().getTime() - Date.parse(i.startedAt) < INTENT_MAX_AGE_MS)) {
         await clearIntent(i.id);
         return;

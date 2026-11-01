@@ -90,6 +90,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     }
     if (verdict.kind === 'empty') {
       const storedTotal = getSyncState(deps.db, telegramId, owner.accountKey).profile_total;
+      const profileTotal = page.profileTotal ?? storedTotal;
       const serverCount = countCheckins(deps.db, telegramId, owner.accountKey);
       return c.json({
         merged: 0,
@@ -97,11 +98,12 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         pageSize: 0,
         nextMaxId: null,
         nextCursor: null,
-        profileTotal: page.profileTotal ?? storedTotal,
+        profileTotal,
         serverCount,
         complete: false,
-        // #934: порожня сторінка нічого не записує — відповідь каже про покриття, яке вже є.
-        caughtUp: isCaughtUp({ count: serverCount, profileTotal: storedTotal, ranges: coverageFor(deps.db, telegramId, owner.accountKey) }),
+        // #934: порожня сторінка нічого не записує — відповідь каже про покриття, яке вже є, проти
+        // того загального ліку, який сама й повертає: новіший більший лік зі сторінки не дасть «✓».
+        caughtUp: isCaughtUp({ count: serverCount, profileTotal, ranges: coverageFor(deps.db, telegramId, owner.accountKey) }),
       });
     }
 

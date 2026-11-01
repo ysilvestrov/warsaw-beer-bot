@@ -100,6 +100,15 @@ export const SYNC_SCENARIOS: SyncScenario[] = [
     coverage: [{ from_id: 580, to_id: 600 }],
   },
   {
+    // #934 PR review: the empty page's own larger total is the one the answer is caught up against.
+    name: 'an empty page that shows a larger profile total is not caught up',
+    steps: [
+      { html: feedPageOf([600, 580], { total: 2 }), maxId: null, expect: ok(null, 2, 0, 2, true) },
+      { html: feedPageOf([], { total: 5 }), maxId: '580', expect: ok(null, 0, 0, 2) },
+    ],
+    coverage: [{ from_id: 580, to_id: 600 }],
+  },
+  {
     name: '#587: an empty page above the oldest known check-in is a dead session',
     steps: [
       { html: feedPageOf([600, 580]), maxId: null, expect: ok('580', 2, 0, 2) },
