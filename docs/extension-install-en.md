@@ -273,13 +273,16 @@ housekeeping one at the bottom:
 - **"Sync my check-ins"** (the large amber button at the top) — pulls in your
   check-ins from Untappd (see below). This is the popup's main action **once
   you've saved a token** — before that, the "Not connected" block below leads
-  instead. While a sync is running the button is greyed out and the line
-  under it counts up (`Syncing… 1200 / 8200`): that means "working", not
-  "broken". If a sync stops, the same line says why. Two of the messages are
-  about Untappd rather than your connection: `Untappd did not return your
-  check-in feed…` — open untappd.com and check you are signed in to the
-  account you linked in the bot; `Untappd returned an unexpected page, so
-  the sync stopped at…` — what was loaded before that is kept; try again later, and if it keeps happening, load your
+  instead. Under the button sit a label, a bar and a detail line: while a sync
+  is running they show `Syncing… 42 %` and `5 210 of 12 407`, and the button
+  becomes **Stop** — that means "working", not "broken". Once your whole
+  history is in, the label says **"✓ Fully synced"** and the button hides: new
+  check-ins keep arriving on their own. If a sync stops, the label says why and
+  the button offers what to do (**Sync**, **Retry**, **Try now**). Only two
+  messages about Untappd and `Sync failed` are red: `Untappd did not return
+  your feed` — open untappd.com and check you are signed in to the account
+  you linked in the bot; `Untappd sent an unexpected page` — what was loaded
+  before that is kept; try again later, and if it keeps happening, load your
   history with `/import` in the bot instead.
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
@@ -337,8 +340,7 @@ bot — this is an alternative to `/import` that does **not require** Untappd
 Supporter.
 
 - **Prerequisite:** first link your account in the bot — `/link <username>`.
-  Without this the button will show "Link your Untappd account in the bot
-  first (/link)".
+  Without this the popup will show "Link Untappd in the bot".
 - **Also needs a saved token** (Part 3). Without one, the button is greyed
   out and captioned `Add a token to sync your check-ins.` instead (see above,
   under "The toolbar button (popup)").
@@ -348,20 +350,39 @@ Supporter.
   sync your check-ins." and the sync won't start.
 - **What it does:** pages through your check-in feed from newest to oldest
   and uploads to the bot the ones it doesn't have yet. Progress is shown
-  right there: `Syncing… 1200 / 8200`.
-- **Multiple runs for a large history:** a single run loads a limited
-  number of pages. If you have a lot of check-ins, the button becomes
-  **"Continue — 3200 left"** — click it to start the next bounded run. Each
-  subsequent run **continues deeper**, rather than starting over. While a run
-  is active, the same button becomes **"Stop"**. Once everything is loaded —
-  **"✓ Fully synced"**.
+  right there: a bar and `Syncing… 42 %`.
+- **One press runs to the end:** even a large history syncs on its own, in
+  parts, with no further presses; you can close the popup, and if the browser
+  restarts mid-sync, the extension picks it up again. **Stop** stops it. The
+  bar shows the share of your profile's check-ins the bot already has;
+  **"✓ Fully synced"** appears only once the bot has confirmed your history is
+  complete with no holes — even at 100 % on the bar you may see **"Synced
+  12 407 of 12 407"** with **Sync again** if a hole remains inside the history.
+- **New check-ins arrive on their own:** when the browser starts and every 6
+  hours after that, the extension quietly checks your feed (at most 10
+  requests at a time and 4 times a day) and tops up new check-ins, so ✅
+  appears on a shop page without pressing Sync — the next time you open or
+  reload that page. The quiet check only runs once access to untappd.com has
+  been allowed; it never asks for it by itself.
+- **An amber "!" on the extension icon** — there are more new check-ins than
+  the quiet check pulls in at once (e.g. after a festival). Open the popup: it
+  says how many (**"152 new check-ins"**) — and press **Sync**.
 - **Who needs this:** Supporters — to quickly top up new check-ins (e.g.
   after a festival where you tried 30+ beers in a day, but the background
   server sync only picks up 25); non-Supporters — to upload their history
   at all.
-- If Untappd starts rate-limiting requests, you'll see **"Untappd is
-  rate-limiting — try again later."**; just try again later (what's already
-  been uploaded won't be lost).
+- **Pauses** (not errors, so not red):
+  - **"Paused: Untappd is limiting requests"** — Untappd started limiting
+    requests. The extension leaves it alone until tomorrow (**"Resumes
+    tomorrow"**); **Try now** tries straight away. What's already uploaded
+    won't be lost.
+  - **"Paused: sign in to untappd.com"** — your Untappd session has expired:
+    open untappd.com (the link is right there), sign in and press **Sync**. If
+    this happened during a quiet check, the popup only suggests **"Sign in to
+    untappd.com to keep ✅ fresh"**, with no badge.
+  - **"Another Untappd account is signed in"** — the browser is signed in to a
+    different Untappd account than the one linked in the bot; the line below
+    says which one to sign in as (**"Sign in as …"**).
 
 ---
 
