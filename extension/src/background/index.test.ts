@@ -718,19 +718,6 @@ describe('#934 scheduler wiring', () => {
     expect(post).toHaveBeenCalledTimes(0);
   });
 
-  it('creates the 6-hourly check alarm on browser start only when it is missing', async () => {
-    vi.mocked(chrome.alarms.create).mockClear();
-    alarmsGet.mockResolvedValueOnce(undefined);
-    onStartup();
-    await vi.waitFor(() => expect(chrome.alarms.create).toHaveBeenCalledWith(CHECK_ALARM, { periodInMinutes: 360 }));
-
-    vi.mocked(chrome.alarms.create).mockClear();
-    alarmsGet.mockResolvedValueOnce({ name: CHECK_ALARM, scheduledTime: 0, periodInMinutes: 360, persistAcrossSessions: true });
-    onStartup();
-    await new Promise((r) => setTimeout(r, 0));
-    expect(chrome.alarms.create).not.toHaveBeenCalledWith(CHECK_ALARM, expect.anything());
-  });
-
   it('the status reply carries the stored verdict and the linked username, never the token', async () => {
     localStore.set('checkinSync', { running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0, outcome: 'gap',
       complete: false, gapMissing: 12, binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } });
@@ -770,7 +757,7 @@ describe('#934 scheduler wiring', () => {
     });
     await handleCheckinSyncStart();
     await vi.waitFor(() => expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' }));
-    expect(localStore.get('checkinSync')).toEqual({ debug: true });
+    expect(localStore.get('checkinSync')).toMatchObject({ running: true });
     releaseFeed();
     await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
     expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
@@ -791,6 +778,19 @@ describe('#934 scheduler wiring', () => {
     expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: 'error' });
     expect(localStore.get('checkinSync')).toMatchObject({ outcome: 'error' });
     expect(console.warn).toHaveBeenCalledWith('[beer-overlay] sync badge update failed', expect.any(Error));
+  });
+
+  it('creates the 6-hourly check alarm on browser start only when it is missing', async () => {
+    vi.mocked(chrome.alarms.create).mockClear();
+    alarmsGet.mockResolvedValueOnce(undefined);
+    onStartup();
+    await vi.waitFor(() => expect(chrome.alarms.create).toHaveBeenCalledWith(CHECK_ALARM, { periodInMinutes: 360 }));
+
+    vi.mocked(chrome.alarms.create).mockClear();
+    alarmsGet.mockResolvedValueOnce({ name: CHECK_ALARM, scheduledTime: 0, periodInMinutes: 360, persistAcrossSessions: true });
+    onStartup();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(chrome.alarms.create).not.toHaveBeenCalledWith(CHECK_ALARM, expect.anything());
   });
 
   it('a browser-start check without the untappd.com permission sends nothing', async () => {
