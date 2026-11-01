@@ -1,4 +1,5 @@
 import type { CheckinSyncState, CheckinSyncPageResult } from '../api/types';
+import { isBlockPage } from '../../../src/shared/untappd/block';
 
 export interface SyncProgress {
   serverCount: number;
@@ -6,7 +7,8 @@ export interface SyncProgress {
   mergedThisRun: number;
 }
 
-export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required' | 'feed_unavailable' | 'page_rejected' | 'error';
+// #934: `gap` — тихий крок зупинився після першої сторінки, бо бракує більше, ніж уміщає бюджет.
+export type SyncStatus = 'done' | 'capped' | 'gap' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required' | 'feed_unavailable' | 'page_rejected' | 'error';
 
 // #846: чому Untappd не віддав стрічку. more_feed — лише для XHR: перенаправлення на ньому
 // означає, що запит не вшановано, і парсити сторінку, куди нас відправили, не можна.
@@ -23,6 +25,8 @@ export interface SyncOutcome {
   serverCount: number;
   profileTotal: number | null;
   mergedThisRun: number;
+  /** #934: останнє `caughtUp` сервера (чи локальної бази); відсутнє поле — false. */
+  caughtUp: boolean;
 }
 
 export interface CheckinSyncDeps {
@@ -34,6 +38,15 @@ export interface CheckinSyncDeps {
   pageCap: number;
   delayMs?: number;
   signal?: AbortSignal;
+  /**
+   * #934: чия сесія на першій сторінці кроку (`cursor === null`), за навігацією. Без входу
+   * untappd.com віддає публічний профіль із 5 чекінами — без цієї перевірки він пішов би як сторінка.
+   */
+  sessionOf?: (html: string) => string | null;
+  /** #934: перед КОЖНИМ запитом до untappd.com; `false` — бюджет вичерпано, крок `capped` без запиту. */
+  beforeFetch?: () => Promise<boolean>;
+  /** #934: після прийнятої сторінки, коли обхід іде далі; `stop` завершує крок як `gap`. */
+  afterPage?: (res: CheckinSyncPageResult, pages: number) => 'continue' | 'stop';
 }
 
 export const DEFAULT_DELAY_MS = 4000;
@@ -47,6 +60,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   let mergedThisRun = 0;
   let serverCount = 0;
   let profileTotal: number | null = null;
+  let caughtUp = false;
   let pages = 0;
 
   let state: CheckinSyncState;
@@ -63,6 +77,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   if (!Number.isSafeInteger(state.linkRevision) || state.linkRevision < 0) return finish('sync_context_required');
   serverCount = state.serverCount;
   profileTotal = state.profileTotal;
+  caughtUp = state.caughtUp === true;
   if (deps.signal?.aborted) return finish('cancelled');
 
   // #587: одна прогулянка згори вниз. Куди ступати далі — каже сервер (`nextCursor`):
@@ -71,6 +86,16 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   let cursor: string | null = null;
   while (pages < deps.pageCap) {
     if (deps.signal?.aborted) return finish('cancelled');
+    if (deps.beforeFetch) {
+      let allowed: boolean;
+      try {
+        allowed = await deps.beforeFetch();
+      } catch {
+        return finish('error');
+      }
+      if (!allowed) return finish('capped');
+      if (deps.signal?.aborted) return finish('cancelled');
+    }
     let html: string;
     try {
       html = await deps.fetchFeed(state.username, cursor);
@@ -81,6 +106,14 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
       return finish('error');
     }
     if (deps.signal?.aborted) return finish('cancelled');
+    if (cursor === null && deps.sessionOf) {
+      // Сторінка Cloudflare з кодом 200 теж без навігації: спершу вона, інакше пауза до
+      // завтра стала б «увійдіть».
+      if (isBlockPage(html)) return finish('blocked');
+      const who = deps.sessionOf(html);
+      if (who === null) return finish('no_session');
+      if (who.toLowerCase() !== state.username.toLowerCase()) return finish('account_changed');
+    }
     let res: CheckinSyncPageResult;
     try {
       res = await deps.submitPage(html, cursor, state.linkRevision);
@@ -98,6 +131,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     mergedThisRun += res.merged;
     serverCount = res.serverCount;
     if (res.profileTotal !== null) profileTotal = res.profileTotal;
+    caughtUp = res.caughtUp === true;
     deps.onProgress({ serverCount, profileTotal, mergedThisRun });
     if (deps.signal?.aborted) return finish('cancelled');
 
@@ -106,6 +140,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     // частковий прогрес. Показуємо помилку, а не вдаваний успіх.
     if (!('nextCursor' in res)) return finish('error');
     if (res.nextCursor === null) return finish('done');
+    if (deps.afterPage && deps.afterPage(res, pages) === 'stop') return finish('gap');
     cursor = res.nextCursor;
     if (pages < deps.pageCap) await deps.sleep(delayMs);
   }
@@ -114,7 +149,8 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   function finish(status: SyncStatus): SyncOutcome {
     // #587: «повністю» — це збіг лічильників, а не дно стрічки: дно недоказове, бо
     // порожню відповідь віддає і воно, і мертва сесія.
-    const complete = status !== 'account_changed' && status !== 'sync_context_required' && profileTotal !== null && serverCount >= profileTotal;
-    return { status, complete, serverCount, profileTotal, mergedThisRun };
+    const foreign = status === 'account_changed' || status === 'sync_context_required';
+    const complete = !foreign && profileTotal !== null && serverCount >= profileTotal;
+    return { status, complete, serverCount, profileTotal, mergedThisRun, caughtUp: !foreign && caughtUp };
   }
 }

@@ -218,6 +218,95 @@ describe('#611 binding-aware runner', () => {
   });
 });
 
+// #934: the session check on a step's first page, and the hooks the scheduler drives the budget with.
+describe('#934 session check and budget hooks', () => {
+  const signedIn = (name: string) => `<html><a data-href=":user/profile" href="/user/${name}">My Profile</a></html>`;
+  const sessionOf = (html: string) => (html.match(/href="\/user\/([^"]+)"/)?.[1] ?? null);
+
+  it('turns a 200 Cloudflare page into blocked, not no_session, and submits nothing', async () => {
+    const submitPage = vi.fn(async () => page({}));
+    const out = await runCheckinSync(baseDeps({ fetchFeed: async () => '<html><title>Just a moment...</title></html>', submitPage, sessionOf }));
+    expect(out.status).toBe('blocked');
+    expect(submitPage).toHaveBeenCalledTimes(0);
+  });
+
+  it('stops on a first page without a session link and submits nothing', async () => {
+    const submitPage = vi.fn(async () => page({}));
+    const out = await runCheckinSync(baseDeps({ fetchFeed: async () => '<html><a href="/login">Log in</a></html>', submitPage, sessionOf }));
+    expect(out.status).toBe('no_session');
+    expect(submitPage).toHaveBeenCalledTimes(0);
+  });
+
+  it('stops on another signed-in account and claims nothing', async () => {
+    const submitPage = vi.fn(async () => page({}));
+    const out = await runCheckinSync(baseDeps({ fetchFeed: async () => signedIn('alice'), submitPage, sessionOf }));
+    expect(out).toMatchObject({ status: 'account_changed', complete: false, caughtUp: false });
+    expect(submitPage).toHaveBeenCalledTimes(0);
+  });
+
+  it('accepts the linked account regardless of case and checks only the first page', async () => {
+    const seen = vi.fn(sessionOf);
+    let n = 0;
+    const out = await runCheckinSync(baseDeps({
+      fetchFeed: async (_u, maxId) => (maxId === null ? signedIn('BOB') : '<html>fragment, no nav</html>'),
+      submitPage: async () => page({ nextCursor: ++n < 3 ? String(100 - n) : null }),
+      sessionOf: seen,
+    }));
+    expect(out.status).toBe('done');
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks beforeFetch once per feed request', async () => {
+    const fetchFeed = vi.fn(async () => '<html>feed</html>');
+    const beforeFetch = vi.fn(async () => true);
+    let n = 0;
+    await runCheckinSync(baseDeps({ fetchFeed, beforeFetch, submitPage: async () => page({ nextCursor: ++n < 4 ? String(100 - n) : null }) }));
+    expect(fetchFeed).toHaveBeenCalledTimes(4);
+    expect(beforeFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('ends the step capped without a request when beforeFetch refuses', async () => {
+    const fetchFeed = vi.fn(async () => '<html>feed</html>');
+    let budget = 2;
+    const out = await runCheckinSync(baseDeps({ fetchFeed, beforeFetch: async () => budget-- > 0 }));
+    expect(out.status).toBe('capped');
+    expect(fetchFeed).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports an error, without a request, when beforeFetch fails', async () => {
+    const fetchFeed = vi.fn(async () => '<html>feed</html>');
+    const out = await runCheckinSync(baseDeps({ fetchFeed, beforeFetch: async () => { throw new Error('storage'); } }));
+    expect(out.status).toBe('error');
+    expect(fetchFeed).toHaveBeenCalledTimes(0);
+  });
+
+  it('ends the step as gap when afterPage says stop, after the page was accepted', async () => {
+    const submitPage = vi.fn(async () => page({ merged: 15, nextCursor: '480' }));
+    const afterPage = vi.fn(() => 'stop' as const);
+    const out = await runCheckinSync(baseDeps({ submitPage, afterPage }));
+    expect(out).toMatchObject({ status: 'gap', mergedThisRun: 15 });
+    expect(submitPage).toHaveBeenCalledTimes(1);
+    expect(afterPage).toHaveBeenCalledWith(expect.objectContaining({ nextCursor: '480' }), 1);
+  });
+
+  it('does not ask afterPage when the walk is already done', async () => {
+    const afterPage = vi.fn(() => 'stop' as const);
+    const out = await runCheckinSync(baseDeps({ submitPage: async () => page({ nextCursor: null }), afterPage }));
+    expect(out.status).toBe('done');
+    expect(afterPage).toHaveBeenCalledTimes(0);
+  });
+
+  it('carries caughtUp from the last answer', async () => {
+    const out = await runCheckinSync(baseDeps({ submitPage: async () => page({ nextCursor: null, caughtUp: true }) }));
+    expect(out.caughtUp).toBe(true);
+  });
+
+  it('reads a missing caughtUp (older server) as false', async () => {
+    const out = await runCheckinSync(baseDeps({ submitPage: async () => page({ nextCursor: null, serverCount: 100, profileTotal: 100 }) }));
+    expect(out).toMatchObject({ complete: true, caughtUp: false });
+  });
+});
+
 describe('feedFailure', () => {
   it.each([
     { name: 'the profile page', isMoreFeed: false, res: { ok: true, status: 200, redirected: false }, want: null },
