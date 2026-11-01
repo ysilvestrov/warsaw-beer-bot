@@ -751,12 +751,14 @@ describe('#934 scheduler wiring', () => {
     expect(chrome.action.setBadgeBackgroundColor).toHaveBeenCalledWith({ color: '#b45309' });
 
     let releaseFeed!: () => void;
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { releaseFeed = () => resolve(new Response(FEED)); })));
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { releaseFeed = () => resolve(new Response(FEED)); }));
+    vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
       merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: null, nextCursor: null, profileTotal: 100, serverCount: 100, complete: false,
     });
     await handleCheckinSyncStart();
-    await vi.waitFor(() => expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
     expect(localStore.get('checkinSync')).toMatchObject({ running: true });
     releaseFeed();
     await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
