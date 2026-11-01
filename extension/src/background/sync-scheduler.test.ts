@@ -127,9 +127,11 @@ describe('manual sync', () => {
   it('keeps and runs a manual start written while a silent intent settles', async () => {
     const base = memoryStore();
     let t!: ReturnType<typeof setup>;
+    // The pause is written inside the intent chain: a press then queues behind the settle, so it
+    // is not awaited here (that would wait on the chain it sits in).
     const store = { ...base, set: async (k: string, v: unknown) => {
       await base.set(k, v);
-      if (k === PAUSE_KEY) await t.scheduler.startManual();
+      if (k === PAUSE_KEY) void t.scheduler.startManual();
     } };
     const runStep = vi.fn()
       .mockResolvedValueOnce(outcome('blocked'))
@@ -138,8 +140,10 @@ describe('manual sync', () => {
     await t.scheduler.check();
     await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(2));
     await t.scheduler.idle();
-    expect(t.reports.map((r) => [r.kind, r.outcome.status])).toEqual([['manual', 'done']]);
+    expect(t.reports.map((r) => [r.kind, r.outcome.status])).toEqual([['silent', 'blocked'], ['manual', 'done']]);
     expect(base.data.has(INTENT_KEY)).toBe(false);
+    // The press lifts the pause the silent step had just set.
+    expect(base.data.has(PAUSE_KEY)).toBe(false);
   });
 
   it('stop drops the intent, reports cancelled, and the watchdog restores nothing', async () => {
