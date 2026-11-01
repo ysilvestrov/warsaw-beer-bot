@@ -1,7 +1,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { canRefresh, formatSyncStatus, authNoteText, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText, refreshReplyText, beers } from './popup';
+import { canRefresh, authNoteText, requestSyncStart, armLiveRegions, refreshResultText, refreshReplyText, beers,
+  count, syncPercent, syncWidgetView, type SyncStatusView } from './popup';
 import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
@@ -18,87 +19,128 @@ describe('canRefresh', () => {
   });
 });
 
-describe('formatSyncStatus', () => {
-  it('shows progress while running', () => {
-    expect(formatSyncStatus({ running: true, serverCount: 1200, profileTotal: 8200, mergedThisRun: 30, outcome: null, complete: false }))
-      .toBe('Syncing… 1200 / 8200');
+const base: SyncStatusView = { running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null,
+  complete: false, caughtUp: false, gapMissing: null, pausedUntil: null, quiet: false, username: null };
+const NOW = new Date('2026-11-01T12:00:00.000Z');
+const none = { bar: null, detail: null, action: null, link: null, tone: 'neutral' };
+const untappd = { text: 'Open untappd.com', href: 'https://untappd.com/' };
+const N = '\u202f';
+
+describe('syncPercent', () => {
+  it('floors the honest share of the counts', () => {
+    expect(syncPercent(0, 12407)).toBe(0);
+    expect(syncPercent(5210, 12407)).toBe(41);
+    expect(syncPercent(12406, 12407)).toBe(99);
+    expect(syncPercent(12407, 12407)).toBe(100);
   });
-  it('shows count only when total is unknown', () => {
-    expect(formatSyncStatus({ running: true, serverCount: 1200, profileTotal: null, mergedThisRun: 30, outcome: null, complete: false }))
-      .toBe('Syncing… 1200');
+  it('never goes past 100 when the server knows more than the profile says', () => {
+    expect(syncPercent(12500, 12407)).toBe(100);
   });
-  it('prompts to continue when capped', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 5000, outcome: 'capped', complete: false }))
-      .toBe('Synced 5000 of 8200.');
-  });
-  it('reports full sync on completion', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 8200, profileTotal: 8200, mergedThisRun: 100, outcome: 'done', complete: true }))
-      .toBe('✓ Fully synced (8200).');
-  });
-  it('tells unlinked users to link first', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'not_linked', complete: false }))
-      .toBe('Link your Untappd account in the bot first (/link).');
-  });
-  it('reports rate limiting', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 10, outcome: 'blocked', complete: false }))
-      .toBe('Untappd is rate-limiting — try again later.');
-  });
-  it('says Untappd did not return the feed', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 0, outcome: 'feed_unavailable', complete: false }))
-      .toBe('Untappd did not return your check-in feed — open untappd.com, make sure you are signed in to the linked account, then sync again.');
-  });
-  it('says the page from Untappd was not the expected one', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 165, profileTotal: 8200, mergedThisRun: 0, outcome: 'page_rejected', complete: false }))
-      .toBe('Untappd returned an unexpected page, so the sync stopped at 165 of 8200 — try again later, or use /import in the bot.');
-  });
-  it('says where a rejected sync stopped when the profile total is unknown', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 165, profileTotal: null, mergedThisRun: 0, outcome: 'page_rejected', complete: false }))
-      .toBe('Untappd returned an unexpected page, so the sync stopped at 165 — try again later, or use /import in the bot.');
-  });
-  it('reports a transient error', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 10, outcome: 'error', complete: false }))
-      .toBe('Sync failed — check your connection and token, then retry.');
-  });
-  it('reports done-but-not-fully-synced when complete is false', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 200, outcome: 'done', complete: false }))
-      .toBe('Synced 5000 of 8200.');
-  });
-  it('returns empty string for the idle/never-started state', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false }))
-      .toBe('');
-  });
-  it('shows ? for total when capped and total is unknown', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: null, mergedThisRun: 5000, outcome: 'capped', complete: false }))
-      .toBe('Synced 5000.');
-  });
-  it('reports where a cancelled sync stopped', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 400, outcome: 'cancelled', complete: false }))
-      .toBe('Sync stopped at 5000 of 8200.');
-  });
-  it('shows the tick when the counts agree', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 12634, profileTotal: 12634, mergedThisRun: 41, outcome: 'done', complete: true }))
-      .toBe('✓ Fully synced (12634).');
-  });
-  it('tells the user to sign in to Untappd when the session is dead', () => {
-    expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 0, outcome: 'no_session', complete: false }))
-      .toBe('Untappd session expired — open untappd.com, sign in, then sync again.');
+  it('has no percentage without a positive profile total', () => {
+    expect(syncPercent(10, null)).toBe(null);
+    expect(syncPercent(10, 0)).toBe(null);
   });
 });
 
-describe('syncButtonLabel', () => {
-  it('offers Stop while a sync is running', () => {
-    expect(syncButtonLabel({ running: true, serverCount: 100, profileTotal: 500, mergedThisRun: 100, outcome: null, complete: false }))
-      .toBe('Stop');
+describe('count', () => {
+  it('groups thousands with a narrow no-break space', () => {
+    expect(count(12407)).toBe(`12${N}407`);
+    expect(count(999)).toBe('999');
+    expect(count(1234567)).toBe(`1${N}234${N}567`);
   });
+});
 
-  it('shows the remaining count after the page cap', () => {
-    expect(syncButtonLabel({ running: false, serverCount: 100, profileTotal: 500, mergedThisRun: 100, outcome: 'capped', complete: false }))
-      .toBe('Continue — 400 left');
+// #934 §6: one row of the widget table per test.
+describe('syncWidgetView', () => {
+  it('a running sync shows the percentage, the counts and Stop', () => {
+    expect(syncWidgetView({ ...base, running: true, serverCount: 5210, profileTotal: 12407 }, NOW)).toEqual({ ...none,
+      label: `Syncing… 41${N}%`, bar: 41, detail: `5${N}210 of 12${N}407`, action: { kind: 'stop', label: 'Stop' } });
   });
-
-  it('offers a generic continuation when the profile total is unknown', () => {
-    expect(syncButtonLabel({ running: false, serverCount: 100, profileTotal: null, mergedThisRun: 100, outcome: 'capped', complete: false }))
-      .toBe('Continue sync');
+  it('a running sync with the total unknown shows an empty bar and the count only', () => {
+    expect(syncWidgetView({ ...base, running: true, serverCount: 5210 }, NOW)).toEqual({ ...none,
+      label: 'Syncing…', bar: 'unknown', detail: `5${N}210 check-ins`, action: { kind: 'stop', label: 'Stop' } });
+  });
+  it('done and caught up: the tick, a full bar, no action', () => {
+    expect(syncWidgetView({ ...base, outcome: 'done', serverCount: 12407, profileTotal: 12407, caughtUp: true }, NOW)).toEqual({ ...none,
+      label: '✓ Fully synced', bar: 100, detail: `12${N}407 check-ins` });
+  });
+  // The requirement of #934: equal counts are not a proven history.
+  it('done with equal counts but not caught up: 100 %, Synced N of N and Sync again, never the tick', () => {
+    expect(syncWidgetView({ ...base, outcome: 'done', serverCount: 12407, profileTotal: 12407, complete: true }, NOW)).toEqual({ ...none,
+      label: `Synced 12${N}407 of 12${N}407`, bar: 100, action: { kind: 'start', label: 'Sync again' } });
+  });
+  it('done without a profile total: the count only', () => {
+    expect(syncWidgetView({ ...base, outcome: 'done', serverCount: 1234 }, NOW)).toEqual({ ...none,
+      label: `Synced 1${N}234`, bar: 'unknown', action: { kind: 'start', label: 'Sync again' } });
+  });
+  it('capped without an intent reads as a finished, not fully synced run', () => {
+    expect(syncWidgetView({ ...base, outcome: 'capped', serverCount: 100, profileTotal: 100, caughtUp: true }, NOW)).toEqual({ ...none,
+      label: 'Synced 100 of 100', bar: 100, action: { kind: 'start', label: 'Sync again' } });
+  });
+  it('a gap names the new check-ins and offers Sync', () => {
+    expect(syncWidgetView({ ...base, outcome: 'gap', serverCount: 12255, profileTotal: 12407, gapMissing: 152 }, NOW)).toEqual({ ...none,
+      label: '152 new check-ins', bar: 98, action: { kind: 'start', label: 'Sync' } });
+  });
+  it('a gap of one is singular', () => {
+    expect(syncWidgetView({ ...base, outcome: 'gap', serverCount: 99, profileTotal: 100, gapMissing: 1 }, NOW).label).toBe('1 new check-in');
+  });
+  it('a gap without the missing count still offers Sync', () => {
+    expect(syncWidgetView({ ...base, outcome: 'gap', serverCount: 99, profileTotal: 100 }, NOW)).toEqual({ ...none,
+      label: 'New check-ins', bar: 99, action: { kind: 'start', label: 'Sync' } });
+  });
+  it('a quiet no_session only asks to sign in, with a link', () => {
+    expect(syncWidgetView({ ...base, outcome: 'no_session', serverCount: 100, profileTotal: 120, quiet: true }, NOW)).toEqual({ ...none,
+      label: 'Sign in to untappd.com to keep ✅ fresh', link: untappd });
+  });
+  it('a manual no_session is a pause with the link and Sync', () => {
+    expect(syncWidgetView({ ...base, outcome: 'no_session', serverCount: 60, profileTotal: 120 }, NOW)).toEqual({ ...none,
+      label: 'Paused: sign in to untappd.com', bar: 50, link: untappd, action: { kind: 'start', label: 'Sync' } });
+  });
+  it('blocked with the pause ahead says it resumes tomorrow and offers Try now', () => {
+    expect(syncWidgetView({ ...base, outcome: 'blocked', serverCount: 60, profileTotal: 120, pausedUntil: '2026-11-02T00:00:00.000Z' }, NOW))
+      .toEqual({ ...none, label: 'Paused: Untappd is limiting requests', bar: 50, detail: 'Resumes tomorrow',
+        action: { kind: 'start', label: 'Try now' } });
+  });
+  it('blocked with the pause already over drops the promise', () => {
+    expect(syncWidgetView({ ...base, outcome: 'blocked', serverCount: 60, profileTotal: 120, pausedUntil: '2026-11-01T12:00:00.000Z' }, NOW).detail)
+      .toBe(null);
+  });
+  it('account_changed names the linked account', () => {
+    expect(syncWidgetView({ ...base, outcome: 'account_changed', username: 'bob' }, NOW)).toEqual({ ...none,
+      label: 'Another Untappd account is signed in', detail: 'Sign in as bob', link: untappd });
+  });
+  it('account_changed without a known username asks for the linked account', () => {
+    expect(syncWidgetView({ ...base, outcome: 'account_changed' }, NOW).detail).toBe('Sign in to the linked account');
+  });
+  it('not_linked points to /link', () => {
+    expect(syncWidgetView({ ...base, outcome: 'not_linked' }, NOW)).toEqual({ ...none,
+      label: 'Link Untappd in the bot', detail: 'Send /link to the bot' });
+  });
+  it('sync_context_required asks to update the extension', () => {
+    expect(syncWidgetView({ ...base, outcome: 'sync_context_required' }, NOW)).toEqual({ ...none, label: 'Update the extension' });
+  });
+  it('feed_unavailable is red with Retry', () => {
+    expect(syncWidgetView({ ...base, outcome: 'feed_unavailable', serverCount: 30, profileTotal: 120 }, NOW)).toEqual({ ...none,
+      label: 'Untappd did not return your feed', bar: 25, tone: 'error', action: { kind: 'start', label: 'Retry' } });
+  });
+  it('page_rejected is red, keeps what was saved and suggests later or /import', () => {
+    expect(syncWidgetView({ ...base, outcome: 'page_rejected', serverCount: 30, profileTotal: 120 }, NOW)).toEqual({ ...none,
+      label: 'Untappd sent an unexpected page', bar: 25, tone: 'error', detail: 'Try again later, or use /import in the bot',
+      action: { kind: 'start', label: 'Retry' } });
+  });
+  it('error is red with Retry', () => {
+    expect(syncWidgetView({ ...base, outcome: 'error', serverCount: 30, profileTotal: 120 }, NOW)).toEqual({ ...none,
+      label: 'Sync failed', bar: 25, tone: 'error', action: { kind: 'start', label: 'Retry' } });
+  });
+  it('cancelled says where it stopped', () => {
+    expect(syncWidgetView({ ...base, outcome: 'cancelled', serverCount: 5210, profileTotal: 12407 }, NOW)).toEqual({ ...none,
+      label: `Stopped at 41${N}%`, bar: 41, action: { kind: 'start', label: 'Sync' } });
+  });
+  it('cancelled without a profile total says the count', () => {
+    expect(syncWidgetView({ ...base, outcome: 'cancelled', serverCount: 5210 }, NOW).label).toBe(`Stopped at 5${N}210`);
+  });
+  it('before any sync: no label, no bar, the start button', () => {
+    expect(syncWidgetView(base, NOW)).toEqual({ ...none, label: '', action: { kind: 'start', label: 'Sync my check-ins' } });
   });
 });
 
@@ -213,11 +255,13 @@ describe('armLiveRegions call site (popup.ts)', () => {
 describe('initPopup', () => {
   const html = readFileSync(resolve(__dirname, 'popup.html'), 'utf8');
 
-  async function bootPopup(token: string) {
+  async function bootPopup(token: string, statusReply?: object) {
     // Only the body content: assigning a fragment to documentElement would leave
     // jsdom without a <body> for popup.ts to query.
     document.body.innerHTML = html.split('<body>')[1].split('</body>')[0];
-    const sendMessage = vi.fn();
+    const sendMessage = vi.fn((m: { type?: string }, callback?: (r?: object) => void) => {
+      if (statusReply && m?.type === 'checkin-sync:status') callback?.(statusReply);
+    });
     const chromeStub = globalThis.chrome as unknown as Record<string, unknown>;
     await (chromeStub.storage as { local: { set(o: object): Promise<void> } }).local.set({ token });
     chromeStub.tabs = { query: vi.fn(async () => [{ id: 7, url: 'https://beerfreak.org/p/1' }]) };
@@ -254,6 +298,31 @@ describe('initPopup', () => {
     expect(guide.style.display).toBe('');
     expect(guide.href).toBe(SETUP_GUIDE_URL);
     expect((document.getElementById('authBlock') as HTMLElement).style.display).toBe('none');
+  });
+
+  it('with a token: a gap reply renders the label, the bar and Sync (#934)', async () => {
+    const reply = { type: 'checkin-sync:status:ok', running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0,
+      outcome: 'gap', complete: false, caughtUp: false, gapMissing: 12, pausedUntil: null, quiet: false, username: 'bob' };
+    const { sendMessage } = await bootPopup('tok', reply);
+    expect(sendMessage.mock.calls.some(([m]) => m?.type === 'checkin-sync:status')).toBe(true);
+    expect(document.getElementById('syncLabel')?.textContent).toBe('12 new check-ins');
+    expect(document.getElementById('syncBar')?.getAttribute('aria-valuenow')).toBe('88');
+    expect((document.getElementById('syncBar') as HTMLElement).hidden).toBe(false);
+    expect(document.querySelector('#syncCheckins span')?.textContent).toBe('Sync');
+    expect((document.getElementById('syncCheckins') as HTMLButtonElement).hidden).toBe(false);
+  });
+
+  it('with a token: a fully synced reply hides the sync button (#934)', async () => {
+    const reply = { type: 'checkin-sync:status:ok', running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 0,
+      outcome: 'done', complete: true, caughtUp: true, gapMissing: null, pausedUntil: null, quiet: false, username: 'bob' };
+    await bootPopup('tok', reply);
+    expect(document.getElementById('syncLabel')?.textContent).toBe('✓ Fully synced');
+    expect((document.getElementById('syncCheckins') as HTMLButtonElement).hidden).toBe(true);
+  });
+
+  it('without a token the widget stays hidden (#934)', async () => {
+    await bootPopup('');
+    expect((document.getElementById('syncWidget') as HTMLElement).hidden).toBe(true);
   });
 
   it('with a token: sync is primary and its status is polled', async () => {
@@ -303,10 +372,3 @@ describe('popup markup', () => {
   });
 });
 
-
-it.each([
-  ['account_changed', 'Untappd account changed — start a new sync for the linked account.'],
-  ['sync_context_required', 'Update the extension, then start a new sync for the linked account.'],
-] as const)('explains %s instead of showing successful completion', (outcome, text) => {
-  expect(formatSyncStatus({ running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome, complete: false })).toBe(text);
-});

@@ -28,6 +28,13 @@
         </svg>
         <span>Sync my check-ins</span>
       </button>
+      <div id="syncWidget" class="sync-widget" hidden>
+        <p id="syncLabel" class="sync-label"></p>
+        <div id="syncBar" class="sync-bar" role="progressbar" aria-label="Check-in history synced" aria-valuemin="0" aria-valuemax="100" hidden>
+          <div id="syncBarFill" class="sync-bar-fill"></div>
+        </div>
+        <p class="sync-detail"><span id="syncDetail"></span> <a id="syncLink" href="https://untappd.com/" target="_blank" rel="noopener" hidden></a></p>
+      </div>
       <p id="syncStatus" class="status"></p>
 
       <button id="refresh" class="btn btn-secondary" type="button">

@@ -16,50 +16,131 @@ export interface SyncStatusView {
   // фону (напр. `no_session`) мовчки провалюється в `default` без помилки типів.
   outcome: SyncOutcome['status'] | null;
   complete: boolean;
+  // #934: the scheduler's verdict. «✓ Fully synced» rests on `caughtUp` alone, never on the counts.
+  caughtUp: boolean;
+  gapMissing: number | null;
+  pausedUntil: string | null;
+  quiet: boolean;
+  username: string | null;
 }
 
-export function formatSyncStatus(s: SyncStatusView): string {
+export const UNTAPPD_HOME = 'https://untappd.com/';
+
+export interface SyncWidgetView {
+  label: string;
+  /** null — no bar; 'unknown' — an empty bar with the count only (profile total unknown). */
+  bar: number | 'unknown' | null;
+  detail: string | null;
+  action: { kind: 'start' | 'stop'; label: string } | null;
+  link: { text: string; href: string } | null;
+  tone: 'neutral' | 'error';
+}
+
+// "12 407": a narrow no-break space groups thousands, as the spec's widget table writes them.
+export function count(n: number): string {
+  return n.toLocaleString('en-US').replace(/,/g, '\u202f');
+}
+
+/** #934 §6: an honest percentage of the counts — a display, no decision rests on it. */
+export function syncPercent(serverCount: number, profileTotal: number | null): number | null {
+  if (profileTotal === null || profileTotal <= 0) return null;
+  return Math.min(100, Math.floor((serverCount / profileTotal) * 100));
+}
+
+function checkins(n: number): string {
+  return n === 1 ? '1 check-in' : `${count(n)} check-ins`;
+}
+
+/** #934 §6: one label, one bar, one action per sync state. */
+export function syncWidgetView(s: SyncStatusView, now: Date): SyncWidgetView {
+  const p = syncPercent(s.serverCount, s.profileTotal);
+  const bar = p ?? 'unknown';
+  const ofTotal = s.profileTotal !== null ? `${count(s.serverCount)} of ${count(s.profileTotal)}` : count(s.serverCount);
+  const view = (label: string, rest: Partial<SyncWidgetView> = {}): SyncWidgetView =>
+    ({ label, bar: null, detail: null, action: null, link: null, tone: 'neutral', ...rest });
+  const start = (label: string) => ({ kind: 'start' as const, label });
+  const untappd = { text: 'Open untappd.com', href: UNTAPPD_HOME };
+
   if (s.running) {
-    return s.profileTotal !== null
-      ? `Syncing… ${s.serverCount} / ${s.profileTotal}`
-      : `Syncing… ${s.serverCount}`;
+    return view(p !== null ? `Syncing… ${p}\u202f%` : 'Syncing…', {
+      bar, detail: s.profileTotal !== null ? ofTotal : checkins(s.serverCount), action: { kind: 'stop', label: 'Stop' },
+    });
   }
   switch (s.outcome) {
-    case null: return '';
-    case 'not_linked': return 'Link your Untappd account in the bot first (/link).';
-    case 'blocked': return 'Untappd is rate-limiting — try again later.';
-    case 'no_session': return 'Untappd session expired — open untappd.com, sign in, then sync again.';
-    case 'account_changed': return 'Untappd account changed — start a new sync for the linked account.';
-    case 'sync_context_required': return 'Update the extension, then start a new sync for the linked account.';
-    case 'feed_unavailable': return 'Untappd did not return your check-in feed — open untappd.com, make sure you are signed in to the linked account, then sync again.';
-    // Не «nothing was saved»: сторінки, прийняті до відмови, уже збережені.
-    case 'page_rejected': return `Untappd returned an unexpected page, so the sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''} — try again later, or use /import in the bot.`;
-    case 'error': return 'Sync failed — check your connection and token, then retry.';
-    // #934: тихий синк зупинився — бракує більше, ніж уміщає бюджет; віджет обв'язки замінить цей рядок.
-    case 'gap': return `${s.profileTotal !== null ? `${Math.max(0, s.profileTotal - s.serverCount)} new check-ins` : 'New check-ins'} — press Sync.`;
-    case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
-    case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
+    case null: return view('', { action: start('Sync my check-ins') });
     case 'done':
-      return s.complete
-        ? `✓ Fully synced (${s.serverCount}).`
-        : `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
+    // A record without an intent that says `capped`: a silent check spent on a hole, or an older version's.
+    case 'capped':
+      return s.outcome === 'done' && s.caughtUp
+        ? view('✓ Fully synced', { bar: 100, detail: checkins(s.serverCount) })
+        : view(`Synced ${ofTotal}`, { bar, action: start('Sync again') });
+    case 'gap':
+      return view(s.gapMissing !== null ? `${s.gapMissing === 1 ? '1 new check-in' : `${count(s.gapMissing)} new check-ins`}` : 'New check-ins',
+        { bar, action: start('Sync') });
+    case 'no_session':
+      return s.quiet
+        ? view('Sign in to untappd.com to keep ✅ fresh', { link: untappd })
+        : view('Paused: sign in to untappd.com', { bar, link: untappd, action: start('Sync') });
+    case 'blocked':
+      return view('Paused: Untappd is limiting requests', {
+        bar,
+        detail: s.pausedUntil !== null && Date.parse(s.pausedUntil) > now.getTime() ? 'Resumes tomorrow' : null,
+        action: start('Try now'),
+      });
+    case 'account_changed':
+      return view('Another Untappd account is signed in', {
+        detail: s.username !== null ? `Sign in as ${s.username}` : 'Sign in to the linked account', link: untappd,
+      });
+    case 'not_linked': return view('Link Untappd in the bot', { detail: 'Send /link to the bot' });
+    case 'sync_context_required': return view('Update the extension');
+    case 'feed_unavailable':
+      return view('Untappd did not return your feed', { bar, tone: 'error', action: start('Retry') });
+    // Не «nothing was saved»: сторінки, прийняті до відмови, уже збережені.
+    case 'page_rejected':
+      return view('Untappd sent an unexpected page', {
+        bar, tone: 'error', detail: 'Try again later, or use /import in the bot', action: start('Retry'),
+      });
+    case 'error': return view('Sync failed', { bar, tone: 'error', action: start('Retry') });
+    case 'cancelled':
+      return view(p !== null ? `Stopped at ${p}\u202f%` : `Stopped at ${count(s.serverCount)}`, { bar, action: start('Sync') });
     default: {
       // #587: вичерпний switch — якщо `SyncOutcome['status']` отримає новий варіант
-      // без гілки тут, компілятор впаде на цьому присвоєнні, а не мовчки поверне ''.
+      // без гілки тут, компілятор впаде на цьому присвоєнні, а не мовчки поверне порожній стан.
       const exhaustive: never = s.outcome;
       return exhaustive;
     }
   }
 }
 
-export function syncButtonLabel(s: SyncStatusView): string {
-  if (s.running) return 'Stop';
-  if (s.outcome === 'capped') {
-    return s.profileTotal === null
-      ? 'Continue sync'
-      : `Continue — ${Math.max(0, s.profileTotal - s.serverCount)} left`;
+interface SyncWidgetNodes {
+  label: HTMLElement;
+  bar: HTMLElement;
+  fill: HTMLElement;
+  detail: HTMLElement;
+  link: HTMLAnchorElement;
+  button: HTMLButtonElement;
+  buttonLabel: HTMLElement | null;
+}
+
+/** The only code that writes a SyncWidgetView into the DOM. */
+export function renderSyncWidget(n: SyncWidgetNodes, v: SyncWidgetView): void {
+  n.label.textContent = v.label;
+  n.label.classList.toggle('is-error', v.tone === 'error');
+  n.bar.hidden = v.bar === null;
+  if (typeof v.bar === 'number') {
+    n.bar.setAttribute('aria-valuenow', String(v.bar));
+    n.fill.style.width = `${v.bar}%`;
+  } else {
+    n.bar.removeAttribute('aria-valuenow');
+    n.fill.style.width = '0';
   }
-  return 'Sync my check-ins';
+  n.detail.textContent = v.detail ?? '';
+  n.link.hidden = v.link === null;
+  n.link.textContent = v.link?.text ?? '';
+  n.link.href = v.link?.href ?? UNTAPPD_HOME;
+  n.button.hidden = v.action === null;
+  n.button.disabled = false;
+  if (n.buttonLabel && v.action) n.buttonLabel.textContent = v.action.label;
 }
 
 type SendSyncStart = (callback: () => void) => void;
@@ -199,22 +280,30 @@ async function initPopup(): Promise<void> {
   const clearStatus = el<HTMLElement>('clearStatus');
   if (clearStatus) wireClearButton(clearBtn, clearStatus, { count: countAll, clear: clearAll });
 
-  if (hasToken && syncBtn && syncStatus) {
-    const syncLabel = syncBtn.querySelector('span');
-    let latestSyncStatus: SyncStatusView | null = null;
+  const widget = el<HTMLElement>('syncWidget');
+  const widgetNodes = syncBtn && widget ? {
+    label: el<HTMLElement>('syncLabel'), bar: el<HTMLElement>('syncBar'), fill: el<HTMLElement>('syncBarFill'),
+    detail: el<HTMLElement>('syncDetail'), link: el<HTMLAnchorElement>('syncLink'), button: syncBtn,
+    buttonLabel: syncBtn.querySelector<HTMLElement>('span'),
+  } : null;
+  if (hasToken && syncBtn && syncStatus && widget && widgetNodes?.label && widgetNodes.bar && widgetNodes.fill
+    && widgetNodes.detail && widgetNodes.link) {
+    const nodes = widgetNodes as SyncWidgetNodes;
+    widget.hidden = false;
+    let latestView: SyncWidgetView | null = null;
     const render = (s: SyncStatusView) => {
-      latestSyncStatus = s;
-      syncStatus.textContent = formatSyncStatus(s);
-      syncBtn.disabled = false;
-      if (syncLabel) syncLabel.textContent = syncButtonLabel(s);
+      latestView = syncWidgetView(s, new Date());
+      // The popup's own messages (Starting…, Stopping…) give way to the state they were about.
+      syncStatus.textContent = '';
+      renderSyncWidget(nodes, latestView);
     };
     const poll = () => {
       chrome.runtime.sendMessage({ type: 'checkin-sync:status' }, (s?: SyncStatusView) => {
         if (chrome.runtime.lastError || !s) {
-          latestSyncStatus = null;
+          latestView = null;
+          renderSyncWidget(nodes, syncWidgetView({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0,
+            outcome: null, complete: false, caughtUp: false, gapMissing: null, pausedUntil: null, quiet: false, username: null }, new Date()));
           syncStatus.textContent = 'Sync interrupted — tap Sync to resume.';
-          syncBtn.disabled = false;
-          if (syncLabel) syncLabel.textContent = 'Sync my check-ins';
           return;
         }
         render(s);
@@ -222,7 +311,7 @@ async function initPopup(): Promise<void> {
       });
     };
     syncBtn.addEventListener('click', async () => {
-      if (latestSyncStatus?.running) {
+      if (latestView?.action?.kind === 'stop') {
         syncBtn.disabled = true;
         syncStatus.textContent = 'Stopping…';
         chrome.runtime.sendMessage({ type: 'checkin-sync:stop' }, () => { void chrome.runtime.lastError; });
@@ -251,7 +340,7 @@ async function initPopup(): Promise<void> {
     poll(); // reflect an in-progress run when the popup (re)opens
   }
 
-  armLiveRegions([el<HTMLElement>('syncStatus'), refreshStatus, el<HTMLElement>('clearStatus')]);
+  armLiveRegions([el<HTMLElement>('syncStatus'), el<HTMLElement>('syncLabel'), refreshStatus, el<HTMLElement>('clearStatus')]);
 }
 
 if (typeof document !== 'undefined' && document.getElementById('refresh')) {
