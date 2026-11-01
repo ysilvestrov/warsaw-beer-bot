@@ -770,7 +770,7 @@ describe('#934 scheduler wiring', () => {
     });
     await handleCheckinSyncStart();
     await vi.waitFor(() => expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' }));
-    expect(localStore.get('checkinSync')).toMatchObject({ running: true });
+    expect(localStore.get('checkinSync')).toEqual({ debug: true });
     releaseFeed();
     await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
     expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
