@@ -259,7 +259,7 @@ describe('initPopup', () => {
     // Only the body content: assigning a fragment to documentElement would leave
     // jsdom without a <body> for popup.ts to query.
     document.body.innerHTML = html.split('<body>')[1].split('</body>')[0];
-    const sendMessage = vi.fn((m: { type?: string }, callback?: (r?: object) => void) => {
+    const sendMessage = vi.fn((_m: { type?: string }, callback?: (r?: object) => void) => {
       callback?.(statusReply);
     });
     const chromeStub = globalThis.chrome as unknown as Record<string, unknown>;
