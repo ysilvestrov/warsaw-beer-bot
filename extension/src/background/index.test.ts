@@ -769,7 +769,8 @@ describe('#934 scheduler wiring', () => {
       merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: null, nextCursor: null, profileTotal: 100, serverCount: 100, complete: false,
     });
     await handleCheckinSyncStart();
-    expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
+    await vi.waitFor(() => expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' }));
+    expect(localStore.get('checkinSync')).toMatchObject({ running: true });
     releaseFeed();
     await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
     expect(setBadgeText).toHaveBeenLastCalledWith({ text: '' });
