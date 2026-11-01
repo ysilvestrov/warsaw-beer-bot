@@ -696,7 +696,7 @@ describe('#934 scheduler wiring', () => {
     await vi.waitFor(() => expect(chrome.alarms.create).toHaveBeenCalledWith(CHECK_ALARM, { periodInMinutes: 360 }));
 
     vi.mocked(chrome.alarms.create).mockClear();
-    alarmsGet.mockResolvedValueOnce({ name: CHECK_ALARM, scheduledTime: 0, periodInMinutes: 360 });
+    alarmsGet.mockResolvedValueOnce({ name: CHECK_ALARM, scheduledTime: 0, periodInMinutes: 360, persistAcrossSessions: true });
     onStartup();
     await new Promise((r) => setTimeout(r, 0));
     expect(chrome.alarms.create).not.toHaveBeenCalledWith(CHECK_ALARM, expect.anything());
