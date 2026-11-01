@@ -157,6 +157,28 @@ describe('manual sync', () => {
     expect(t.alarms.has(WATCHDOG_ALARM)).toBe(false);
   });
 
+  // #934 cross-review: Stop, then Sync before the aborted step has settled — the step must not
+  // settle the new intent as its own.
+  it('a Sync pressed right after Stop survives the cancelled step and runs', async () => {
+    let releaseCancel!: () => void;
+    const cancelled = new Promise<void>((r) => { releaseCancel = r; });
+    const runStep = vi.fn()
+      .mockImplementationOnce((req: StepRequest) => new Promise<SyncOutcome>((resolve) => {
+        req.signal.addEventListener('abort', () => { void cancelled.then(() => resolve(outcome('cancelled'))); });
+      }))
+      .mockResolvedValueOnce(outcome('done', { serverCount: 5, profileTotal: 5 }));
+    const t = setup({ runStep });
+    await t.scheduler.startManual();
+    await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(1));
+    await t.scheduler.stop();
+    await t.scheduler.startManual();
+    releaseCancel();
+    await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(2));
+    await t.scheduler.idle();
+    expect(t.reports.map((r) => r.outcome.status)).toEqual(['cancelled', 'done']);
+    expect(t.store.data.has(INTENT_KEY)).toBe(false);
+  });
+
   it('a step that threw ends as error and drops the intent', async () => {
     const t = setup({ runStep: async () => { throw new Error('boom'); } });
     await t.scheduler.startManual();
@@ -310,6 +332,7 @@ describe('resume', () => {
     expect(runStep).toHaveBeenCalledTimes(0);
     expect(t.reports).toEqual([]);
     expect(t.store.data.has(INTENT_KEY)).toBe(false);
+    expect(t.clearMatchCache).toHaveBeenCalledTimes(0);
   });
 
   it('continues an intent just under a day old', async () => {
@@ -318,6 +341,22 @@ describe('resume', () => {
     const t = setup({ runStep }, memoryStore({ [INTENT_KEY]: intent }));
     await t.scheduler.resume();
     expect(runStep).toHaveBeenCalledTimes(1);
+  });
+
+  // #934 cross-review: alarms are not promised to survive a browser restart.
+  it('restores a missing watchdog for the intent it continues', async () => {
+    const intent: SyncIntent = { id: 'a', kind: 'manual', startedAt: new Date(2026, 10, 1, 10, 0).toISOString(), silentPagesUsed: 0 };
+    const t = setup({ runStep: never }, memoryStore({ [INTENT_KEY]: intent }));
+    void t.scheduler.resume();
+    await vi.waitFor(() => expect(t.alarms.has(WATCHDOG_ALARM)).toBe(true));
+  });
+
+  // #934 cross-review: the dead worker's accepted pages come back as known (merged 0) in the resumed step.
+  it('clears the /match cache once when it continues a dead worker\'s intent, even if the step merges nothing', async () => {
+    const intent: SyncIntent = { id: 'a', kind: 'manual', startedAt: new Date(2026, 10, 1, 10, 0).toISOString(), silentPagesUsed: 0 };
+    const t = setup({ runStep: async () => outcome('done', { serverCount: 5, profileTotal: 5 }) }, memoryStore({ [INTENT_KEY]: intent }));
+    await t.scheduler.resume();
+    expect(t.clearMatchCache).toHaveBeenCalledTimes(1);
   });
 
   it('without an intent only drops a stale watchdog', async () => {

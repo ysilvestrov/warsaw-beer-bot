@@ -191,8 +191,9 @@ export function createSyncScheduler(deps: SchedulerDeps) {
         await deps.clearMatchCache().catch(() => undefined);
       }
       const after = await readIntent();
-      if (!after) {
-        // Stop removed the intent while the step ran.
+      // Stop removed the intent while the step ran — also when a Sync after it already wrote a new
+      // one: that is a request of its own, not this step's to settle. The loop runs it next.
+      if (!after || (step.signal.aborted && after.id !== intent.id)) {
         await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: true });
         continue;
       }
@@ -264,6 +265,12 @@ export function createSyncScheduler(deps: SchedulerDeps) {
         await deps.onReport({ outcome: emptyOutcome(token ? 'error' : 'not_linked'), kind: i.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: false });
         return;
       }
+      // Chrome does not promise that alarms survive a browser restart: without the watchdog a second
+      // worker death would strand the intent (a check sees it and never starts).
+      await deps.alarms.create(WATCHDOG_ALARM, 1);
+      // The dead worker may have had pages accepted and died before its step cleared the /match cache;
+      // the resumed step finds them known (merged 0) and would leave the old "not drunk" for 8 h.
+      await deps.clearMatchCache().catch(() => undefined);
       await loop();
     },
 
