@@ -3,6 +3,11 @@ import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, DEFAULT_TIMEOUT_MS, getCheckinSyncState, postCheckinSyncPage, type MatchClient } from '../api/client';
 import { ensureInstall, extensionVersion, forgetInstallToken } from './install';
 import { feedFailure, runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
+import {
+  CHECK_ALARM, CHECK_PERIOD_MINUTES, INTENT_KEY, WATCHDOG_ALARM, createSyncScheduler,
+  type SchedulerReport, type StepRequest,
+} from './sync-scheduler';
+import { sessionUsername } from '../../../src/shared/untappd/session-user';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
 
@@ -209,8 +214,8 @@ export interface CheckinSyncStartMessage { type: 'checkin-sync:start' }
 export interface CheckinSyncStatusMessage { type: 'checkin-sync:status' }
 export interface CheckinSyncStopMessage { type: 'checkin-sync:stop' }
 
-const SYNC_PAGE_CAP = 200;
 const SYNC_STATE_KEY = 'checkinSync';
+const UNTAPPD_ORIGINS = ['https://untappd.com/*'];
 
 interface SyncBinding {
   username: string;
@@ -227,14 +232,21 @@ interface StoredSyncStatus {
   mergedThisRun: number;
   outcome: SyncOutcome['status'] | null;
   complete: boolean;
+  // #934: what the scheduler adds once an intent is settled. Absent in older records.
+  caughtUp?: boolean;
+  gapMissing?: number;
+  pausedUntil?: string;
+  quiet?: boolean;
 }
 
+// #934: chrome.storage.local, not session — after a browser restart the popup still knows how
+// the last sync ended, and the scheduler's intent lives next to it.
 async function writeSyncStatus(s: StoredSyncStatus): Promise<void> {
-  await chrome.storage.session.set({ [SYNC_STATE_KEY]: s });
+  await chrome.storage.local.set({ [SYNC_STATE_KEY]: s });
 }
 
 async function readSyncStatus(): Promise<StoredSyncStatus> {
-  const s = await chrome.storage.session.get(SYNC_STATE_KEY);
+  const s = await chrome.storage.local.get(SYNC_STATE_KEY);
   return (s[SYNC_STATE_KEY] as StoredSyncStatus | undefined) ?? {
     running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false,
   };
@@ -243,8 +255,13 @@ async function readSyncStatus(): Promise<StoredSyncStatus> {
 let syncGeneration = 0;
 let syncWriteChain: Promise<void> = Promise.resolve();
 function enqueueSyncStatus(s: StoredSyncStatus, generation = syncGeneration): Promise<void> {
+  return enqueueSyncStatusPatch(() => s, generation);
+}
+function enqueueSyncStatusPatch(next: (cur: StoredSyncStatus) => StoredSyncStatus | null, generation = syncGeneration): Promise<void> {
   syncWriteChain = syncWriteChain.catch(() => undefined).then(async () => {
-    if (generation === syncGeneration) await writeSyncStatus(s);
+    if (generation !== syncGeneration) return;
+    const s = next(await readSyncStatus());
+    if (s) await writeSyncStatus(s);
   });
   return syncWriteChain;
 }
@@ -253,6 +270,11 @@ let syncRunning = false;
 let syncAbortController: AbortController | null = null;
 type CheckinSyncStartReply = { type: 'checkin-sync:started'; alreadyRunning: boolean };
 let syncStartPromise: Promise<CheckinSyncStartReply> | null = null;
+// #934: a manual start replies once its step has written the first status, as before the scheduler.
+let pendingStartAck: { resolve: (r: CheckinSyncStartReply) => void; reject: (e: unknown) => void } | null = null;
+// The generation of the step a report is about: the report must not outlive an invalidation.
+// null — no step ran for this intent in this worker (resume dropped it): the current generation.
+let reportGeneration: number | null = null;
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
@@ -280,6 +302,46 @@ export function feedUrl(username: string, maxId: string | null): string {
     : `https://untappd.com/profile/more_feed/${u}/${encodeURIComponent(maxId)}?v2=true`;
 }
 
+const syncScheduler = createSyncScheduler({
+  store: {
+    get: async <T,>(key: string) => (await chrome.storage.local.get(key))[key] as T | undefined,
+    set: (key, value) => chrome.storage.local.set({ [key]: value }),
+    remove: (key) => chrome.storage.local.remove(key),
+  },
+  alarms: {
+    create: async (name, periodInMinutes) => { await chrome.alarms.create(name, { periodInMinutes }); },
+    clear: async (name) => { await chrome.alarms.clear(name); },
+  },
+  now: () => new Date(),
+  runStep: runSyncStep,
+  clearMatchCache: async () => { await handleCacheClearAll(); },
+  hasUntappdPermission: () => chrome.permissions.contains({ origins: UNTAPPD_ORIGINS }),
+  hasToken: async () => Boolean((await getSettings()).token),
+  onReport: reportSyncIntent,
+});
+
+// #934: the scheduler's verdict on top of the step's own terminal status — only what the step could
+// not know (gap instead of capped, the pause, a quiet hint), and a terminal write the step lost.
+async function reportSyncIntent(r: SchedulerReport): Promise<void> {
+  const o = r.outcome;
+  const generation = reportGeneration ?? syncGeneration;
+  reportGeneration = null;
+  await enqueueSyncStatusPatch((cur) => {
+    const next: StoredSyncStatus = { ...cur };
+    let changed = false;
+    if (cur.running || cur.outcome !== o.status) {
+      Object.assign(next, { running: false, outcome: o.status, serverCount: o.serverCount, profileTotal: o.profileTotal,
+        mergedThisRun: o.mergedThisRun, complete: o.complete });
+      changed = true;
+    }
+    if (o.caughtUp) { next.caughtUp = true; changed = true; }
+    if (r.gapMissing !== null) { next.gapMissing = r.gapMissing; changed = true; }
+    if (r.pausedUntil !== null) { next.pausedUntil = r.pausedUntil; changed = true; }
+    if (r.quiet) { next.quiet = true; changed = true; }
+    return changed ? next : null;
+  }, generation).catch(() => undefined);
+}
+
 export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
   if (syncStartPromise) {
     try {
@@ -290,7 +352,7 @@ export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
     }
   }
   if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
-  const startPromise = beginCheckinSync();
+  const startPromise = startManualSync();
   syncStartPromise = startPromise;
   try {
     return await startPromise;
@@ -301,12 +363,45 @@ export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
   }
 }
 
-async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
+async function startManualSync(): Promise<CheckinSyncStartReply> {
+  const ack = new Promise<CheckinSyncStartReply>((resolve, reject) => { pendingStartAck = { resolve, reject }; });
+  try {
+    const { alreadyRunning } = await syncScheduler.startManual();
+    if (alreadyRunning) {
+      // Between two steps of a running intent: the next step picks the manual intent up.
+      pendingStartAck = null;
+      return { type: 'checkin-sync:started', alreadyRunning: true };
+    }
+  } catch (error) {
+    pendingStartAck = null;
+    throw error;
+  }
+  return ack;
+}
+
+// #934: one step of the scheduler — the #611 run as it was: status, binding, cache invalidation.
+async function runSyncStep(step: StepRequest): Promise<SyncOutcome> {
+  const ack = pendingStartAck;
+  pendingStartAck = null;
+  let launched: { reply: CheckinSyncStartReply; done: Promise<SyncOutcome> };
+  try {
+    launched = await launchCheckinSync(step);
+  } catch (error) {
+    ack?.reject(error);
+    throw error;
+  }
+  ack?.resolve(launched.reply);
+  return launched.done;
+}
+
+async function launchCheckinSync(step: StepRequest): Promise<{ reply: CheckinSyncStartReply; done: Promise<SyncOutcome> }> {
+  const reply: CheckinSyncStartReply = { type: 'checkin-sync:started', alreadyRunning: false };
   const cur = await readSyncStatus();
 
   const { token, baseUrl } = await getSettings();
   if (!token) {
     const generation = ++syncGeneration;
+    reportGeneration = generation;
     try {
       await handleCacheClearAll();
     } catch (error) {
@@ -315,14 +410,17 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
       console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
     }
     await enqueueSyncStatus(emptySyncStatus('error'), generation);
-    return { type: 'checkin-sync:started', alreadyRunning: false };
+    return { reply, done: Promise.resolve({ status: 'error', complete: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, caughtUp: false }) };
   }
 
   const generation = ++syncGeneration;
+  reportGeneration = generation;
   let binding: SyncBinding | null = null;
   syncRunning = true;
   const controller = new AbortController();
   syncAbortController = controller;
+  if (step.signal.aborted) controller.abort();
+  else step.signal.addEventListener('abort', () => controller.abort(), { once: true });
   try {
     await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, binding }, generation);
   } catch (error) {
@@ -331,8 +429,9 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
     throw error;
   }
 
-  void (async () => {
+  const done = (async (): Promise<SyncOutcome> => {
     let terminalStatus: StoredSyncStatus | null = null;
+    let outcome: SyncOutcome = { status: 'error', complete: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, caughtUp: false };
     try {
       const onProgress = (p: SyncProgress) => {
         void enqueueSyncStatus({
@@ -345,7 +444,7 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
           complete: false,
         }, generation).catch(() => undefined);
       };
-      const outcome = await runCheckinSync({
+      outcome = await runCheckinSync({
         getState: async () => {
           const state = await getCheckinSyncState(baseUrl, token);
           if (generation !== syncGeneration) controller.abort();
@@ -362,9 +461,9 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
         },
         fetchFeed: async (username, maxId) => {
           // more_feed is XHR-only: without X-Requested-With Untappd 307-redirects it to
-          // /home. A redirect on that endpoint means the request wasn't honoured (e.g.
-          // logged-out session) — treat it as an error rather than parsing /home (which
-          // has no check-ins and would look like a clean "feed bottom").
+          // /home. A redirect on that endpoint means the request wasn't honoured — treat it as
+          // an error rather than parsing /home. A signed-out more_feed answers an empty 200
+          // (probe 2026-10-31, #934): the session is checked on the first page instead.
           const isMoreFeed = maxId !== null;
           const res = await fetch(feedUrl(username, maxId), {
             credentials: 'include',
@@ -382,8 +481,11 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
         submitPage: (html, maxId, linkRevision) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal, undefined, linkRevision),
         onProgress,
         sleep: (ms) => abortableDelay(ms, controller.signal),
-        pageCap: SYNC_PAGE_CAP,
+        pageCap: step.pageCap,
         signal: controller.signal,
+        sessionOf: sessionUsername,
+        beforeFetch: step.beforeFetch,
+        afterPage: step.afterPage,
       });
       terminalStatus = {
         binding,
@@ -399,18 +501,21 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
       if (terminalStatus) {
         await enqueueSyncStatus(terminalStatus, generation).catch(() => undefined);
       } else {
-        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, binding }, generation);
+        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, binding }, generation).catch(() => undefined);
       }
     } finally {
       syncRunning = false;
       if (syncAbortController === controller) syncAbortController = null;
     }
+    return outcome;
   })();
 
-  return { type: 'checkin-sync:started', alreadyRunning: false };
+  return { reply, done };
 }
 
 export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:stopped'; stopped: boolean }> {
+  // #934: the intent goes first, so the scheduler does not start another step after the abort.
+  await syncScheduler.stop().catch(() => false);
   if (syncAbortController) {
     syncAbortController.abort();
     return { type: 'checkin-sync:stopped', stopped: true };
@@ -431,6 +536,10 @@ function emptySyncStatus(outcome: StoredSyncStatus['outcome'] = null, state?: Ch
 function syncStatusReply(s: StoredSyncStatus) {
   return { type: 'checkin-sync:status:ok' as const, running: s.running, serverCount: s.serverCount,
     profileTotal: s.profileTotal, mergedThisRun: s.mergedThisRun, outcome: s.outcome, complete: s.complete };
+}
+
+async function hasSyncIntent(): Promise<boolean> {
+  return (await chrome.storage.local.get(INTENT_KEY))[INTENT_KEY] !== undefined;
 }
 
 export async function handleCheckinSyncStatus() {
@@ -460,7 +569,7 @@ export async function handleCheckinSyncStatus() {
     return syncStatusReply(emptySyncStatus('sync_context_required'));
   }
   const latestSettings = await getSettings();
-  const orphaned = !syncStartPromise && !syncRunning && !syncAbortController;
+  const orphaned = !syncStartPromise && !syncRunning && !syncAbortController && !syncScheduler.running;
   const status = await readSyncStatus();
   if (generation !== syncGeneration || latestSettings.token !== settings.token || latestSettings.baseUrl !== settings.baseUrl) {
     return syncStatusReply(emptySyncStatus());
@@ -480,7 +589,8 @@ export async function handleCheckinSyncStatus() {
     await enqueueSyncStatus(fresh, invalidationGeneration).catch(() => undefined);
     return syncStatusReply(invalidationGeneration === syncGeneration ? fresh : emptySyncStatus());
   }
-  if (status.running && orphaned) {
+  // #934: a running status with a stored intent is not an orphan — the watchdog continues it.
+  if (status.running && orphaned && !(await hasSyncIntent())) {
     const recovered = { ...status, running: false, outcome: 'error' as const, complete: false };
     await enqueueSyncStatus(recovered, generation).catch(() => undefined);
     return syncStatusReply(recovered);
@@ -488,8 +598,23 @@ export async function handleCheckinSyncStatus() {
   return syncStatusReply(status);
 }
 
-chrome.runtime.onInstalled.addListener(() => { void ensureInstall(); });
-chrome.runtime.onStartup.addListener(() => { void ensureInstall(); });
+// #934: the check alarm keeps its period across worker restarts — created only when missing.
+async function ensureCheckAlarm(): Promise<void> {
+  if (!(await chrome.alarms.get(CHECK_ALARM))) await chrome.alarms.create(CHECK_ALARM, { periodInMinutes: CHECK_PERIOD_MINUTES });
+}
+
+chrome.runtime.onInstalled.addListener(() => { void ensureInstall(); void ensureCheckAlarm(); });
+chrome.runtime.onStartup.addListener(() => {
+  void ensureInstall();
+  void ensureCheckAlarm();
+  void syncScheduler.check();
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === WATCHDOG_ALARM) void syncScheduler.resume();
+  if (alarm.name === CHECK_ALARM) void syncScheduler.check();
+});
+// Every worker start: an intent a dead worker left behind continues from the first page.
+void syncScheduler.resume();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void ensureInstall();

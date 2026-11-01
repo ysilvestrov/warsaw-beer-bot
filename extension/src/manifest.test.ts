@@ -21,6 +21,11 @@ describe('manifest (both variants)', () => {
     }
   });
 
+  // #934: the sync scheduler's watchdog and check alarms, and nothing else new.
+  it('asks for exactly storage, activeTab and alarms in both variants', () => {
+    for (const m of [dev, store]) expect(m.permissions).toEqual(['storage', 'activeTab', 'alarms']);
+  });
+
   it('injects the content script on supported shop pages', () => {
     const [cs] = dev.content_scripts;
     expect(cs.matches).toContain('https://beerfreak.org/*');

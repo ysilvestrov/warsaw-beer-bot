@@ -30,6 +30,14 @@ const store = new Map<string, unknown>();
       }),
     },
   },
+  // #934: the background worker registers the sync alarms at import.
+  alarms: {
+    create: vi.fn(async () => {}),
+    clear: vi.fn(async () => true),
+    get: vi.fn(async () => undefined),
+    onAlarm: { addListener: vi.fn() },
+  },
+  permissions: { contains: vi.fn(async () => false) },
   runtime: {
     onMessage: { addListener: vi.fn() },
     onInstalled: { addListener: vi.fn() },

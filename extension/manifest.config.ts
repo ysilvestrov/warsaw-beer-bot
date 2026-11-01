@@ -62,7 +62,8 @@ export function buildManifest(opts: { store: boolean }) {
     // storage: match cache + token/settings. activeTab: the popup reads the active tab's
     // URL (chrome.tabs.query) and messages its content script (chrome.tabs.sendMessage)
     // for "Refresh this page" — both covered by activeTab, so `tabs` is not needed.
-    permissions: ['storage', 'activeTab'],
+    // #934: `alarms` — the sync watchdog and the 6-hourly check; Chrome shows no warning for it.
+    permissions: ['storage', 'activeTab', 'alarms'],
     host_permissions: ['https://beer-api.ysilvestrov-ai.uk/*'],
     // The store build drops the broad 'https://*/*' (custom-baseUrl debugging) the dev
     // build keeps, to avoid an "access all sites" review flag.
