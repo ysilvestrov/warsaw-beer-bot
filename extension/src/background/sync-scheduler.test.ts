@@ -193,6 +193,34 @@ describe('manual sync', () => {
     expect(t.reports.map((r) => [r.kind, r.outcome.status])).toEqual([['manual', 'done']]);
   });
 
+  // #934 PR review @6fbb536: the same window, with a step that ended in a pause — the press must not
+  // be settled by the old step's verdict (it would put the pause back).
+  it('a Sync pressed right after a silent step ended blocked runs, and the pause is not set', async () => {
+    let t!: ReturnType<typeof setup>;
+    const runStep = vi.fn()
+      .mockResolvedValueOnce(outcome('blocked', { serverCount: 75, profileTotal: 500, mergedThisRun: 25 }))
+      .mockResolvedValueOnce(outcome('done', { serverCount: 500, profileTotal: 500 }));
+    t = setup({ runStep, clearMatchCache: async () => { await t.scheduler.startManual(); } });
+    await t.scheduler.check();
+    await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(2));
+    await t.scheduler.idle();
+    expect(t.reports.map((r) => [r.kind, r.outcome.status])).toEqual([['manual', 'done']]);
+    expect(t.store.data.has(PAUSE_KEY)).toBe(false);
+  });
+
+  // #934 PR review @6fbb536: a report that fails must not leave the intent to restart the loop.
+  it('a verdict that fails to store still ends the sync: one step, no intent left', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const runStep = vi.fn(async () => outcome('done', { serverCount: 5, profileTotal: 5, caughtUp: true }));
+    const t = setup({ runStep, onReport: async () => { throw new Error('quota'); } });
+    await t.scheduler.startManual();
+    await t.scheduler.idle();
+    expect(runStep).toHaveBeenCalledTimes(1);
+    expect(t.store.data.has(INTENT_KEY)).toBe(false);
+    expect(warn).toHaveBeenCalledWith('[beer-overlay] sync verdict not stored', new Error('quota'));
+    warn.mockRestore();
+  });
+
   // #934 PR review: a worker death between the two must not lose the verdict.
   it('stores the verdict while the intent still stands', async () => {
     const store = memoryStore();

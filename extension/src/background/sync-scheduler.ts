@@ -156,14 +156,20 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       if (cur && cur.id !== intent.id) return;
       // The verdict is stored before the intent goes: a worker that dies between the two re-runs the
       // step from the intent, instead of leaving a finished sync without its ✓, gap or pause.
-      await deps.onReport({
-        outcome: gap ? { ...outcome, status: 'gap' } : outcome,
-        kind,
-        gapMissing: gap ? missing : null,
-        pausedUntil,
-        quiet: outcome.status === 'no_session' && kind === 'silent',
-        afterStep: true,
-      });
+      try {
+        await deps.onReport({
+          outcome: gap ? { ...outcome, status: 'gap' } : outcome,
+          kind,
+          gapMissing: gap ? missing : null,
+          pausedUntil,
+          quiet: outcome.status === 'no_session' && kind === 'silent',
+          afterStep: true,
+        });
+      } catch (error) {
+        // The intent goes anyway: left standing, it would restart the loop at once, and a manual one
+        // would fetch step after step with no delay and no budget. A lost verdict costs one Sync press.
+        console.warn('[beer-overlay] sync verdict not stored', error);
+      }
       await removeIntent();
     });
   }
@@ -202,9 +208,12 @@ export function createSyncScheduler(deps: SchedulerDeps) {
         await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: true });
         continue;
       }
-      // capped and gap are budget verdicts: a manual intent — also one pressed after the silent step
-      // ended, before this read — owes them nothing and runs on.
-      if ((outcome.status === 'capped' || outcome.status === 'gap') && after.kind === 'manual') continue;
+      // A start written after the step ended, before this read, has its own id: a request of its own,
+      // not this step's to settle — whatever the step ended with (a gap, a pause, an error). The loop
+      // runs it next, and it reports its own verdict.
+      if (after.id !== intent.id) continue;
+      // The step cap is no verdict for a manual intent: it runs on.
+      if (outcome.status === 'capped' && after.kind === 'manual') continue;
       await settle(outcome, after);
     }
   }
