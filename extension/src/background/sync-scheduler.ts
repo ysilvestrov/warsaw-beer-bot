@@ -146,14 +146,12 @@ export function createSyncScheduler(deps: SchedulerDeps) {
     // A silent budget spent on a coverage hole, with the counts equal, is no news for the person:
     // only a count gap is a gap (badge, "N new check-ins").
     const gap = outcome.status === 'gap' || (outcome.status === 'capped' && kind === 'silent' && missing !== null && missing > 0);
-    let pausedUntil: string | null = null;
-    if (outcome.status === 'blocked') {
-      pausedUntil = nextLocalMidnight(deps.now()).toISOString();
-      await deps.store.set(PAUSE_KEY, { until: pausedUntil });
-    }
+    const pausedUntil = outcome.status === 'blocked' ? nextLocalMidnight(deps.now()).toISOString() : null;
     await withIntent(async (cur) => {
-      // A start written while this step ran has its own id and stays: the loop runs it next.
+      // A start written after the step ended has its own id and stays: the loop runs it next, and
+      // this step's verdict — a pause above all — is not written over the press.
       if (cur && cur.id !== intent.id) return;
+      if (pausedUntil) await deps.store.set(PAUSE_KEY, { until: pausedUntil });
       // The verdict is stored before the intent goes: a worker that dies between the two re-runs the
       // step from the intent, instead of leaving a finished sync without its ✓, gap or pause.
       try {
@@ -197,23 +195,22 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       } finally {
         if (controller === step) controller = null;
       }
+      // Read as the step ends, before anything else awaits: a press up to here was made while the step
+      // ran and the step serves it; a press after this has its own id, which settle leaves alone.
+      const after = await readIntent();
       if (outcome.mergedThisRun > 0) {
         // New check-ins: the /match cache would keep the old "not drunk" for up to 8 h.
         await deps.clearMatchCache().catch(() => undefined);
       }
-      const after = await readIntent();
       // Stop removed the intent while the step ran — also when a Sync after it already wrote a new
       // one: that is a request of its own, not this step's to settle. The loop runs it next.
       if (!after || (step.signal.aborted && after.id !== intent.id)) {
         await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, gapMissing: null, pausedUntil: null, quiet: false, afterStep: true });
         continue;
       }
-      // A start written after the step ended, before this read, has its own id: a request of its own,
-      // not this step's to settle — whatever the step ended with (a gap, a pause, an error). The loop
-      // runs it next, and it reports its own verdict.
-      if (after.id !== intent.id) continue;
-      // The step cap is no verdict for a manual intent: it runs on.
-      if (outcome.status === 'capped' && after.kind === 'manual') continue;
+      // capped and gap are budget verdicts: an intent made manual while the step ran owes them
+      // nothing and runs on.
+      if ((outcome.status === 'capped' || outcome.status === 'gap') && after.kind === 'manual') continue;
       await settle(outcome, after);
     }
   }
