@@ -217,6 +217,10 @@ Superpowers Workflow
 
 Follow the project's Superpowers workflow.
 
+The general process rules are in the detent block at the end of this file and in the `detent-*`
+skills; the sections below hold only what is specific to this project. `npx github:ysilvestrov/detent#<tag> install`
+updates the block and the skills: do not edit them by hand.
+
 Always set up an isolated worktree when developing a change.
 
 When making changes:
@@ -237,17 +241,8 @@ the user's decision or authority, or a concrete blocker is named.
 
 Classifying a Fix: the Light Path
 
-Not every bug is architectural. A fix may skip the spec and plan documents when
-all four of these hold:
-
-- it **restores** behaviour `spec.md` already describes, and needs no new
-  sentence in `spec.md`;
-- the mechanism of the defect was **proven by a live probe or replay before**
-  the classification — never classify at intake, because an issue's text
-  describes the symptom while the path is decided by the cause;
-- the change stays within two files plus their tests and introduces no new
-  concept;
-- it does not change a rule that acts on all data.
+The four conditions are rule 2 of the detent block at the end of this file. Never classify at
+intake: an issue's text describes the symptom, while the path is decided by the cause.
 
 The last condition separates things that look identical from the outside.
 Adding a pair to the curated `ALIAS_PAIRS` list is the light path: the list is
@@ -271,17 +266,7 @@ no code.
 
 The Ratchet Turns One Way
 
-The moment any of the four conditions fails — a third file is needed, a new
-concept appears, a sentence wants to go into `spec.md` — the work **stops
-completely**.
-
-Everything already obtained (the diagnosis, the probe output, a draft fix,
-measurements) is written down as input, and the change restarts on the
-architectural path **from the beginning**: brainstorming, spec, plan, worktree.
-Not "we will add a spec for what is already built": a spec written after the
-fact, around a finished fix, proves exactly one thing — that the fix exists.
-
-Never reclassify downward.
+The rule is rule 3 of the detent block.
 
 Why the trigger sits after the probe rather than at intake: #587 arrived as
 "the refresh gets stuck on the last step" and looked like a trivial client bug.
@@ -294,13 +279,7 @@ without a spec.
 
 Claims and Their Evidence
 
-A design document must carry a table of every place the system **records
-something as fact** — a state row, a cursor, a coverage range, a verdict, a
-cache others later read as truth — with what it claims beside what proves it.
-
-A row whose evidence is a count, an assumption about an external file, or "it
-has always been so" is a weak row. Probe it live before writing the plan, or
-do not record the claim at all.
+The rule is rule 4 of the detent block; the format is in the `detent-design-spec` skill.
 
 Measured on #587: two such rows — a migration seed justified by count equality,
 and an import coverage range justified by assuming an export is complete — went
@@ -317,32 +296,20 @@ claim about data.
 
 Writing a Design Spec
 
-Every new architectural spec follows `docs/spec-format.md`, whichever agent writes it. The owner
-approves a spec from its first section, «Для власника», and is not required to read the body; a
-decision that lives only in the body is a decision the owner misses. That is how "merge means
-deploy" went through in the merge-deploy spec.
+The format and the estimate game are in the `detent-design-spec` skill. In this project the goal in
+«Для власника» is measured against the person asking about beer and against the budget. A decision
+that lives only in the body is a decision the owner misses: that is how "merge means deploy" went
+through in the merge-deploy spec.
 
-- At the start of brainstorming, restate the task in your own words and ask for the owner's size
-  estimate **before giving yours** — yours would anchor it. Give yours once the approach is chosen
-  and before the spec is written, with a breakdown and a cheaper variant. A gap of two sizes or
-  more stops the work until it is talked through.
-- After the probes, with the spec committed, have Claude review it: `npm run cross-review -- --spec
-  <file> --reviewer claude`, with a command timeout of at least 16 minutes. The same
-  `.codex/rules/default.rules` entry as for the code review lets it reach the network. Verify each
-  finding: fix it or reject it with a reason. Put the printed `Spec-review:` line in the spec's
-  header and the decisions in its final `## Рев'ю спеки` table. Once per spec.
-- After the last PR of the change merges, add the actual size to the spec's estimate.
+The spec review still uses this repo's own script: `npm run cross-review -- --spec <file> --reviewer
+claude`, with a command timeout of at least 16 minutes. The same `.codex/rules/default.rules` entry as
+for the code review lets it reach the network.
 
 ---
 
 Staging a Large Change
 
-A change whose plan runs past roughly four tasks, or whose later tasks build on
-a mechanism that does not exist yet, is not planned in one piece.
-
-The spec stays whole. The plan splits: first the **core** — the mechanism the
-change exists for — then its whole-branch review, and only after that review a
-separate plan for the periphery (clients, migrations, adjacent paths, docs).
+The rule is in the `detent-pr-slicing` skill.
 
 Why, from #587: a seven-task plan written against code that did not exist yet
 contained three defects of its own — a mutation step naming a test that could
@@ -355,20 +322,8 @@ already been built on it.
 
 Sizing a Task Before Dispatching
 
-**This overrides the subagent-driven-development skill's rule that the
-controller never implements.**
-
-Before dispatching a task, size it. A task is small when all three hold:
-
-- its text already contains the complete code to write,
-- it touches at most two files plus their tests,
-- it requires no new decision.
-
-Then the controller implements it directly: change, **full gate**, commit. If
-any of the three fails, dispatch as usual.
-
-Fresh eyes are not lost: work done inline MUST be included in the next task's
-review package and named in the whole-branch review dispatch.
+The conditions are in the `detent-pr-slicing` skill. In this project work done inline is also named
+in the whole-branch review dispatch.
 
 Measured on #587: a five-line popup change got its own implementer (76k tokens)
 and its own reviewer (57k), and so did a twenty-line one — about four wasted
@@ -433,14 +388,11 @@ When modifying behavior:
 
 Tests should verify the requested behavior and remain narrowly scoped.
 
-Test Quality Principles:
-
-Newly written and refactored tests must maintain high assertion rigor:
-- **No weak assertions**: Prefer `.toBe()` or `.toEqual()` with exact expected values over `.toBeGreaterThanOrEqual()`, `.toBeTruthy()`, or `.toBeDefined()`. A test that passes for both the right and wrong value is worthless. **An exact assertion pins the test's own fact, not current state that the next code change will move**: when replacing a weak assertion, first name what the test claims and assert that (a test of migration v20 asserts v20 is recorded — `WHERE version = 20` — not `MAX(version) = 34`). A global value that grows with the code (schema head, registry size, number of supported shops) is pinned by **exactly one** test, so a new change edits only that one. Why — #701/#708: `>= 20` was replaced with `toBe(34)`, a parallel branch adding migration v35 collided with that line only after both merged, and the fix deleted the assertion instead of correcting it.
-- **No conditional test logic**: Avoid `if/else`, early returns (`if (!x) return;`), or branching assertions inside tests. Tests must have a single deterministic assertion path.
-- **No tautological tests**: Tests must assert against external reality or explicit expected constants, never against their own internal logic or comparing a function to itself (e.g. `expect(fn(a)).toBe(fn(b))`).
-- **Cover edge cases and boundaries**: Do not test only the happy path. Explicitly verify error cases, boundary conditions, empty inputs, and invalid payloads.
-- **No test setup that mirrors implementation**: Tests must not re-implement production logic or algorithms in test helpers to derive expected values.
+Test quality is rule 5 of the detent block. An exact assertion pins the test's own fact: a test of
+migration v20 asserts v20 is recorded (`WHERE version = 20`), not `MAX(version) = 34`. Why a global
+value (schema head, registry size, number of supported shops) is pinned by exactly one test — #701/#708:
+`>= 20` was replaced with `toBe(34)`, a parallel branch adding migration v35 collided with that line
+only after both merged, and the fix deleted the assertion instead of correcting it.
 
 ---
 
@@ -459,12 +411,11 @@ If uncertain, choose the more conservative implementation.
 
 For every code change:
 
-- **create the pull request by default — do not ask.** When the work is done and the gate is green, push the branch and open the PR as the normal final step. Asking "should I create a PR?" is a wasted round trip: the answer is always yes unless the user said otherwise in advance, and the user will say so explicitly when a change must not become a PR. This overrides any skill that presents a choice at the end of a branch (e.g. superpowers `finishing-a-development-branch`): go straight to its push-and-PR option. Opening a PR is not merging it — the user still merges.
 - **Merged means deployed, except `[deploy:hold]`** (design: `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md`): the host deploys `main` by itself after a merge (merge-deploy), so a merge is an unattended deploy. If a change needs a step on the host — root (sudoers, units, litestream, `install-*.sh`, `rsync-filter`, installed copies of the deployer), a new `.env` key, or a preflight for a migration that rewrites data irreversibly (like #611) — the PR **must** carry the `[deploy:hold]` marker at the start of its title **and** the `deploy:hold` label, and its body lists the steps for the human. The `deploy-hold` CI check catches hold paths and a marker/label mismatch, but not `.env` keys or preflights — the author names those. A hold is released when the human does the steps and runs `bash deploy/deploy.sh`.
 - **before creating the PR, fetch `main` and rebase onto it if it has moved** — `git fetch origin main`, then `git rebase origin/main`. Otherwise the rebase has to happen at merge time, and every check (CI, both builds, the AI review) runs a second time while the merge waits on them. A worktree branches from `origin/main`, so the branch starts current; the drift accumulates while the work is under way, which is why this belongs immediately before the PR rather than at the start.
 - after a rebase, **re-run the full gate** (`npm test && npm run typecheck`) before pushing — a rebase breaks a branch even when both sides were green on their own — then `git push --force-with-lease`
 - if `git fetch` fails with `GitHub is temporarily limiting some unauthenticated downloads`, that is #583, not the network: the repo is public, so GitHub never returns a 401 and git therefore never offers credentials. The working form is `git -c http.extraHeader="Authorization: Basic $(printf 'x-access-token:%s' "$(gh auth token)" | base64 -w0)" fetch origin main`. `git push` is unaffected — a push always authenticates.
-- **before creating the PR, have Claude cross-review the branch**: once the solution is ready (gate green, rebase done), run `npm run cross-review -- --reviewer claude` with a command timeout of at least 16 minutes (the review may take up to 15): a shell-tool timeout kills the process before it cleans up, leaving its snapshot worktree in `tmp/`. Claude reviews the branch diff against `origin/main` read-only (`--restricted`, Read/Grep/Glob only); the report lands in `tmp/cross-review-claude-<branch>-<sha>-XXXXXX/report.md` (the script prints the path). The repo's `.codex/rules/default.rules` allows this command, so it reaches the network without a manual approval; if it fails with `no network`, the rule was not loaded — ask the user to approve the escalation. Verify **each** finding like a GH review comment: fix it or reject it with a reason, never apply findings blindly; commit fixes and re-run the gate. The PR body carries the marker `Cross-review: claude @ <sha> — <n> findings: <f> fixed, <r> rejected` (the script prints a template). Once per PR — not per commit, not after fixes to an open PR. A docs-only PR says `Cross-review: skipped (docs-only)`. A reviewer failure (exit 5) does not block the PR: the marker says `Cross-review: failed (<reason>)` and the GH review remains the gate. Why: every push to a PR runs the paid GH AI reviewer; local agents run on flat subscriptions, so catching a finding before the PR saves a paid round. The marker is self-reported and gates nothing — it exists to count the effect later. Design: `docs/superpowers/specs/2026-09/2026-09-29-cross-review-design.md`. When editing the script, keep the codex direction pinned to a Sol-class model (`DEFAULT_MODEL` in `scripts/cross-review/core.ts`): the Codex CLI default moves with updates, and Astra costs far more tokens for no better review.
+- **before creating the PR, have Claude cross-review the branch** (in this repo rule 6 of the detent block still runs through this repo's own script, not `npx detent cross-review`): once the solution is ready (gate green, rebase done), run `npm run cross-review -- --reviewer claude` with a command timeout of at least 16 minutes (the review may take up to 15): a shell-tool timeout kills the process before it cleans up, leaving its snapshot worktree in `tmp/`. Claude reviews the branch diff against `origin/main` read-only (`--restricted`, Read/Grep/Glob only); the report lands in `tmp/cross-review-claude-<branch>-<sha>-XXXXXX/report.md` (the script prints the path). The repo's `.codex/rules/default.rules` allows this command, so it reaches the network without a manual approval; if it fails with `no network`, the rule was not loaded — ask the user to approve the escalation. Verify **each** finding like a GH review comment: fix it or reject it with a reason, never apply findings blindly; commit fixes and re-run the gate. The PR body carries the marker `Cross-review: claude @ <sha> — <n> findings: <f> fixed, <r> rejected` (the script prints a template). Once per PR — not per commit, not after fixes to an open PR. A docs-only PR says `Cross-review: skipped (docs-only)`. A reviewer failure (exit 5) does not block the PR: the marker says `Cross-review: failed (<reason>)` and the GH review remains the gate. Why: every push to a PR runs the paid GH AI reviewer; local agents run on flat subscriptions, so catching a finding before the PR saves a paid round. The marker is self-reported and gates nothing — it exists to count the effect later. Design: `docs/superpowers/specs/2026-09/2026-09-29-cross-review-design.md`. When editing the script, keep the codex direction pinned to a Sol-class model (`DEFAULT_MODEL` in `scripts/cross-review/core.ts`): the Codex CLI default moves with updates, and Astra costs far more tokens for no better review.
 - create the PR
 - after creating the PR, wait for review comments/checks to complete before reporting final status
 - evaluate review comments technically before changing code
@@ -489,3 +440,86 @@ The full protocol, the labelled corpus, and every pass's numbers are in `docs/ai
 When automating GitHub PR operations:
 
 - avoid GitHub GraphQL for PR edits or metadata updates; prefer `gh pr` commands, and if those fail due GitHub GraphQL/deprecation issues, use REST via `gh api repos/<owner>/<repo>/pulls/<number>` instead
+
+<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->
+## Development rules (detent)
+
+Paths and commands named in backticks below (`specFile`, `specsDir`, …) are keys of `detent.json`
+at the repository root; read their values there.
+
+1. **The spec is the single source of truth.** Before changing behaviour, read `specFile`. If the
+   change needs a new sentence in the spec, update the spec in the same PR. When code and spec
+   disagree, the spec wins: the mismatch is a defect in the code, or a reason to change the spec
+   through the full cycle. Design specs live in `<specsDir>/<YYYY-MM>/`.
+
+2. **Classify after the probe, never on entry.** There are three paths: `spike` (commits
+   nothing), the light path, and the full cycle. The light path is allowed only when all four
+   conditions hold:
+   (a) the fix restores behaviour the spec already describes and needs no new sentence in it;
+   (b) the mechanism of the defect was proven by a live probe or a replay before classifying;
+   (c) the change fits in two files plus their tests and introduces no new concept;
+   (d) it does not change a rule that applies to all data.
+   The trace of the light path is an issue plus a commit message that names the mechanism.
+
+3. **The ratchet only goes one way.** The moment any light-path condition fails, stop. Record
+   what you have (diagnosis, probe output, draft fix, measurements) as input, and start the
+   change over through the full cycle. Never write a spec after the fact to fit a finished fix.
+   Never reclassify downwards.
+
+4. **Claim → evidence.** Every place where the system records something as fact gets a row in the
+   spec's claim → evidence table. The format is in the `detent-design-spec` skill
+   (`spec-format.md` next to its `SKILL.md`).
+
+5. **Test quality.**
+   - Exact assertions that pin the test's own fact, not the current state the next change will
+     move. No weak assertions (truthy, defined, at-least) where an exact value is known.
+   - A global value that grows with the code is pinned by exactly one test.
+   - No conditional logic in tests: no branches, no early returns; one deterministic path.
+   - No tautologies: do not compare a function with itself, do not check mock state instead of
+     the code.
+   - Cover boundaries, empty inputs and errors, not only the happy path.
+   - Do not compute the expected value by repeating production logic in the test.
+
+6. **The reviewer is not the author.** Before a PR, and before a spec goes to the owner, a model
+   of another family reviews it through `npx detent cross-review`. The protocol is in the
+   `detent-cross-review` skill.
+
+7. **Superpowers overrides** (apply only when Superpowers is installed). They name behaviour, not
+   branch names inside those skills, because branch names change between releases. These
+   overrides were checked against Superpowers 7.0.1 (brainstorming, writing-plans,
+   subagent-driven-development, executing-plans, finishing-a-development-branch,
+   using-git-worktrees, requesting-code-review); on a new Superpowers release, re-read them.
+   - `superpowers:brainstorming`:
+     - A "quick, clear task — just do it" or "small change — short doc" route does not bypass
+       classification. A behaviour change without a spec is possible only on the light path (all
+       four conditions, after the probe); everything else gets a full spec per
+       `detent-design-spec`. A human opting out of questions cancels the questions, not the spec.
+     - Sizing is the estimate game of `detent-design-spec`, not the author naming a size: the
+       question that ends your first message is the owner's size (XS–XL), and yours comes only
+       after an approach is picked.
+     - Before the owner sees a spec: builder check, then `cross-review --spec`. The builder is of
+       your family and is not the reviewer of rule 6; its questions only the owner can answer go
+       into the spec's questions for the owner, not a separate round. More than three such
+       questions means the spec is not ready: ask them in one message before the cross-review.
+     - A spike commits nothing. Specs go to `<specsDir>/<YYYY-MM>/`, never flat.
+   - `superpowers:writing-plans`: slice the plan per `detent-pr-slicing` and save it under
+     `<plansDir>/<YYYY-MM>/`. Do not ask the owner to review the plan or pick an execution method:
+     pick it per `detent-pr-slicing` and say which in one line.
+   - `superpowers:subagent-driven-development`: do a small task inline (the conditions are in
+     `detent-pr-slicing`) instead of dispatching it.
+   - `superpowers:subagent-driven-development` and `superpowers:executing-plans`: the final
+     review of a core plan is its end-to-end review: write the harness plan next, and finish the
+     branch only after the last plan. A ruling that would change the spec's owner section stops
+     the run: it is an amendment that returns the spec for approval. Never delete the plan's
+     workspace; rule 8 applies.
+   - `superpowers:finishing-a-development-branch`: do not ask for the base branch: rebase on
+     `baseBranch`, run the gate, run `cross-review`, then open the PR by default, without asking,
+     against the branch `baseBranch` names (without the remote). Only a human merges.
+
+8. **Deletion.** Never type a recursive delete as a command (`rm -r…`, `Remove-Item -Recurse`,
+   `find -delete`, `git clean`, `rmtree` and the like). Write a script file with literal absolute
+   paths and guards (fail on unset variables, refuse paths outside the folder being cleaned),
+   show the owner a dry run listing exactly what will go, and run it only after the owner says
+   yes. Never in the background. Reason: an inline cleanup whose path variable expanded to empty
+   once deleted far outside its folder.
+<!-- detent:constitution end -->

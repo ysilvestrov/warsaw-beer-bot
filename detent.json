@@ -1,0 +1,12 @@
+{
+  "language": "uk",
+  "specFile": "spec.md",
+  "specsDir": "docs/superpowers/specs",
+  "plansDir": "docs/superpowers/plans",
+  "gate": "npm test && npm run typecheck",
+  "baseBranch": "origin/main",
+  "tmpDir": "tmp",
+  "reviewers": ["codex", "claude", "agy"],
+  "models": { "codex": "gpt-6.1-sol", "agy": "gemini-4-argon" },
+  "reviewContext": "One host, SQLite, a budget of $20–40/month, a single maintainer. Merged means deployed: the host deploys main after a merge, except a PR marked [deploy:hold]."
+}
