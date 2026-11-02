@@ -218,8 +218,10 @@ Superpowers Workflow
 Follow the project's Superpowers workflow.
 
 The general process rules are in the detent block at the end of this file and in the `detent-*`
-skills; the sections below hold only what is specific to this project. `npx github:ysilvestrov/detent#<tag> install`
-updates the block and the skills: do not edit them by hand.
+skills; the sections below hold only what is specific to this project. Do not edit the block and the
+skills by hand. To update detent: `npm i -D -E @ysilvestrov/detent@<version>`, then
+`npx --no-install detent install --claude --agents`, then a PR. Dependabot does not propose it, because the
+binary and the skills must move together.
 
 Always set up an isolated worktree when developing a change.
 
@@ -301,8 +303,8 @@ The format and the estimate game are in the `detent-design-spec` skill. In this 
 that lives only in the body is a decision the owner misses: that is how "merge means deploy" went
 through in the merge-deploy spec.
 
-The spec review still uses this repo's own script: `npm run cross-review -- --spec <file> --reviewer
-claude`, with a command timeout of at least 16 minutes. The same `.codex/rules/default.rules` entry as
+The spec review: `npm run cross-review -- --author codex --spec <file>`, with a command timeout of at
+least 16 minutes. The same `.codex/rules/default.rules` entry as
 for the code review lets it reach the network.
 
 ---
@@ -415,7 +417,7 @@ For every code change:
 - **before creating the PR, fetch `main` and rebase onto it if it has moved** — `git fetch origin main`, then `git rebase origin/main`. Otherwise the rebase has to happen at merge time, and every check (CI, both builds, the AI review) runs a second time while the merge waits on them. A worktree branches from `origin/main`, so the branch starts current; the drift accumulates while the work is under way, which is why this belongs immediately before the PR rather than at the start.
 - after a rebase, **re-run the full gate** (`npm test && npm run typecheck`) before pushing — a rebase breaks a branch even when both sides were green on their own — then `git push --force-with-lease`
 - if `git fetch` fails with `GitHub is temporarily limiting some unauthenticated downloads`, that is #583, not the network: the repo is public, so GitHub never returns a 401 and git therefore never offers credentials. The working form is `git -c http.extraHeader="Authorization: Basic $(printf 'x-access-token:%s' "$(gh auth token)" | base64 -w0)" fetch origin main`. `git push` is unaffected — a push always authenticates.
-- **before creating the PR, have Claude cross-review the branch** (in this repo rule 6 of the detent block still runs through this repo's own script, not `npx detent cross-review`): once the solution is ready (gate green, rebase done), run `npm run cross-review -- --reviewer claude` with a command timeout of at least 16 minutes (the review may take up to 15): a shell-tool timeout kills the process before it cleans up, leaving its snapshot worktree in `tmp/`. Claude reviews the branch diff against `origin/main` read-only (`--restricted`, Read/Grep/Glob only); the report lands in `tmp/cross-review-claude-<branch>-<sha>-XXXXXX/report.md` (the script prints the path). The repo's `.codex/rules/default.rules` allows this command, so it reaches the network without a manual approval; if it fails with `no network`, the rule was not loaded — ask the user to approve the escalation. Verify **each** finding like a GH review comment: fix it or reject it with a reason, never apply findings blindly; commit fixes and re-run the gate. The PR body carries the marker `Cross-review: claude @ <sha> — <n> findings: <f> fixed, <r> rejected` (the script prints a template). Once per PR — not per commit, not after fixes to an open PR. A docs-only PR says `Cross-review: skipped (docs-only)`. A reviewer failure (exit 5) does not block the PR: the marker says `Cross-review: failed (<reason>)` and the GH review remains the gate. Why: every push to a PR runs the paid GH AI reviewer; local agents run on flat subscriptions, so catching a finding before the PR saves a paid round. The marker is self-reported and gates nothing — it exists to count the effect later. Design: `docs/superpowers/specs/2026-09/2026-09-29-cross-review-design.md`. When editing the script, keep the codex direction pinned to a Sol-class model (`DEFAULT_MODEL` in `scripts/cross-review/core.ts`): the Codex CLI default moves with updates, and Astra costs far more tokens for no better review.
+- **before creating the PR, have another model cross-review the branch** (the protocol: rule 6 of the detent block and the `detent-cross-review` skill): once the solution is ready (gate green, rebase done), run `npm run cross-review -- --author codex` with a command timeout of at least 16 minutes (the review may take up to 15). In this repo use this alias of `detent cross-review` rather than the form the block names: the repo's `.codex/rules/default.rules` allows this command, so it reaches the network without a manual approval; if it fails with `no network`, the rule was not loaded — ask the user to approve the escalation. Why: every push to a PR runs the paid GH AI reviewer; local agents run on flat subscriptions, so catching a finding before the PR saves a paid round. Design: `docs/superpowers/specs/2026-09/2026-09-29-cross-review-design.md`; the move to detent: `docs/superpowers/specs/2026-11/2026-11-02-detent-cross-review-migration-design.md`.
 - create the PR
 - after creating the PR, wait for review comments/checks to complete before reporting final status
 - evaluate review comments technically before changing code
@@ -441,7 +443,7 @@ When automating GitHub PR operations:
 
 - avoid GitHub GraphQL for PR edits or metadata updates; prefer `gh pr` commands, and if those fail due GitHub GraphQL/deprecation issues, use REST via `gh api repos/<owner>/<repo>/pulls/<number>` instead
 
-<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->
+<!-- detent:constitution v1 begin — edit outside these markers; `npx -y @ysilvestrov/detent install` rewrites this block -->
 ## Development rules (detent)
 
 Paths and commands named in backticks below (`specFile`, `specsDir`, …) are keys of `detent.json`
@@ -481,8 +483,8 @@ at the repository root; read their values there.
    - Do not compute the expected value by repeating production logic in the test.
 
 6. **The reviewer is not the author.** Before a PR, and before a spec goes to the owner, a model
-   of another family reviews it through `npx detent cross-review`. The protocol is in the
-   `detent-cross-review` skill.
+   of another family reviews it through `npx -y @ysilvestrov/detent cross-review`. The protocol is
+   in the `detent-cross-review` skill.
 
 7. **Superpowers overrides** (apply only when Superpowers is installed). They name behaviour, not
    branch names inside those skills, because branch names change between releases. These
