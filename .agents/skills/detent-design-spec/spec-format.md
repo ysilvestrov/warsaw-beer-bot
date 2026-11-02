@@ -47,8 +47,8 @@ Status: draft | awaiting approval | approved YYYY-MM-DD
 Spec-review: <reviewer>/<model> @ <sha7> (author: <author>) — <n> findings: <f> fixed, <r> rejected
 ```
 
-The `Spec-review:` line is printed by `npx detent cross-review --spec <file>`; fill in `<f>` and
-`<r>`. A failure prints `Spec-review: failed (…)`; copy it as is.
+The `Spec-review:` line is printed by `npx -y @ysilvestrov/detent cross-review --spec <file>`;
+fill in `<f>` and `<r>`. A failure prints `Spec-review: failed (…)`; copy it as is.
 
 ## Owner section
 
@@ -113,8 +113,8 @@ is weak: probe it live before the plan, or do not make the claim at all.
 ## Spec review
 
 After the probes and before the owner reads the spec, run the review by a model of another family:
-`npx detent cross-review --spec <file>`, per the `detent-cross-review` skill (author flag,
-background run, failures).
+`npx -y @ysilvestrov/detent cross-review --spec <file>`, per the `detent-cross-review` skill
+(author flag, background run, failures).
 
 The spec must be committed: the review is bound to the SHA. Once per spec; amendments after
 approval do not rerun it.

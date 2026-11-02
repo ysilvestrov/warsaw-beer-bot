@@ -20,9 +20,13 @@ updates:
     # The `better-sqlite3` 13 and `undici` 8 holds are GONE: they required Node
     # >= 22 / >= 22.19 and the host now runs 24 (#458). Dependabot will re-propose
     # both majors; `ci` decides, on 24.
+    #
+    # detent moves only by hand: a bump goes with `detent install`, which Dependabot does
+    # not run, or the binary and the installed skills drift apart.
     ignore:
       - dependency-name: stream-json
         update-types: ["version-update:semver-major"]
+      - dependency-name: "@ysilvestrov/detent"
 
   - package-ecosystem: npm
     directory: "/extension"

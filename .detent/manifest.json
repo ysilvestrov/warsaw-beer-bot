@@ -1,55 +1,55 @@
 {
-  "detentVersion": "0.2.1",
+  "detentVersion": "0.3.0",
   "files": {
     ".agents/skills/detent-cross-review/SKILL.md": {
-      "sha256": "5ed931c36b7b53c553ed413f32486ac6b6f513d90aa98668de5588c63936b2b3",
-      "version": "0.2.1"
+      "sha256": "cb186faa68ff17fcb79ad9fa054f0c764455114566ff037faf8cc75d70944e70",
+      "version": "0.3.0"
     },
     ".agents/skills/detent-design-spec/SKILL.md": {
-      "sha256": "8103856af168aced5c7b69a4595f20404c923249c69f7e9da3c5255ee0c63ed3",
-      "version": "0.2.1"
+      "sha256": "a66e1873c601ab5e64670e1a07743d0d1d75490b4e1f41e0800c26415e259692",
+      "version": "0.3.0"
     },
     ".agents/skills/detent-design-spec/spec-format.md": {
-      "sha256": "a16ef50db43349837a25fc8e7ad6038a280cb2cfbe604eb8a05632032eafc4bd",
-      "version": "0.2.1"
+      "sha256": "6f7b5655feffa34545d88480d6639863e968416fe487ef389dca91dd795d066d",
+      "version": "0.3.0"
     },
     ".agents/skills/detent-dev-cycle/SKILL.md": {
-      "sha256": "d56ed6421689a31f0e8d2835cc6cb0b2dc37f3e566e91a2cc6bec964222e789f",
-      "version": "0.2.1"
+      "sha256": "95ca1a70e6091c9a164f1d12f86d88cb9eb27be4adebecdf7a0355e910864b77",
+      "version": "0.3.0"
     },
     ".agents/skills/detent-pr-slicing/SKILL.md": {
       "sha256": "4d3878c788fed56fa4b689e3f00c4fad00fe4ea2740c6cac6c3ea7fd046ef9cb",
-      "version": "0.2.1"
+      "version": "0.3.0"
     },
     ".claude/skills/detent-cross-review/SKILL.md": {
-      "sha256": "9f85d08ab18c3994085ff15862d9e53285ea1dc5dfeb82d65d1e0448f43e59e3",
-      "version": "0.2.1"
+      "sha256": "e8d3159842babcb9fcd27cdad6dd3fedcb73c24a903f2f059de558b23d1278c5",
+      "version": "0.3.0"
     },
     ".claude/skills/detent-design-spec/SKILL.md": {
-      "sha256": "8103856af168aced5c7b69a4595f20404c923249c69f7e9da3c5255ee0c63ed3",
-      "version": "0.2.1"
+      "sha256": "a66e1873c601ab5e64670e1a07743d0d1d75490b4e1f41e0800c26415e259692",
+      "version": "0.3.0"
     },
     ".claude/skills/detent-design-spec/spec-format.md": {
-      "sha256": "a16ef50db43349837a25fc8e7ad6038a280cb2cfbe604eb8a05632032eafc4bd",
-      "version": "0.2.1"
+      "sha256": "6f7b5655feffa34545d88480d6639863e968416fe487ef389dca91dd795d066d",
+      "version": "0.3.0"
     },
     ".claude/skills/detent-dev-cycle/SKILL.md": {
-      "sha256": "d56ed6421689a31f0e8d2835cc6cb0b2dc37f3e566e91a2cc6bec964222e789f",
-      "version": "0.2.1"
+      "sha256": "95ca1a70e6091c9a164f1d12f86d88cb9eb27be4adebecdf7a0355e910864b77",
+      "version": "0.3.0"
     },
     ".claude/skills/detent-pr-slicing/SKILL.md": {
       "sha256": "4d3878c788fed56fa4b689e3f00c4fad00fe4ea2740c6cac6c3ea7fd046ef9cb",
-      "version": "0.2.1"
+      "version": "0.3.0"
     }
   },
   "blocks": {
     "AGENTS.md": {
-      "sha256": "5537b58f25b74c4af0bd43d2711d1aceae38e0c70e7e14a5481acbb31a7736ee",
-      "version": "0.2.1"
+      "sha256": "a8989b9f5347bbc3d559f82832b1ec4d5bb98d62b4b38706f38246f85900ac73",
+      "version": "0.3.0"
     },
     "CLAUDE.md": {
-      "sha256": "5537b58f25b74c4af0bd43d2711d1aceae38e0c70e7e14a5481acbb31a7736ee",
-      "version": "0.2.1"
+      "sha256": "a8989b9f5347bbc3d559f82832b1ec4d5bb98d62b4b38706f38246f85900ac73",
+      "version": "0.3.0"
     }
   }
 }

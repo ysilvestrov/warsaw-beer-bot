@@ -8,5 +8,5 @@
   "tmpDir": "tmp",
   "reviewers": ["codex", "claude", "agy"],
   "models": { "codex": "gpt-6.1-sol", "agy": "gemini-4-argon" },
-  "reviewContext": "One host, SQLite, a budget of $20–40/month, a single maintainer. Merged means deployed: the host deploys main after a merge, except a PR marked [deploy:hold]."
+  "reviewContext": "One host, SQLite, a budget of $20–40/month, a single maintainer. Merged means deployed: the host deploys main after a merge, except a PR marked [deploy:hold]. Besides the detent block, CLAUDE.md holds this project's rules: read them, the Testing bullet above all. The platform: systemd, litestream, sqlite."
 }

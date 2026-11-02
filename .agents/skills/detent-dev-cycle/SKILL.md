@@ -7,7 +7,7 @@ description: Only when invoked explicitly.
 
 This skill runs only when invoked explicitly: by name (`/detent-dev-cycle`), or through the
 constitution line "Without Superpowers, start any behaviour change with `detent-dev-cycle`",
-which `npx detent install` adds only to projects where it found no Superpowers.
+which `npx -y @ysilvestrov/detent install` adds only to projects where it found no Superpowers.
 
 Write every artifact (spec, plan, messages to the owner) in the `language` from `detent.json`.
 

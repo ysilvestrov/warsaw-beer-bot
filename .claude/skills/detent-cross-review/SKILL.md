@@ -1,6 +1,6 @@
 ---
 name: detent-cross-review
-description: Use when a design spec is committed and about to go to the owner, or when the gate is green, the branch is rebased and a PR is about to be opened. Runs `npx detent cross-review` by a model of another family and covers the author flag, the background run, the marker, triage of findings and reviewer failures.
+description: Use when a design spec is committed and about to go to the owner, or when the gate is green, the branch is rebased and a PR is about to be opened. Runs `npx -y @ysilvestrov/detent cross-review` by a model of another family and covers the author flag, the background run, the marker, triage of findings and reviewer failures.
 ---
 
 # Cross-review: the reviewer is not the author
@@ -28,8 +28,8 @@ its description.
 ## Run
 
 ```
-npx detent cross-review --author <id>                # the branch against baseBranch
-npx detent cross-review --author <id> --spec <file>  # a committed spec
+npx -y @ysilvestrov/detent cross-review --author <id>                # the branch against baseBranch
+npx -y @ysilvestrov/detent cross-review --author <id> --spec <file>  # a committed spec
 ```
 
 - Run it **in the background** and wait for it to finish. A review takes up to 15 minutes, and

@@ -31,8 +31,8 @@ and premise tags included (`spec-format.md` → "Language"). Save it under
    is already answered or minor yourself; put what only the owner can answer into "Questions for
    the owner". More than three such questions means the spec is not ready: ask the owner before
    the cross-review, in one message.
-7. **Commit, then cross-review.** Run `npx detent cross-review --spec <file>` per the
-   `detent-cross-review` skill. Fix or reject each finding with a reason. Put the printed
+7. **Commit, then cross-review.** Run `npx -y @ysilvestrov/detent cross-review --spec <file>`
+   per the `detent-cross-review` skill. Fix or reject each finding with a reason. Put the printed
    `Spec-review:` line in the header (fill in fixed / rejected) and the decision table in the
    last section. Set the status to "awaiting approval", commit, and hand the spec to the owner.
    If the review failed, say so to the owner in your message.
