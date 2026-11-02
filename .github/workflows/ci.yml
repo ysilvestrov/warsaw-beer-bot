@@ -17,7 +17,9 @@ concurrency:
 jobs:
   build:
     name: build (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: on 26.04 /usr/sbin/visudo is visudo-rs, which refuses the wildcard
+    # arguments of deploy/sudoers.d/wbb-release, so test_visudo_accepts_wbb_release fails.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
