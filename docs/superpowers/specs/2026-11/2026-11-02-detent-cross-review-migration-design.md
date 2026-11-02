@@ -1,7 +1,7 @@
 # Перехід на `detent cross-review`: прибрати власний скрипт рев'ю
 
 Дата: 2026-11-02
-Статус: чекає на затвердження
+Статус: затверджено 2026-11-02
 Spec-review: codex/gpt-6.1-sol @ 10accb4 (author: claude) — 1 findings: 1 fixed, 0 rejected
 
 ## Для власника
