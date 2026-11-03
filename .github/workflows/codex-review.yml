@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
 
     # #435: a Dependabot PR leaves exactly one file in review scope —
-    # package.json, whose diff is version-range strings (IGNORE_PATTERNS at
-    # scripts/ai-pr-review.ts:22 already drops package-lock.json). A reviewer
+    # package.json, whose diff is version-range strings (`prReview.ignore` in
+    # detent.json already drops package-lock.json). A reviewer
     # built to find correctness bugs in code gets a diff with no code. And with
     # auto-merge armed the PR merges on the required checks, so any comment
     # lands on something already merged and deployed — there is no point at
@@ -27,35 +27,7 @@ jobs:
     if: github.event.pull_request.user.login != 'dependabot[bot]'
 
     steps:
-      - name: Checkout PR head
-        uses: actions/checkout@v7
+      # A commit, not a tag, because this action receives the key.
+      - uses: ysilvestrov/detent@0fde6d45a80f5232dabfb6df974339518c7e28c9 # v0.4.0
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: AI code review
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_ENDPOINT: https://api.openai.com/v1
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          set -euo pipefail
-          # Full base history is needed for the triple-dot (origin/base...HEAD) diffs
-          # the script runs; the checkout above already used fetch-depth: 0.
-          git fetch origin "$BASE_REF"
-          npx tsx scripts/ai-pr-review.ts
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}

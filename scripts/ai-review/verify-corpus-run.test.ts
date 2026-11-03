@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { EMPTY_USAGE } from './usage';
+import { EMPTY_USAGE } from '@ysilvestrov/detent/pr-review';
 import { gitBody, groupEntries, runDraw } from './verify-corpus-run';
 import type { CorpusEntry } from './verify-corpus';
 

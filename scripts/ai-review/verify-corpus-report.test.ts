@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_USAGE } from './usage';
+import { EMPTY_USAGE } from '@ysilvestrov/detent/pr-review';
 import { formatReport } from './verify-corpus-report';
 import { resolveArgs } from './verify-corpus-cli';
 import type { EntryOutcome } from './verify-corpus-run';

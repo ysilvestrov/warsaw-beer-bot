@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
-    "ai-review-replay": "tsx scripts/ai-review/replay.ts",
+    "ai-review-replay": "detent pr-review --replay",
     "verify-corpus": "tsx scripts/ai-review/verify-corpus-cli.ts",
     "cross-review": "detent cross-review",
     "alias-key": "tsx scripts/brewery-alias-key.ts",

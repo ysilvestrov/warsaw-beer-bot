@@ -37,10 +37,11 @@ A config that is quiet looks excellent on precision alone. Measure both or neith
 
 ```
 export OPENAI_API_KEY=…                 # not in .env; it is a GitHub secret
-export OPENAI_API_ENDPOINT=https://api.openai.com/v1
 AI_REVIEW_MODEL=<candidate> AI_REVIEW_VERIFY_MODEL=<candidate> \
-  npm run ai-review-replay -- <pr> [base-sha]
+  npm run ai-review-replay -- <pr> [--base <sha>] [--provider <id>]
 ```
+
+Since the move to `@ysilvestrov/detent` this runs `detent pr-review --replay`; another vendor is `--provider` with its own key, not `OPENAI_API_ENDPOINT`. The results log below keeps the paths and commands of its day.
 
 `replay` posts nothing and reads file bodies from the PR head via `git show`, so it never
 touches the working tree. `--head <sha>` replays at an arbitrary commit (see the recall

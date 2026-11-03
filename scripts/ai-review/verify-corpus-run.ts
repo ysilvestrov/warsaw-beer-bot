@@ -5,10 +5,8 @@
  * Design: docs/superpowers/specs/2026-09/2026-09-23-verify-corpus-and-runner-design.md
  */
 import { execFileSync } from 'node:child_process';
-import type { OpenAiDeps } from './openai';
-import { EMPTY_USAGE, addUsage, type Usage } from './usage';
+import { EMPTY_USAGE, addUsage, type OpenAiDeps, type Usage, type verifyAll } from '@ysilvestrov/detent/pr-review';
 import type { CorpusEntry } from './verify-corpus';
-import type { verifyAll } from './verify';
 
 export interface CorpusGroup {
   sha: string;

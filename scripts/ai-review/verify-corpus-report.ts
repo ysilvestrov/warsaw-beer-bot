@@ -7,7 +7,7 @@
  * are therefore split by expected verdict and by provenance, and a model that
  * fails the `confirmed` row is rejected whatever the `refuted` row says.
  */
-import { formatTokens, type Usage } from './usage';
+import { formatTokens, type Usage } from '@ysilvestrov/detent/pr-review';
 import type { EntryOutcome } from './verify-corpus-run';
 
 /**

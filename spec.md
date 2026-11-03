@@ -3449,8 +3449,8 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 `docs/superpowers/plans/2026-07/2026-07-28-ai-review-quality.md`,
 `docs/superpowers/specs/2026-07/2026-07-28-ai-review-measurement.md`.
 
-- **Двоетапний пайплайн.** `scripts/ai-pr-review.ts` оркеструє чотири чисті
-  кроки з `scripts/ai-review/`: `find` — жадібний прохід, що просить модель
+- **Двоетапний пайплайн.** `detent pr-review` (пакет `@ysilvestrov/detent`, настройки в `prReview` у `detent.json`, промпти в `.detent/prompts/`) оркеструє чотири чисті
+  кроки: `find` — жадібний прохід, що просить модель
   віддати **все** підозріле як structured JSON (кожне зауваження несе дослівну
   `quote` з коду, не переказ); `gate` — механічний фільтр без мережі; `verify` —
   окремий adversarial-прохід, що виносить вердикт по кожному зауваженню, яке
@@ -3529,7 +3529,7 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   closed, потім найменш серйозні відкриті), і тіло **прямо каже**, скільки
   зауважень приховано. Без кумулятивності інкрементальний прогін стирав би ще
   відкриті зауваження минулого.
-- **Контекст:** `scripts/ai-review/context.ts` шле моделі і діф, і повний HEAD-вміст
+- **Контекст:** `src/pr-review/context.ts` пакета detent шле моделі і діф, і повний HEAD-вміст
   змінених файлів (кожного, чий `readFile` не повернув `null` — див. виняток для
   тестових файлів нижче), у порядку спадання churn (додані+видалені рядки), поки не
   вичерпається бюджет `CONTEXT_BUDGET` (240 000 символів). Бюджет рахує **все
@@ -3545,9 +3545,9 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 
   Тіло тестового файлу не потрапляє у зібраний **find-контекст**: у нього йде лише діф,
   знахідки в тестовому файлі лишаються легальними, і сам файл потрапляє у список «Files
-  where you see only the diff» (`BODY_EXCLUDE_PATTERNS`, `isBodyExcluded` і `contextReader`,
-  усі три — `scripts/ai-pr-review.ts`, застосовуються обома викликачами `buildReviewContext`:
-  `scripts/ai-pr-review.ts` і `scripts/ai-review/replay.ts`). Патерни суворо анкеровані (`**/*.test.ts`,
+  where you see only the diff» (`prReview.bodyExclude` і `prReview.bodyInclude` у `detent.json`,
+  застосовуються обома викликачами `buildReviewContext`: запуском у CI і
+  `detent pr-review --replay`). Патерни суворо анкеровані (`**/*.test.ts`,
   `tests/**/*.ts`, `extension/tests/**/*.ts`, `deploy/release/test_*.py`, `deploy/release/release_testkit.py`,
   `scripts/ops/test_*.py`), щоб уникнути хибного збігу з нетестовими файлами.
   Функція `isBodyExcluded` містить **явний захист** для `scripts/ops/test_run.py`: це
@@ -3564,7 +3564,7 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   і так несе. Виняток діє **лише**
   на збірку find-контексту: гейт і verify читають справжній файл, інакше кожне
   зауваження в тесті стало б `quote_not_found`.
-- **Скоуп рев'ю (`INCLUDE_PATTERNS`, оновлено в #816, #526).** Охоплює TS (`src`, `tests`,
+- **Скоуп рев'ю (`prReview.include`, оновлено в #816, #526).** Охоплює TS (`src`, `tests`,
   `scripts`, `extension`), Python (`scripts`, `deploy`, `extension`), Shell (`scripts`, `deploy`),
   CJS (`deploy`), та UI HTML/CSS (`extension/src`, `src/api`). Файли `deploy/*.service`,
   `deploy/*.path`, конфіги, `site/` та `deploy/sudoers.d/*` залишаються поза межами рев'ю.
@@ -3581,7 +3581,7 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
     Підрахунок ведеться по `decision.prSpec` (за весь PR) і не включає свідомо
     ігноровану документацію (`docs/**`, `*.md`).
 - **Механічний gate (`gate.ts`, чистий, без мережі).** Відкидає зауваження, якщо:
-  файл поза скоупом (`INCLUDE_PATTERNS`/`IGNORE_PATTERNS`, той самий
+  файл поза скоупом (`prReview.include`/`prReview.ignore`, той самий
   `globToRegExp`, що й раніше); `quote` не знаходиться дослівно (whitespace-
   normalised) у HEAD-вмісті файлу (`quote_not_found`); **жодне** входження цитати
   не перетинається зі зміненими рядками діфу (`outside_changed_lines`, з
@@ -3629,13 +3629,13 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   lookup не скасовує прямої спроби створення. Загальний 10-секундний бюджет
   fallback розділено на 2 секунди для lookup і зарезервовані 8 секунд для
   create/update; невдала публікація коментаря не маскує первинну помилку.
-- **Offline replay:** `npm run ai-review-replay -- <pr> [base-sha] [--head <sha>]` ганяє
-  весь пайплайн (з `base-sha` — саме той інкрементальний зріз, який побачив би CI на
+- **Offline replay:** `npm run ai-review-replay -- <pr> [--base <sha>] [--head <sha>]` ганяє
+  весь пайплайн (з `--base` — саме той інкрементальний зріз, який побачив би CI на
   відповідному push, інакше — перше рев'ю від merge-base)
   проти вже існуючого PR (діф + HEAD-вміст через `git show`) без постингу — той
   самий інструмент, яким виміряно вибір моделей вище. Дефолти моделей —
-  **ті самі константи** (`DEFAULT_FIND_MODEL`/`DEFAULT_VERIFY_MODEL` з
-  `ai-pr-review.ts`), інакше replay міряв би конфігурацію, якої CI не запускає.
+  **ті самі значення** (`PROVIDERS` з
+  `src/pr-review/providers.ts` пакета detent), інакше replay міряв би конфігурацію, якої CI не запускає.
   Якщо head-коміта PR немає локально, replay сам робить
   `git fetch origin pull/<pr>/head` (і каже про це), замість падати на
   відсутньому об'єкті. `--head <sha>` перекриває, який коміт вважати HEAD PR-а —

@@ -13,12 +13,10 @@
  * wrong lines. See I5, final review fix wave.
  */
 import { readFileSync } from 'node:fs';
-import { DEFAULT_MAX_COMPLETION_TOKENS } from './openai';
-import { addUsage, costUsd, EMPTY_USAGE } from './usage';
+import { DEFAULT_MAX_COMPLETION_TOKENS, addUsage, costUsd, EMPTY_USAGE, verifyAll } from '@ysilvestrov/detent/pr-review';
 import { loadCorpus, type CorpusEntry } from './verify-corpus';
 import { formatReport } from './verify-corpus-report';
 import { gitBody, runDraw, type EntryOutcome } from './verify-corpus-run';
-import { verifyAll } from './verify';
 
 export interface ResolvedArgs {
   check: boolean;
@@ -152,7 +150,7 @@ async function main(): Promise<void> {
   const entries = only ? all.filter((e) => e.id.startsWith(only)) : all;
   if (entries.length === 0) throw new Error(`--only ${only} matched no entry`);
 
-  const instructions = readFileSync('.github/ai-review/VERIFY.md', 'utf8');
+  const instructions = readFileSync('.detent/prompts/pr-review-verify.md', 'utf8');
   const results: EntryOutcome[][] = [];
   let usage = EMPTY_USAGE;
 

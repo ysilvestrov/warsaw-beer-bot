@@ -17,7 +17,7 @@ export interface GithubIssuesClient {
   setIssueBody(issueNumber: number, body: string): Promise<void>;
 }
 
-// Minimal GitHub REST client (plain fetch, same style as scripts/ai-pr-review.ts).
+// Minimal GitHub REST client (plain fetch).
 // The triage job files at most a handful of requests per day, so no pagination
 // beyond per_page=100 and no rate-limit handling — a failure surfaces in the
 // digest and retries tomorrow.
