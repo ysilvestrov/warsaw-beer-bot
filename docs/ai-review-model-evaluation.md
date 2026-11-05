@@ -52,7 +52,7 @@ From detent 0.5.0 a replay also takes the following. This repo still pins 0.4.0,
 - `--record <file>` appends one JSON line per API call and per run, with the usage the provider reported. Scores and spend are then read from the file, not from a terminal.
 - `--find-only --save-findings <file>`, then `--verify-from <file>`, judges saved findings. It is the only way to compare judges without find's variance.
 - `AI_REVIEW_OPENROUTER_ONLY` and `AI_REVIEW_VERIFY_OPENROUTER_ONLY`, or `prReview.openrouterOnly` `{find, verify}` in `detent.json`, pin the host per stage (precondition 2). With another provider they exit 2.
-- `AI_REVIEW_FIND_MAX_TOKENS` and `AI_REVIEW_FIND_REASONING` tune find for a model that spends its limit on reasoning.
+- `AI_REVIEW_FIND_MAX_TOKENS` and `AI_REVIEW_FIND_REASONING` tune find for a model that spends its limit on reasoning. They work in a replay only: a real review keeps 8,000.
 - `AI_REVIEW_CACHE=on` keeps the paid cache writes that are off by default on direct OpenAI for `gpt-5.6-sol`, `gpt-6.1-terra` and `gpt-6.1-sol`. Spend measured with and without them is not the same number.
 
 A whole pass against a spend ceiling is `scripts/eval/funnel.mjs` in detent, and `scripts/eval/summary.mjs` prints its tables.
@@ -234,7 +234,7 @@ and a candidate that **returns empty or truncated completions**, which is usuall
 unpinned endpoint not honouring `strict` rather than the model being unable. Diagnose the
 second with precondition 1 before blaming the model. Then check the token limit: on 2026-11-05 the owner's guess held that several OpenRouter
 models spend it on reasoning (`AI_REVIEW_FIND_MAX_TOKENS`, `AI_REVIEW_FIND_REASONING`), and
-raising it brought two of them back while others stayed empty. An empty list with a normal
+raising it to 32,000 brought two of them back; at 64,000 all six tried finished. An empty list with a normal
 finish, as `gemini-3.8-flash` gave, reads like a clean review, so look at the completion
 tokens before crediting a quiet run.
 
@@ -918,3 +918,56 @@ its row can move.
 
 The protocol changed with this entry: precondition 4, the second probe, D5, `Setup` and the
 settled outcomes. The numbers above in this log stay as they were.
+
+## 2026-11-05, token ladder — how much the cut models need, outside the big test
+
+The big test's second try stopped at a limit of 32,000, so "cut" there said nothing about what
+the models need. This pass answers only that: find on #418 at `584aa661`, limit 64,000, going to
+128,000 only if cut again. It ran after the owner closed the test, outside its ledger and its
+report. Hosts were not pinned, so a difference from the entry above can be the model or the host
+(precondition 2). The scores below were made inline by the agent that ran the pass and not blind,
+unlike the entry above, with the claims checked against `584aa661` only. No judge, #930 or corpus.
+
+Nothing reached 128,000, and every completion finished with `stop`.
+
+| Model | Output | Reasoning | Raised, after the gate | Cost | Host | Output at 32,000 before |
+|---|---|---|---|---|---|---|
+| `deepseek-v4.1-flash-1017` | 24.7k | 22.2k | 8, 6 | $0.026 | DigitalOcean | cut (DeepInfra) |
+| `kimi-k3.1-pro` | 28.6k | 26.8k | 9, 9 | $0.332 | InferenceNet | cut (Moonshot AI) |
+| `qwen3.8-flash` | 29.8k | 25.4k | 15, 12 | $0.021 | Alibaba | cut (Alibaba) |
+| `qwen3.8-max-0902` | 30.1k | 27.7k | 14, 12 | $0.270 | Alibaba | cut (Alibaba) |
+| `hy4-preview` | 33.2k | 33.2k | 0, 0 | $0.119 | Cohere | 23.0k, 30.3k, cut (AtlasCloud) |
+| `glm-5.3-flashx-legal` | 50.1k | 46.6k | 12, 7 | $0.078 | Z.AI | cut (Z.AI) |
+
+- **The need is not a stable number.** Four models cut at 32,000 now finished under it. So a
+  limit has to sit far above one draw's output.
+- **`hy4-preview` returned `{"findings":[]}`** after 33.2k of reasoning, with `stop` and exit 0, on
+  a head with five known defects. It reads as a clean review. Its two finished draws at AtlasCloud
+  raised 8 and 4, so one draw does not separate the model from the host.
+- **Speed follows the host.** `kimi-k3.1-pro` took about 23 minutes for 32,000 on Moonshot AI and
+  about 6 for 28.6k on InferenceNet. The candidate list's "host Moonshot only" is out of date.
+
+Only two models were scored, as the cheapest:
+
+| Model, draw | D1 | D2 | D3 | D4 | D5 | After the gate | Output | Cost |
+|---|---|---|---|---|---|---|---|---|
+| `qwen3.8-flash`, 1 | cut by the gate | yes | yes | yes | yes | 4 | 29.8k | $0.021 |
+| `qwen3.8-flash`, 2 | yes | yes | yes | yes | no | 4 | 61.9k | $0.036 |
+| `qwen3.8-flash`, 3 | yes | yes | no | yes | yes | 4 | 20.9k | $0.011 |
+| `deepseek-v4.1-flash-1017`, 1 | yes | no | no | no | yes | 2 | 24.7k | $0.026 |
+
+`qwen3.8-flash` per draw is 4, 4, 4 and its union is 5 of 5, counting the D1 in draw 1 that
+`quote_not_found` cut: the model wrote real line breaks where the source has `\n\n`. Its draws
+against the entry above are not like for like, given who scored them. Draw 2 stopped 2k under the
+limit, so 64,000 is not a safe limit for it either.
+
+It is the strongest of the second-try models on this one probe and it stays unmeasured for
+fabrication, with 10 to 13 findings a draw after the gate that nobody labelled. It also cannot be
+a profile yet: `AI_REVIEW_FIND_MAX_TOKENS` is replay only, so a real review would still cut it.
+If the `openrouter` row is ever wanted, it is the first candidate, and it needs a code change and
+the full measurement.
+
+Spend was $0.89 for eight calls. OpenRouter's activity page, read before the last two draws,
+showed $5.81 and 68 requests against $5.455 and 64 in the records. The gap of $0.355 and four
+requests sits in the bar for 2026-11-03, before the records start. It looks like probes, not
+confirmed, and if so it is also missing from the big test's $27.48.
