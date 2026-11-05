@@ -32,6 +32,9 @@ from deploy_state import Pre  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEPLOY = os.path.dirname(HERE)
 SUDOERS = os.path.join(DEPLOY, 'sudoers.d')
+# The grammar the host reads: classic sudo. On Ubuntu 26.04 /usr/sbin/visudo is visudo-rs, which refuses the wildcard
+# arguments of these files (#947), and the classic one, when installed, is visudo.ws. Neither is present: skipped.
+VISUDO = next((p for p in ('/usr/sbin/visudo.ws', '/usr/sbin/visudo') if os.access(p, os.X_OK)), None)
 OPERATOR = 'ysi'
 SHA = 'c' * 40
 PRE_NAME = '20251010T080000Z-ccccccc-pre.db'
@@ -254,9 +257,9 @@ class SudoersSyntaxCheck(unittest.TestCase):
                 with self.assertRaises(SudoersSyntax):
                     parse(text)
 
-    @unittest.skipUnless(os.access('/usr/sbin/visudo', os.X_OK), 'no visudo here: the minimal parser above checks')
+    @unittest.skipUnless(VISUDO, 'no visudo here: the minimal parser above checks')
     def test_visudo_accepts_wbb_release(self):
-        r = subprocess.run(['/usr/sbin/visudo', '-cf', os.path.join(SUDOERS, 'wbb-release')],
+        r = subprocess.run([VISUDO, '-cf', os.path.join(SUDOERS, 'wbb-release')],
                            capture_output=True, text=True, timeout=30)
         self.assertEqual((r.returncode, r.stderr), (0, ''))
 
