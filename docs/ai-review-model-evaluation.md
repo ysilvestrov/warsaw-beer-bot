@@ -47,6 +47,16 @@ Since the move to `@ysilvestrov/detent` this runs `detent pr-review --replay`; a
 touches the working tree. `--head <sha>` replays at an arbitrary commit (see the recall
 probe, which needs it).
 
+From detent 0.5.0 a replay also takes the following. This repo still pins 0.4.0, so until the bump they run from a detent clone.
+
+- `--record <file>` appends one JSON line per API call and per run, with the usage the provider reported. Scores and spend are then read from the file, not from a terminal.
+- `--find-only --save-findings <file>`, then `--verify-from <file>`, judges saved findings. It is the only way to compare judges without find's variance.
+- `AI_REVIEW_OPENROUTER_ONLY` and `AI_REVIEW_VERIFY_OPENROUTER_ONLY`, or `prReview.openrouterOnly` `{find, verify}` in `detent.json`, pin the host per stage (precondition 2). With another provider they exit 2.
+- `AI_REVIEW_FIND_MAX_TOKENS` and `AI_REVIEW_FIND_REASONING` tune find for a model that spends its limit on reasoning.
+- `AI_REVIEW_CACHE=on` keeps the paid cache writes that are off by default on direct OpenAI for `gpt-5.6-sol`, `gpt-6.1-terra` and `gpt-6.1-sol`. Spend measured with and without them is not the same number.
+
+A whole pass against a spend ceiling is `scripts/eval/funnel.mjs` in detent, and `scripts/eval/summary.mjs` prints its tables.
+
 Probe `/v1/models` with the key before assuming a model name exists. It is free, and the
 key's reachable set has twice been wider than assumed.
 
@@ -56,6 +66,8 @@ PRs **#344, #348, #352, #356, #358**, labelled in
 `docs/superpowers/specs/2026-07/2026-07-28-ai-review-baseline-labels.md`. Replay each at its
 own head, then check **every published finding against that tree** with
 `git show <head>:<path>` before labelling it. Never label from the claim text.
+
+Run the section 5 check on each PR first. A starved PR drops out of the pass: on 2026-11-05 #348 sent `src/domain/pacific-day.ts` and `src/sources/google/resolver.ts` as diff only, so that pass used the other four.
 
 Labels, unchanged since 2026-07 — changing them between evaluations destroys comparability:
 
@@ -94,6 +106,22 @@ there, never from a summary:
 
 Score a config by how many of the five it publishes, judged on the **mechanism**, not the
 wording — and check the claim against both trees before crediting it.
+
+> **D5 read broadly since 2026-11-04 (the owner's ruling).** A finding earns D5 if it says the
+> tool schema is wider than zod (`col`, `op` or `value`) and that a term zod rejects therefore
+> fails the whole run, not only the term. A finding that only says a value is not validated
+> does not earn it. Log entries before 2026-11-05 scored the narrower wording above, so their
+> D5 and their totals are not directly comparable with later ones.
+
+**Second probe: PR #930 at `a5926a74`**, the head of the 2026-10-30 review, held out from
+model selection so that a config fitted to #418 shows. The next commit, `977fab49` "address AI
+review", closes three findings and explicitly declines a fourth. Read them there:
+
+- **R1:** independent ledger writes, so one ledger error does not lose the others.
+- **R2:** the empty version.
+- **R3:** the miss counter that must not go backwards.
+
+An advantage on #418 that #930 does not confirm is a tie, and the baseline stays.
 
 > **Corrected 2026-09-23.** This list previously read "scope-fence hijack, new-issue scope
 > guard, in-run saturation counter, free-string tool schema, and **the guard counters**". The
@@ -181,9 +209,18 @@ Four things must be settled before any number from such a run means anything:
    refused the body.
 4. **Check the candidate's reasoning switch reaches it.** The find stage leans on reasoning
    — 5.1k of 5.6k find completion tokens on PR #688 — and gpt-5.x reasons by default.
-   Anthropic's compat endpoint accepts both `reasoning_effort` and a native `thinking`
-   block **and ignores them** (probed 2026-09-23: completion tokens unchanged, no reasoning
-   accounting). A candidate measured with reasoning off can only be cleared by that test,
+   Anthropic's compat endpoint accepted both `reasoning_effort` and a native `thinking`
+   block **and ignored them** (probed 2026-09-23 on that day's models: completion tokens
+   unchanged, no reasoning accounting). That does not make an Anthropic candidate a run with
+   reasoning off.
+
+   **Corrected 2026-11-05.** `claude-sonnet-5-5`, sent neither switch, returned at least twice
+   the completion tokens its content explains (`contentLength / 4`, a rough estimate) on 18 of
+   23 calls in batches 101 and 106 of the big test, and on all 6 find calls, at 3.7–6.1×. It
+   reports no `reasoning_tokens`, so this ratio is the only sign; `summary.mjs` prints it. The
+   switches themselves were not re-probed.
+
+   A candidate that really was measured with reasoning off can only be cleared by that test,
    never rejected by it.
 
 Measure exactly as above: the labelled corpus for fabrication, the recall probe at
@@ -195,7 +232,11 @@ Two failure modes to expect, both seen on 2026-09-22: a candidate that **raises 
 loses it at verify** (`refuted`, not `out_of_scope` — that distinction is the whole signal),
 and a candidate that **returns empty or truncated completions**, which is usually the
 unpinned endpoint not honouring `strict` rather than the model being unable. Diagnose the
-second with precondition 1 before blaming the model.
+second with precondition 1 before blaming the model. Then check the token limit: on 2026-11-05 the owner's guess held that several OpenRouter
+models spend it on reasoning (`AI_REVIEW_FIND_MAX_TOKENS`, `AI_REVIEW_FIND_REASONING`), and
+raising it brought two of them back while others stayed empty. An empty list with a normal
+finish, as `gemini-3.8-flash` gave, reads like a clean review, so look at the completion
+tokens before crediting a quiet run.
 
 ## Outcomes that are settled — do not re-derive
 
@@ -225,6 +266,18 @@ second with precondition 1 before blaming the model.
   find the blind spot; do not explain it with the price.
 - **Quote per-draw scores and the union together.** They are different numbers and a candidate
   is compared like-to-like with each. Half of a 2026-09-22 confusion was this alone.
+- **The judge sees one file's group of findings, so it answers `out_of_scope` on real
+  cross-file defects.** Every judge lost D1 this way on the baseline's finding on 2026-11-05,
+  and `claude-sonnet-5-5` also lost D5 and D1 on its own. Such a loss is about the judge's
+  view; it does not say the finding was weak.
+- **A paid cache write does not pay back here.** A write costs 25% over input on the direct
+  OpenAI models that bill one. The next head of #688 read 0 of 23,585 written, and verify read
+  0 of 247,683 across the whole big test. Only an identical repeat reads (1.00 per written
+  token), so a measurement that repeats one head flatters the cache. The writes are off for
+  three models by the owner's decision. This agrees with "the prompt cache is not a lever".
+- **A cabinet can bill less than the list.** On 2026-11-04 OpenAI's matched our requests (384)
+  and tokens (2,776,159) exactly and billed $8.67 against ≈$14.03 at list, unexplained. Size
+  a pass by the list, and never read a price off a cabinet.
 
 ---
 
@@ -797,3 +850,71 @@ stated criterion is unmet.** (The plan's other stage-2 item, updating `spec.md`,
 follow-up here: it was already satisfied in stage 1 — `spec.md:2349-2361` documents the CLI and
 `--check` — so the plan's own "`spec.md` needs no change" line is correct, not a contradiction of
 the design's stage-2 description.)
+
+## 2026-11-05, big test — the pair stays, `gpt-6.1-terra` is the cheap profile, OpenRouter gets none
+
+The record is [`docs/eval/2026-11/report.md`](https://github.com/ysilvestrov/detent/blob/main/docs/eval/2026-11/report.md)
+in `ysilvestrov/detent`, in Ukrainian, with the records, scores and grading notes beside it
+(ysilvestrov/detent#28, open when this entry was written). This entry keeps what the protocol
+needs. Everything was measured on this repo alone, so it proves nothing about other projects.
+
+**What ran.** #418 and the new #930 (section 2) for recall, #344, #352, #356 and #358 for
+fabrication (#348 dropped, section 1), three draws per finalist, the baseline re-measured in the
+same session. Graders scored blind. D5 was read broadly, so these numbers do not compare directly
+with the entries above. Spend: $27.48 of a $30 ceiling (OpenAI 15.07, Anthropic 6.04, OpenRouter
+4.61, by hand 1.75).
+
+Profiles, by the owner's decision of 2026-11-05. Prices are at list with cache writes off where
+the code turns them off, for a first review of #418.
+
+| Provider | Profile | Find + verify | #418, of 5 | #930, of 3 | Corpus published, `false` | Cost |
+|---|---|---|---|---|---|---|
+| `openai` | best, default | `gpt-5.6-sol` + `gpt-5.5` | 3, 5, 4 | 2, 3, 2 | 17, 0 | $0.47 |
+| `openai` | balanced, best value | `gpt-6.1-terra` + `gpt-6.1-terra` | 4, 4, 4 | 1, 1, 1 | 17, 0 | $0.09 |
+| `anthropic` | all three | `claude-sonnet-5-5` + `claude-sonnet-5-5` | 4, 3, 4 | 1, 1, 1 | 6, 0 | $0.25–0.26 |
+| `openrouter` | none | | | | | |
+
+The default pair does not change.
+
+- **`gpt-6.1-terra` + `gpt-6.1-terra` loses a defect every run.** D5 twice and D1 once on #418,
+  and R2 and R3 never on #930. Its union looks complete, so quote the draws.
+- **`gpt-6.1-terra` + `gpt-5.5` tied the baseline.** Median 5 against 4 on #418, but 1 against 2
+  on #930, and by the rule in section 2 the baseline stays.
+- **`claude-sonnet-5-5` is quiet.** It published 6 on the corpus against 17 and nothing on #352
+  or #356, though find raised one on each. It passes the rule as written, and the owner kept the
+  rule.
+
+**Judges** on the verify corpus, agreement with consensus of 15 over 3 runs: `gpt-5.5` 15,
+`gpt-6.1-sol` 15, `gpt-6.1-terra` 15, `claude-sonnet-5-5` 14, `claude-haiku-5-5` 11 (fails).
+On identical findings from batch 104, `gpt-6.1-terra` differed in 1 verdict of 23, and Sonnet
+lost D2 twice and D1 once.
+
+**Generic prompts** (batch 105, detent's defaults instead of this repo's): 4, 3, 4 on #418;
+corpus 16 published, 15 `real`, 1 `unfalsifiable`, 0 `false`; D2 raised before the judge in 1 of 3
+draws against 3 of 3. The two prompt sets differ only in the project name, some scope wording and
+`{{reviewContext}}`, so this says little about other projects.
+
+**Second try at models cut by the token limit**, find on #418 only, so preliminary: none went
+through a judge, #930 or the corpus.
+
+| Model | Setting | Defects | Misses | Find cost |
+|---|---|---|---|---|
+| `mimo-v2.6-pro` | limit 32,000 | 3, 4, 4 | D2 | ≈$0.04 |
+| `kimi-k3.1-pro` | limit 8,000, reasoning low | 3, 4, 4 | D5 | ≈$0.08–0.15 |
+
+`mimo-v2.6-pro` output reached 31,009 tokens, close to its limit. `hy4-preview`,
+`glm-5.3-flashx-legal`, `gemini-3.8-flash`, `step-5-preview`, `qwen3.8-flash`, `qwen3.8-max-0902`
+and `deepseek-v4.1-flash-1017` are out. The same find from `gpt-6.1-terra` scored 5, 5, 5 at
+$0.07 and from `gpt-5.6-sol` 4, 5, 4 at $0.31. The owner stopped the test without filling the
+`openrouter` row.
+
+**The owner's check**: 66 credited findings of the four deciding pairs and 10 random of the other
+239, 76 agreed, 0 disagreed, scores unchanged. Corpus findings outside that sample were not looked
+at.
+
+**Not verified:** the spend line of detent 0.5.0 on a real push against the cabinet, and writes
+off on any route but direct OpenAI. `gpt-5.6-sol`'s $4/$20 is promotional through 2026-11-21, so
+its row can move.
+
+The protocol changed with this entry: precondition 4, the second probe, D5, `Setup` and the
+settled outcomes. The numbers above in this log stay as they were.
