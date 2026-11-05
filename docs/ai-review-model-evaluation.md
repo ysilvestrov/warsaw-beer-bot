@@ -47,7 +47,7 @@ Since the move to `@ysilvestrov/detent` this runs `detent pr-review --replay`; a
 touches the working tree. `--head <sha>` replays at an arbitrary commit (see the recall
 probe, which needs it).
 
-From detent 0.5.0 a replay also takes the following. This repo still pins 0.4.0, so until the bump they run from a detent clone.
+From detent 0.5.0 a replay also takes the following.
 
 - `--record <file>` appends one JSON line per API call and per run, with the usage the provider reported. Scores and spend are then read from the file, not from a terminal.
 - `--find-only --save-findings <file>`, then `--verify-from <file>`, judges saved findings. It is the only way to compare judges without find's variance.
