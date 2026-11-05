@@ -178,6 +178,11 @@ class Cli(unittest.TestCase):
         patcher = mock.patch.object(sb, 'HIDDEN_BY_PRIVATE_TMP', ())  # this test's scratch is under /tmp
         patcher.start()
         self.addCleanup(patcher.stop)
+        # main() has no seam for trial's free-space gate, so it would read this machine's real disk: a /tmp under
+        # 10 GiB (tmpfs in WSL) makes `trial` TRANSIENT. The gate's own boundary is test_trial's to prove.
+        disk = mock.patch.object(cli.tr.shutil, 'disk_usage', return_value=mock.Mock(free=1 << 40))
+        disk.start()
+        self.addCleanup(disk.stop)
         trial_root = os.path.join(self.base, 'trial')
         os.makedirs(trial_root, exist_ok=True)
         snaps = os.path.join(self.base, 'snaps')
