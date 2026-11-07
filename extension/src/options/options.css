@@ -87,6 +87,26 @@ input::placeholder { color: var(--fg-muted); }
   line-height: 1.45;
 }
 
+.local-db {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+}
+
+.local-db h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.local-db .checkbox-note {
+  margin-left: 0;
+}
+
+.local-db-stats {
+  margin: 10px 0;
+  font-size: 13px;
+}
+
 .actions {
   display: flex;
   align-items: center;

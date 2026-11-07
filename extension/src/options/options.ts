@@ -2,6 +2,7 @@ import { getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from '../
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { getHealth, postMatch, ApiError } from '../api/client';
 import { syncInstall } from '../background/install';
+import { count } from '../shared/format';
 export { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 
 // Replaced at build time by Vite `define`. Undefined under Vitest (no define), hence the
@@ -45,6 +46,74 @@ export async function removeEnrichPermission(): Promise<boolean> {
   return chrome.permissions.remove({ origins: [...ENRICH_ORIGINS] });
 }
 
+export interface LocalDbCounts {
+  checkins: number;
+  beers: number;
+  lastSync: string | null;
+}
+
+function plural(n: number, one: string): string {
+  return n === 1 ? `1 ${one}` : `${count(n)} ${one}s`;
+}
+
+/** #924 §6: one line on what this browser keeps — counts and the day of the last sync. */
+export function localDbSummary(s: LocalDbCounts): string {
+  if (s.checkins === 0) return 'Empty — open the popup and tap Sync my check-ins.';
+  const counts = `${plural(s.checkins, 'check-in')} · ${plural(s.beers, 'beer')}`;
+  return s.lastSync !== null ? `${counts} · last sync ${s.lastSync.slice(0, 10)}` : counts;
+}
+
+export interface LocalDbNodes {
+  section: HTMLElement;
+  stats: HTMLElement;
+  clear: HTMLButtonElement;
+  status: HTMLElement;
+}
+
+export type SendMessage = (message: { type: string }) => Promise<unknown>;
+
+const EMPTY_COUNTS: LocalDbCounts = { checkins: 0, beers: 0, lastSync: null };
+
+function countsOf(reply: unknown): LocalDbCounts {
+  const r = reply as { type?: string; checkins?: number; beers?: number; lastSync?: string | null } | undefined;
+  if (r?.type !== 'local-db:stats:ok' || typeof r.checkins !== 'number' || typeof r.beers !== 'number') return EMPTY_COUNTS;
+  return { checkins: r.checkins, beers: r.beers, lastSync: r.lastSync ?? null };
+}
+
+/**
+ * #924 §6: the "Local check-ins" block. Shown only without a Telegram token — with one, check-ins
+ * live on the server and there is nothing in this browser to show or clear.
+ */
+export async function initLocalDb(nodes: LocalDbNodes, hasToken: boolean, send: SendMessage,
+  ask: (question: string) => boolean): Promise<void> {
+  nodes.section.hidden = hasToken;
+  if (hasToken) return;
+  let current = EMPTY_COUNTS;
+  const refresh = async () => {
+    current = countsOf(await send({ type: 'local-db:stats' }));
+    nodes.stats.textContent = localDbSummary(current);
+  };
+  await refresh();
+  nodes.clear.addEventListener('click', async () => {
+    const what = current.checkins > 0 ? plural(current.checkins, 'check-in') : 'the check-ins';
+    if (!ask(`Delete ${what} stored in this browser? Your Untappd account is not affected.`)) return;
+    nodes.clear.disabled = true;
+    const reply = (await send({ type: 'local-db:clear' })) as { ok?: boolean } | undefined;
+    nodes.status.textContent = reply?.ok === true ? 'Cleared.' : 'Could not clear the check-ins stored in this browser.';
+    await refresh();
+    nodes.clear.disabled = false;
+  });
+}
+
+function sendToWorker(message: { type: string }): Promise<unknown> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (reply?: unknown) => {
+      void chrome.runtime.lastError;
+      resolve(reply);
+    });
+  });
+}
+
 // --- DOM wiring (runs only in the options page, not under test) ---
 function el<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
@@ -85,6 +154,15 @@ async function initOptionsPage(): Promise<void> {
         status.textContent = 'Enrichment off.';
       }
     });
+  }
+
+  const localSection = el<HTMLElement>('localDb');
+  const localStats = el<HTMLElement>('localDbStats');
+  const localClear = el<HTMLButtonElement>('localDbClear');
+  const localStatus = el<HTMLElement>('localDbStatus');
+  if (localSection && localStats && localClear && localStatus) {
+    void initLocalDb({ section: localSection, stats: localStats, clear: localClear, status: localStatus },
+      s.token !== '', sendToWorker, (q) => window.confirm(q));
   }
 
   const stats = el<HTMLInputElement>('installRegistration');

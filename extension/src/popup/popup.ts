@@ -2,6 +2,7 @@ import { pickAdapter } from '../sites/registry';
 import { countAll } from '../cache/store';
 import { clearAll } from '../cache/client';
 import { authToken, getSettings, SETUP_GUIDE_URL, syncMode } from '../shared/config';
+import { count } from '../shared/format';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
 import { wireClearButton } from './clear-cache';
 import { applyTokenState, tokenStateView } from './token-state';
@@ -39,10 +40,7 @@ export interface SyncWidgetView {
   tone: 'neutral' | 'error';
 }
 
-// "12 407": a narrow no-break space groups thousands, as the spec's widget table writes them.
-export function count(n: number): string {
-  return n.toLocaleString('en-US').replace(/,/g, '\u202f');
-}
+export { count };
 
 /** #934 §6: an honest percentage of the counts — a display, no decision rests on it. */
 export function syncPercent(serverCount: number, profileTotal: number | null): number | null {

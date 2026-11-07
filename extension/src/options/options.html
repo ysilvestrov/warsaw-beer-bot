@@ -34,6 +34,16 @@
       </p>
       <p id="installStatus" class="options-status" aria-live="polite"></p>
 
+      <section id="localDb" class="local-db" hidden>
+        <h2>Local check-ins</h2>
+        <p class="checkbox-note">
+          Without a Telegram token, your check-ins are stored only in this browser and never sent to our server.
+        </p>
+        <p id="localDbStats" class="local-db-stats"></p>
+        <button id="localDbClear" class="btn btn-secondary" type="button">Clear local check-ins</button>
+        <p id="localDbStatus" class="options-status" aria-live="polite"></p>
+      </section>
+
       <div class="actions">
         <button id="save" class="btn btn-primary" type="button">Save</button>
         <button id="test" class="btn btn-secondary" type="button">Test connection</button>
