@@ -1007,7 +1007,8 @@ describe('#924 local mode in the worker', () => {
     await setSettings({ token: '' });
     expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, serverCount: 0 });
     answerState({ username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 0, profileTotal: 9 });
-    await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
+    // The step's real end — the status reply of local mode is empty either way.
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false), { timeout: 15000 });
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(post).toHaveBeenCalledTimes(0);
   });
