@@ -1,7 +1,7 @@
 import { pickAdapter } from '../sites/registry';
 import { countAll } from '../cache/store';
 import { clearAll } from '../cache/client';
-import { authToken, getSettings, SETUP_GUIDE_URL } from '../shared/config';
+import { authToken, getSettings, SETUP_GUIDE_URL, syncMode } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
 import { wireClearButton } from './clear-cache';
 import { applyTokenState, tokenStateView } from './token-state';
@@ -22,6 +22,8 @@ export interface SyncStatusView {
   pausedUntil: string | null;
   quiet: boolean;
   username: string | null;
+  /** #924: the popup's own mode (from the token), not the worker's reply. Absent — linked. */
+  mode?: 'linked' | 'local';
 }
 
 export const UNTAPPD_HOME = 'https://untappd.com/';
@@ -31,7 +33,8 @@ export interface SyncWidgetView {
   /** null — no bar; 'unknown' — an empty bar with the count only (profile total unknown). */
   bar: number | 'unknown' | null;
   detail: string | null;
-  action: { kind: 'start' | 'stop'; label: string } | null;
+  /** 'clear' — #924: empty the local check-ins, then sync (another account in local mode). */
+  action: { kind: 'start' | 'stop' | 'clear'; label: string } | null;
   link: { text: string; href: string } | null;
   tone: 'neutral' | 'error';
 }
@@ -91,6 +94,15 @@ export function syncWidgetView(s: SyncStatusView, now: Date): SyncWidgetView {
     // (the worker then stores account_changed until the next sync). The label fits both, and Sync
     // stays — after signing in, the person must not wait for the next quiet check.
     case 'account_changed':
+      // #924: in local mode the database belongs to one account; the person decides whether to drop it.
+      if (s.mode === 'local') {
+        return view('Untappd account changed', {
+          detail: s.username !== null
+            ? `This browser's check-ins belong to ${s.username}. Clear them and sync this account?`
+            : 'Clear the check-ins stored in this browser and sync this account?',
+          action: { kind: 'clear', label: 'Clear and sync' },
+        });
+      }
       return view('Untappd account changed', {
         detail: s.username !== null ? `Sign in as ${s.username}, then Sync` : 'Sign in to the linked account, then Sync',
         link: untappd, action: start('Sync'),
@@ -180,12 +192,12 @@ export function canRefresh(url: string): boolean {
   }
 }
 
-/** Popup note shown when the extension has no token: global-only, with how to authorize. */
+/** Popup note shown when the extension has no Telegram token: what local mode gives, and what a token adds. */
 export function authNoteText(hasToken: boolean, hasInstall = false): string | null {
   if (hasToken) return null;
   return hasInstall
-    ? "Works without Telegram — global ratings (⭐) and missing-beer search. Add a token to see which beers you've had ✅ and your own rating."
-    : "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.";
+    ? 'Works without Telegram — ⭐ global ratings, missing-beer search, and ✅ from check-ins you sync into this browser only. A bot token adds recommendations and sync across devices.'
+    : 'Works without Telegram — ⭐ global ratings and ✅ from check-ins you sync into this browser only. A bot token adds recommendations and sync across devices.';
 }
 
 /** Pluralizes a count of beers (parsed cards) — the refresh result's noun, distinct from clear-cache.ts's cache-entry `entries()`. */
@@ -269,7 +281,7 @@ async function initPopup(): Promise<void> {
     getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
     applyTokenState(
       { header, authBlock, syncBtn, syncStatus, getTokenBtn, guideLink, foot },
-      tokenStateView(hasToken, hasInstall),
+      tokenStateView(hasToken),
     );
   }
 
@@ -290,13 +302,15 @@ async function initPopup(): Promise<void> {
     detail: el<HTMLElement>('syncDetail'), link: el<HTMLAnchorElement>('syncLink'), button: syncBtn,
     buttonLabel: syncBtn.querySelector<HTMLElement>('span'),
   } : null;
-  if (hasToken && syncBtn && syncStatus && widget && widgetNodes?.label && widgetNodes.bar && widgetNodes.fill
+  // #924: both modes sync — to the server with a Telegram token, into this browser without one.
+  const mode = syncMode(settings);
+  if (syncBtn && syncStatus && widget && widgetNodes?.label && widgetNodes.bar && widgetNodes.fill
     && widgetNodes.detail && widgetNodes.link) {
     const nodes = widgetNodes as SyncWidgetNodes;
     widget.hidden = false;
     let latestView: SyncWidgetView | null = null;
     const render = (s: SyncStatusView) => {
-      latestView = syncWidgetView(s, new Date());
+      latestView = syncWidgetView({ ...s, mode }, new Date());
       // The popup's own messages (Starting…, Stopping…) give way to the state they were about.
       syncStatus.textContent = '';
       renderSyncWidget(nodes, latestView);
@@ -321,8 +335,9 @@ async function initPopup(): Promise<void> {
         chrome.runtime.sendMessage({ type: 'checkin-sync:stop' }, () => { void chrome.runtime.lastError; });
         return;
       }
+      const clearFirst = latestView?.action?.kind === 'clear';
       syncBtn.disabled = true;
-      syncStatus.textContent = 'Starting…';
+      syncStatus.textContent = clearFirst ? 'Clearing…' : 'Starting…';
       // Fetching the user's feed needs the untappd.com host permission (optional,
       // shared with enrichment). Request it in this user-gesture context so a user
       // who never enabled enrichment can still sync. Must be the first await so the
@@ -332,6 +347,20 @@ async function initPopup(): Promise<void> {
         syncStatus.textContent = 'Allow access to untappd.com to sync your check-ins.';
         syncBtn.disabled = false;
         return;
+      }
+      if (clearFirst) {
+        const cleared = await new Promise<boolean>((resolve) => {
+          chrome.runtime.sendMessage({ type: 'local-db:clear' }, (reply?: { ok?: boolean }) => {
+            void chrome.runtime.lastError;
+            resolve(reply?.ok === true);
+          });
+        });
+        if (!cleared) {
+          syncStatus.textContent = 'Could not clear the check-ins stored in this browser.';
+          syncBtn.disabled = false;
+          return;
+        }
+        syncStatus.textContent = 'Starting…';
       }
       await requestSyncStart((callback) => {
         chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => {

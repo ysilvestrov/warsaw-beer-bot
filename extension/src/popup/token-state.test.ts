@@ -37,43 +37,20 @@ function fixture(): TokenStateNodes & { card: HTMLElement } {
 }
 
 describe('tokenStateView', () => {
-  it('without a token, the auth block leads and sync cannot be used', () => {
+  // #924: without a token the check-ins sync into this browser, so sync leads and the token is an offer.
+  it('without a token, sync is the primary action and the auth block offers a token on the secondary tier', () => {
     expect(tokenStateView(false)).toEqual({
       authVisible: true,
-      syncTier: 'btn-secondary',
-      authTier: 'btn-primary',
-      syncEnabled: false,
-      syncCaption: 'Add a token to sync your check-ins.',
+      syncTier: 'btn-primary',
+      authTier: 'btn-secondary',
+      syncEnabled: true,
+      syncCaption: '',
       guideHome: 'auth',
     });
   });
 
   it('with a token, sync is the primary action and the guide moves to the footer', () => {
     expect(tokenStateView(true)).toEqual({
-      authVisible: false,
-      syncTier: 'btn-primary',
-      authTier: 'btn-secondary',
-      syncEnabled: true,
-      syncCaption: '',
-      guideHome: 'foot',
-    });
-  });
-});
-
-describe('tokenStateView — install token, no Telegram (#923)', () => {
-  it('Get a token is offered but no longer primary; check-in sync still needs Telegram', () => {
-    expect(tokenStateView(false, true)).toEqual({
-      authVisible: true,
-      syncTier: 'btn-secondary',
-      authTier: 'btn-secondary',
-      syncEnabled: false,
-      syncCaption: 'Add a token to sync your check-ins.',
-      guideHome: 'auth',
-    });
-  });
-
-  it('with a Telegram token as well, the Telegram view stands', () => {
-    expect(tokenStateView(true, true)).toEqual({
       authVisible: false,
       syncTier: 'btn-primary',
       authTier: 'btn-secondary',
@@ -103,20 +80,23 @@ describe('applyTokenState — no token', () => {
     expect(n.getTokenBtn.nextElementSibling).toBe(n.guideLink);
   });
 
-  it('disables sync, demotes it, and says what is missing', () => {
+  it('keeps sync enabled, primary and uncaptioned (#924)', () => {
     const n = fixture();
+    n.syncBtn.disabled = true;
+    n.syncStatus.textContent = 'stale caption';
     applyTokenState(n, tokenStateView(false));
-    expect(n.syncBtn.disabled).toBe(true);
-    expect(n.syncBtn.classList.contains('btn-secondary')).toBe(true);
-    expect(n.syncBtn.classList.contains('btn-primary')).toBe(false);
-    expect(n.syncStatus.textContent).toBe('Add a token to sync your check-ins.');
+    expect(n.syncBtn.disabled).toBe(false);
+    expect(n.syncBtn.classList.contains('btn-primary')).toBe(true);
+    expect(n.syncBtn.classList.contains('btn-secondary')).toBe(false);
+    expect(n.syncStatus.textContent).toBe('');
   });
 
-  it('promotes Get a token to the primary tier', () => {
+  it('keeps Get a token on the secondary tier (#924)', () => {
     const n = fixture();
+    n.getTokenBtn.classList.replace('btn-secondary', 'btn-primary');
     applyTokenState(n, tokenStateView(false));
-    expect(n.getTokenBtn.classList.contains('btn-primary')).toBe(true);
-    expect(n.getTokenBtn.classList.contains('btn-secondary')).toBe(false);
+    expect(n.getTokenBtn.classList.contains('btn-secondary')).toBe(true);
+    expect(n.getTokenBtn.classList.contains('btn-primary')).toBe(false);
   });
 });
 

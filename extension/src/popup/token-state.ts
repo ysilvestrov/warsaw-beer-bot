@@ -1,9 +1,6 @@
 // #519/#522: the popup's hierarchy is a function of one fact — whether a token
-// exists. Without one, `Sync my check-ins` cannot succeed (the background finds
-// no token, stores outcome:'error' and the popup prints a connection error),
-// and it would first raise a host-permission prompt for untappd.com on the way
-// there. So in that state it is demoted, disabled and captioned, while the two
-// controls that CAN help — `Get a token` and the setup guide — lead the card.
+// exists. Without one the auth block (`Get a token` and the setup guide) sits
+// right under the header; with one it is hidden and the guide moves to the footer.
 
 export interface TokenStateView {
   /** The auth block is shown, directly after the header. Only ever true without a token. */
@@ -27,10 +24,10 @@ export interface TokenStateNodes {
   foot: HTMLElement;
 }
 
-// #923: an anonymous install token makes the extension work without Telegram, so `Get a token`
-// stops being the one thing to do and drops to the secondary tier. Check-ins still need the
-// Telegram token: sync stays disabled and captioned exactly as without any token.
-export function tokenStateView(hasToken: boolean, hasInstall = false): TokenStateView {
+// #924: without a Telegram token the extension syncs check-ins into this browser (local mode), so
+// sync is the primary action in both states. `Get a token` stays on offer, on the secondary tier,
+// for what only the bot gives (recommendations, sync across devices).
+export function tokenStateView(hasToken: boolean): TokenStateView {
   return hasToken
     ? {
         authVisible: false,
@@ -42,10 +39,10 @@ export function tokenStateView(hasToken: boolean, hasInstall = false): TokenStat
       }
     : {
         authVisible: true,
-        syncTier: 'btn-secondary',
-        authTier: hasInstall ? 'btn-secondary' : 'btn-primary',
-        syncEnabled: false,
-        syncCaption: 'Add a token to sync your check-ins.',
+        syncTier: 'btn-primary',
+        authTier: 'btn-secondary',
+        syncEnabled: true,
+        syncCaption: '',
         guideHome: 'auth',
       };
 }
