@@ -28,10 +28,12 @@ right away how it works.
 Products that a supported shop itself files under a "not beer" category also get
 a grey `✕`; it needs no token and is not a link.
 
-Personal features are unlocked by a **token** (Part 2): a green check "you already
-had this" badge with **your own** rating, a dashed `?` outline for uncertain matches, plus searching
-for missing beers and check-in syncing. The extension popup will show "Not
-connected" (English UI) until a token is added.
+**"Sync my check-ins"** works without a token too: your check-ins are kept **in this browser
+only** (never sent to the server), and shop pages show a green check "you already had this" with
+your own rating, and a dashed `?` outline for uncertain matches. See "Without Telegram" in Part 4.
+
+A **token** (Part 2) adds what only the bot does: recommendations and sync across devices (your
+check-ins live on the server rather than in one browser).
 
 ---
 
@@ -54,6 +56,22 @@ badges will appear).
 1. Open the bot in Telegram, send **`/start`**.
 2. Change the language if needed: **`/lang`**.
 
+### Without Telegram: check-ins in this browser only
+
+Without a token, "Sync my check-ins" reads your Untappd feed within your session and keeps the beers
+you've had and your ratings **in this browser only** — they are not sent to our server. No need to
+link your account in the bot: being logged in on untappd.com is enough.
+
+- After a sync, shop pages show ✅ for beers you've had and your rating. New check-ins keep
+  arriving on their own, as with a token.
+- The options page shows how many check-ins are stored and when they last synced, under
+  **"Local check-ins"**. **"Clear local check-ins"** (after a confirmation) deletes them; your
+  Untappd account is not affected. Uninstalling the extension deletes them too.
+- If you're logged in to untappd.com as a **different account**, the popup says `Untappd account
+  changed` and offers **"Clear and sync"**: the previous account's check-ins are deleted and the
+  new account's sync starts.
+- On another computer or browser, sync again. To have your history everywhere and get
+  recommendations from the bot, get a token (Part 1.4).
 ### 1.2. Link your Untappd account
 
 Send:
@@ -242,7 +260,7 @@ this guide first.
    (filters, pagination), the overlay updates itself.
 
 > **The check + your rating** only appear for beers from your own history (requires
-> `/import`, Part 1). **The star** is also shown for beers you haven't had yet, if
+> `/import` or "Sync my check-ins"; without a token, "Sync my check-ins" into this browser). **The star** is also shown for beers you haven't had yet, if
 > they're already in the bot's catalog. A number **without** a star after the check is
 > always yours; a number **with** a star is the global one.
 >
@@ -271,9 +289,9 @@ housekeeping one at the bottom:
 </figure>
 
 - **"Sync my check-ins"** (the large amber button at the top) — pulls in your
-  check-ins from Untappd (see below). This is the popup's main action **once
-  you've saved a token** — before that, the "Not connected" block below leads
-  instead. Under the button sit a label, a bar and a detail line: while a sync
+  check-ins from Untappd (see below). This is the popup's main action with or
+  without a token (without one, your check-ins stay in this browser — see
+  "Without Telegram"). Under the button sit a label, a bar and a detail line: while a sync
   is running they show `Syncing… 42 %` and `5 210 of 12 407`, and the button
   becomes **Stop** — that means "working", not "broken". Once your whole
   history is in, the label says **"✓ Fully synced"** and the button hides: new
@@ -313,20 +331,13 @@ housekeeping one at the bottom:
   <figcaption>The expanded directory is grouped by shipping origin; scroll the list to see every shop.</figcaption>
 </figure>
 
-Until a token is saved, the popup puts a "Not connected" block with a
-**"Get a token"** button directly under the header — it's the first stop for
-`Tab`. The **"Sync my check-ins"** button is greyed out and inactive in this
-state, captioned `Add a token to sync your check-ins.`: without a token,
-syncing couldn't succeed anyway, so the extension doesn't ask for extra
-access to untappd.com only to show a connection error.
+Until a token is saved, the popup shows a **"Works without Telegram"** block directly under the
+header, with a secondary **"Get a token"** button: it says what works without the bot (global
+ratings, ✅ from check-ins you sync into this browser, and — with an anonymous install —
+missing-beer search) and what a token adds (recommendations and sync across devices). "Sync my
+check-ins" stays the main button.
 
-With no token but an anonymous install ("Anonymous usage statistics"), the popup says **"Works
-without Telegram"** instead of "Not connected": global ratings and missing-beer search work, and
-"Get a token" stays, as a secondary button. A token is only needed for your own badges and "Sync
-my check-ins".
-
-Once you save a token (Part 3), that block disappears and "Sync my
-check-ins" becomes the main button again. The **"Read the setup guide →"**
+Once you save a token (Part 3), that block disappears. The **"Read the setup guide →"**
 link doesn't go anywhere — it just moves down to the bottom of the popup,
 above "Clear all cache".
 
@@ -341,9 +352,8 @@ Supporter.
 
 - **Prerequisite:** first link your account in the bot — `/link <username>`.
   Without this the popup will show "Link Untappd in the bot".
-- **Also needs a saved token** (Part 3). Without one, the button is greyed
-  out and captioned `Add a token to sync your check-ins.` instead (see above,
-  under "The toolbar button (popup)").
+- **Without a token** the button works too, but your check-ins stay in this
+  browser and are not sent to the bot — see "Without Telegram" below.
 - **The first time**, the browser will ask for permission to access
   `untappd.com` (to read your feed within your session) — click
   **Allow**. If you decline, you'll see "Allow access to untappd.com to
