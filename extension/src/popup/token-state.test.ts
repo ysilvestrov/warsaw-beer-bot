@@ -142,7 +142,9 @@ describe('applyTokenState is reversible', () => {
     applyTokenState(n, tokenStateView(false));
     expect(n.header.nextElementSibling).toBe(n.authBlock);
     expect(n.authBlock.contains(n.guideLink)).toBe(true);
-    expect(n.syncBtn.disabled).toBe(true);
-    expect(n.syncStatus.textContent).toBe('Add a token to sync your check-ins.');
+    expect(n.authBlock.style.display).toBe('');
+    // #924: sync stays usable without a token — it goes into this browser.
+    expect(n.syncBtn.disabled).toBe(false);
+    expect(n.syncStatus.textContent).toBe('');
   });
 });
