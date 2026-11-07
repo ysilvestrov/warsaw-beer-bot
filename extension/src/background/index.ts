@@ -10,7 +10,9 @@ import {
 import { sessionUsername } from '../../../src/shared/untappd/session-user';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
-import { anonymous, hadIndex, overlayHad } from '../local/had';
+import { anonymous, hadIndex, invalidateHadIndex, overlayHad } from '../local/had';
+import { clearLocalDb, currentGeneration, localStats } from '../local/db';
+import { localSyncDeps } from '../local/sync';
 
 export interface MatchMessage {
   type: 'match';
@@ -357,9 +359,12 @@ const syncScheduler = createSyncScheduler({
   },
   now: () => new Date(),
   runStep: runSyncStep,
-  clearMatchCache: async () => { await handleCacheClearAll(); },
+  // #924: the local cache is anonymous and the had index drops itself after every page, so only
+  // linked mode has personal answers to clear.
+  clearMatchCache: async () => { if (!(await isLocalMode())) await handleCacheClearAll(); },
   hasUntappdPermission: () => chrome.permissions.contains({ origins: UNTAPPD_ORIGINS }),
-  hasToken: async () => Boolean((await getSettings()).token),
+  // #924: both modes have somewhere to sync to — the server with a Telegram token, this browser without.
+  hasToken: async () => true,
   onReport: reportSyncIntent,
 });
 
@@ -456,9 +461,9 @@ async function launchCheckinSync(step: StepRequest): Promise<{ reply: CheckinSyn
   const cur = await readSyncStatus();
 
   const { token, baseUrl } = await getSettings();
-  if (!token) {
-    const generation = ++syncGeneration;
-    reportGeneration = generation;
+  const isLocal = !token;
+  if (isLocal && cur.binding?.token) {
+    // #924: the Telegram token is gone — the linked run's personal answers go with it.
     try {
       await handleCacheClearAll();
     } catch (error) {
@@ -466,18 +471,26 @@ async function launchCheckinSync(step: StepRequest): Promise<{ reply: CheckinSyn
       // credential/account binding, so retained entries cannot cross accounts.
       console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
     }
-    await enqueueSyncStatus(emptySyncStatus('error'), generation);
-    return { reply, done: Promise.resolve({ status: 'error', complete: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, caughtUp: false }) };
   }
 
   const generation = ++syncGeneration;
   reportGeneration = generation;
-  let binding: SyncBinding | null = null;
+  // #924: a local run is bound to the database generation from its first record, so even a run that
+  // fails before it learns the username is told apart from a linked leftover.
+  let binding: SyncBinding | null = isLocal ? { username: '', linkRevision: await currentGeneration(), token: '', baseUrl } : null;
   syncRunning = true;
   const controller = new AbortController();
   syncAbortController = controller;
   if (step.signal.aborted) controller.abort();
   else step.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  // #924: the database adapter of local mode — the same walk, decided over IndexedDB, with no request to us.
+  const local = isLocal ? localSyncDeps({
+    fetchText: async (url) => {
+      const res = await fetch(url, { credentials: 'include', signal: controller.signal });
+      if (!res.ok) throw new ApiError('feed_unavailable');
+      return res.text();
+    },
+  }) : null;
   try {
     await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, binding }, generation);
   } catch (error) {
@@ -503,12 +516,12 @@ async function launchCheckinSync(step: StepRequest): Promise<{ reply: CheckinSyn
       };
       outcome = await runCheckinSync({
         getState: async () => {
-          const state = await getCheckinSyncState(baseUrl, token);
+          const state = local ? await local.getState() : await getCheckinSyncState(baseUrl, token);
           if (generation !== syncGeneration) controller.abort();
           if (Number.isSafeInteger(state.linkRevision) && state.linkRevision >= 0) {
             binding = { username: state.username.toLowerCase(), linkRevision: state.linkRevision, token, baseUrl };
-            if (!cur.binding || cur.binding.username !== binding.username
-              || cur.binding.linkRevision !== binding.linkRevision || cur.binding.token !== token || cur.binding.baseUrl !== baseUrl) {
+            if (!local && (!cur.binding || cur.binding.username !== binding.username
+              || cur.binding.linkRevision !== binding.linkRevision || cur.binding.token !== token || cur.binding.baseUrl !== baseUrl)) {
               await handleCacheClearAll();
             }
             await enqueueSyncStatus({ binding, running: true, serverCount: state.serverCount,
@@ -535,7 +548,13 @@ async function launchCheckinSync(step: StepRequest): Promise<{ reply: CheckinSyn
           if (failure) throw new ApiError(failure);
           return res.text();
         },
-        submitPage: (html, maxId, linkRevision) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal, undefined, linkRevision),
+        submitPage: local
+          ? async (html, maxId, linkRevision) => {
+            const res = await local.submitPage(html, maxId, linkRevision);
+            invalidateHadIndex();
+            return res;
+          }
+          : (html, maxId, linkRevision) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal, undefined, linkRevision),
         onProgress,
         sleep: (ms) => abortableDelay(ms, controller.signal),
         pageCap: step.pageCap,
@@ -597,17 +616,19 @@ function syncStatusReply(s: StoredSyncStatus, intentStored = false) {
   return { type: 'checkin-sync:status:ok' as const, running: s.running || intentStored, serverCount: s.serverCount,
     profileTotal: s.profileTotal, mergedThisRun: s.mergedThisRun, outcome: s.outcome, complete: s.complete,
     caughtUp: s.caughtUp === true, gapMissing: s.gapMissing ?? null, pausedUntil: s.pausedUntil ?? null,
-    quiet: s.quiet === true, username: s.binding?.username ?? null };
+    quiet: s.quiet === true, username: s.binding?.username || null };
 }
 
 async function hasSyncIntent(): Promise<boolean> {
   return (await chrome.storage.local.get(INTENT_KEY))[INTENT_KEY] !== undefined;
 }
 
-export async function handleCheckinSyncStatus() {
-  const generation = syncGeneration;
-  const settings = await getSettings();
-  if (!settings.token) {
+// #924: local mode answers from the stored record alone — opening the popup sends no request
+// anywhere. A record shows only if it is of this database (a local binding at its generation).
+async function localSyncStatus(generation: number) {
+  const status = await readSyncStatus();
+  if (status.binding?.token) {
+    // The Telegram token is gone: its record and its personal answers go with it.
     if (generation !== syncGeneration) return syncStatusReply(emptySyncStatus());
     const invalidationGeneration = ++syncGeneration;
     syncAbortController?.abort();
@@ -618,9 +639,24 @@ export async function handleCheckinSyncStatus() {
       // credential/account binding, so retained entries cannot cross accounts.
       console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
     }
-    await enqueueSyncStatus(emptySyncStatus('error'), invalidationGeneration).catch(() => undefined);
-    return syncStatusReply(emptySyncStatus('error'));
+    await enqueueSyncStatus(emptySyncStatus(), invalidationGeneration).catch(() => undefined);
+    return syncStatusReply(emptySyncStatus());
   }
+  if (!status.binding || status.binding.linkRevision !== await currentGeneration()) return syncStatusReply(emptySyncStatus());
+  const orphaned = !syncStartPromise && !syncRunning && !syncAbortController && !syncScheduler.running;
+  const intentStored = await hasSyncIntent();
+  if (status.running && orphaned && !intentStored) {
+    const recovered = { ...status, running: false, outcome: 'error' as const, complete: false };
+    await enqueueSyncStatus(recovered, generation).catch(() => undefined);
+    return syncStatusReply(recovered);
+  }
+  return syncStatusReply(status, intentStored);
+}
+
+export async function handleCheckinSyncStatus() {
+  const generation = syncGeneration;
+  const settings = await getSettings();
+  if (syncMode(settings) === 'local') return localSyncStatus(generation);
   let current: CheckinSyncState;
   try {
     current = await getCheckinSyncState(settings.baseUrl, settings.token);
@@ -636,10 +672,11 @@ export async function handleCheckinSyncStatus() {
   if (generation !== syncGeneration || latestSettings.token !== settings.token || latestSettings.baseUrl !== settings.baseUrl) {
     return syncStatusReply(emptySyncStatus());
   }
-  if (!status.binding && (syncStartPromise || syncRunning)) {
+  // #924: a record of local mode is no linked binding — a new token is a first sync, not another account.
+  const binding = status.binding?.token ? status.binding : null;
+  if (!binding && (syncStartPromise || syncRunning)) {
     return syncStatusReply({ ...emptySyncStatus(null, current), running: true });
   }
-  const binding = status.binding;
   const matches = binding && binding.username === current.username.toLowerCase()
     && binding.linkRevision === current.linkRevision && binding.token === settings.token && binding.baseUrl === settings.baseUrl;
   if (!matches) {
@@ -659,6 +696,41 @@ export async function handleCheckinSyncStatus() {
     return syncStatusReply(recovered);
   }
   return syncStatusReply(status, intentStored);
+}
+
+export type LocalDbStatsReply = { type: 'local-db:stats:ok'; mode: 'linked' | 'local'; checkins: number; beers: number;
+  lastSync: string | null; username: string | null };
+
+/** #924 §6: Options' "Local check-ins" block. Linked mode has no local database to show. */
+export async function handleLocalDbStats(): Promise<LocalDbStatsReply> {
+  const empty = { checkins: 0, beers: 0, lastSync: null, username: null };
+  if (!(await isLocalMode())) return { type: 'local-db:stats:ok', mode: 'linked', ...empty };
+  try {
+    const s = await localStats();
+    return { type: 'local-db:stats:ok', mode: 'local', checkins: s.checkins, beers: s.beers,
+      lastSync: s.meta?.updatedAt ?? null, username: s.meta?.username ?? null };
+  } catch {
+    return { type: 'local-db:stats:ok', mode: 'local', ...empty };
+  }
+}
+
+/**
+ * #924 §6: "Clear" — the sync stops, the database goes (a late page of it is refused by its
+ * generation), and the status starts over. Only in local mode: linked check-ins live on the server.
+ */
+export async function handleLocalDbClear(): Promise<{ type: 'local-db:cleared'; ok: boolean }> {
+  if (!(await isLocalMode())) return { type: 'local-db:cleared', ok: false };
+  try {
+    await syncScheduler.stop().catch(() => false);
+    const generation = ++syncGeneration;
+    await clearLocalDb(() => syncAbortController?.abort());
+    invalidateHadIndex();
+    await enqueueSyncStatus(emptySyncStatus(), generation);
+    return { type: 'local-db:cleared', ok: true };
+  } catch (error) {
+    console.warn('[beer-overlay] clearing the local check-ins failed', error);
+    return { type: 'local-db:cleared', ok: false };
+  }
 }
 
 // #934: the check alarm keeps its period across worker restarts — created only when missing.
@@ -699,5 +771,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
   if (t === 'checkin-sync:stop') { handleCheckinSyncStop().then(sendResponse); return true; }
   if (t === 'checkin-sync:status') { handleCheckinSyncStatus().then(sendResponse); return true; }
+  if (t === 'local-db:stats') { handleLocalDbStats().then(sendResponse); return true; }
+  if (t === 'local-db:clear') { handleLocalDbClear().then(sendResponse); return true; }
   return undefined;
 });

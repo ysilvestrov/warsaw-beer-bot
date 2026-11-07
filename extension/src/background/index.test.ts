@@ -1,12 +1,14 @@
 import 'fake-indexeddb/auto';
 import { webcrypto } from 'node:crypto';
 import * as cacheStore from '../cache/store';
-import { clearLocalDb, inPageTx } from '../local/db';
-import { invalidateHadIndex } from '../local/had';
+import { clearLocalDb, currentGeneration, inPageTx, localStats } from '../local/db';
+import { hadIndex, invalidateHadIndex } from '../local/had';
+import { feedPageOf } from '../../../src/shared/checkin-sync/scenarios';
 import { afterEach, beforeEach, describe, it, expect, vi, type Mock } from 'vitest';
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
-  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleMatch, restoreSyncBadge,
+  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleLocalDbClear, handleLocalDbStats, handleMatch,
+  restoreSyncBadge,
 } from './index';
 import { setSettings } from '../shared/config';
 import { CHECK_ALARM, INTENT_KEY, WATCHDOG_ALARM } from './sync-scheduler';
@@ -22,6 +24,9 @@ const localStore = new Map<string, unknown>();
 // A signed-in profile page: the step checks the session on page one (#934).
 const signedIn = (name: string) => `<html><a data-href=":user/profile" href="/user/${name}">My Profile</a></html>`;
 const FEED = signedIn('bob');
+// #924: a signed-out untappd.com page — in local mode the session check of getState refuses it.
+const SIGNED_OUT = '<html><a href="/login">Log in</a></html>';
+const LINKED_BINDING = { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' };
 // #934: the scheduler's verdict fields of a status reply for a record that carries none.
 const NO_VERDICT = { caughtUp: false, gapMissing: null, pausedUntil: null, quiet: false };
 
@@ -545,10 +550,12 @@ test('a start without credentials cannot retain an earlier completion', async ()
   await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
     is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
   await setSettings({ token: '' });
+  // #924: without a token the start is a local sync; here the session check stops it.
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(SIGNED_OUT)));
   await handleCheckinSyncStart();
+  await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'no_session' }));
   expect(await getCached('old-personal')).toBe(null);
-  expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
-    mergedThisRun: 0, outcome: 'error', complete: false });
+  expect(localStore.get('checkinSync')).not.toHaveProperty('caughtUp');
 });
 
 test('clearing credentials invalidates cached personal data and aborts an active old-token sync', async () => {
@@ -563,8 +570,9 @@ test('clearing credentials invalidates cached personal data and aborts an active
     is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
   const signal = fetchFeed.mock.calls[0][1].signal!;
   await setSettings({ token: '' });
+  // #924: without a token the popup is in local mode — a fresh start, not a failure.
   expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, ...NO_VERDICT, username: null });
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, ...NO_VERDICT, username: null });
   const aborted = signal.aborted;
   const cached = await getCached('old-personal');
   resolveFeed(new Response('<html></html>'));
@@ -574,7 +582,7 @@ test('clearing credentials invalidates cached personal data and aborts an active
   expect(cached).toBe(null);
   expect(post).not.toHaveBeenCalled();
   expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
-    mergedThisRun: 0, outcome: 'error', complete: false });
+    mergedThisRun: 0, outcome: null, complete: false });
 });
 
 
@@ -610,23 +618,23 @@ test('late personal cache writes cannot repopulate cleared credentials, while gl
 
 test('a cache removal failure does not preserve a completed report on no-token start', async () => {
   await chrome.storage.local.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
-    mergedThisRun: 5, outcome: 'done', complete: true } });
+    mergedThisRun: 5, outcome: 'done', complete: true, binding: LINKED_BINDING } });
   await setSettings({ token: '' });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(SIGNED_OUT)));
   vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache storage failed'));
   expect(await handleCheckinSyncStart()).toEqual({ type: 'checkin-sync:started', alreadyRunning: false });
-  expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
-    mergedThisRun: 0, outcome: 'error', complete: false });
+  await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'no_session', complete: false }));
 });
 
 test('a cache removal failure still returns and persists a no-token status reply', async () => {
   await chrome.storage.local.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
-    mergedThisRun: 5, outcome: 'done', complete: true } });
+    mergedThisRun: 5, outcome: 'done', complete: true, binding: LINKED_BINDING } });
   await setSettings({ token: '' });
   vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache storage failed'));
   expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
-    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, ...NO_VERDICT, username: null });
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, ...NO_VERDICT, username: null });
   expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
-    mergedThisRun: 0, outcome: 'error', complete: false });
+    mergedThisRun: 0, outcome: null, complete: false });
 });
 
 const scopedPersonal: MatchResult = { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
@@ -677,9 +685,11 @@ test('a normal sync start does not invalidate a pending match for the unchanged 
 test.each(['start', 'status'] as const)('retained cache entries are unreadable after failed %s cleanup and a token change', async (operation) => {
   await cacheStore.setCached('retained', scopedPersonal);
   await setSettings({ token: '' });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(SIGNED_OUT)));
   vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache removal failed'));
   const operations = { start: handleCheckinSyncStart, status: handleCheckinSyncStatus };
   await operations[operation]();
+  await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
   const { handleCacheGetMany } = await import('./index');
   expect(await handleCacheGetMany(['retained', 'absent'])).toEqual([null, null]);
   expect(await getCached('retained')).toEqual(scopedPersonal);
@@ -788,13 +798,15 @@ describe('#934 scheduler wiring', () => {
     await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
   });
 
-  it('dropping an intent for a gone token leaves no ✓ of the previous run next to not_linked', async () => {
+  // #924: without a token the intent has a local database to continue into.
+  it('an intent left by a gone token continues in local mode, with no ✓ of the previous run', async () => {
     localStore.set('checkinSync', { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome: 'done',
-      complete: true, caughtUp: true, binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } });
+      complete: true, caughtUp: true, binding: LINKED_BINDING });
     localStore.set(INTENT_KEY, { id: 'a', kind: 'manual', startedAt: new Date().toISOString(), silentPagesUsed: 0 });
     await setSettings({ token: '' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(SIGNED_OUT)));
     onAlarm({ name: WATCHDOG_ALARM });
-    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ outcome: 'not_linked' }));
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'no_session' }));
     expect(localStore.get('checkinSync')).not.toHaveProperty('caughtUp');
   });
 
@@ -863,10 +875,11 @@ describe('#934 scheduler wiring', () => {
   it('a failing badge call does not fail the status write', async () => {
     vi.mocked(chrome.action.setBadgeText).mockRejectedValueOnce(new Error('no action'));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    localStore.set('checkinSync', { running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0, outcome: 'done', complete: false });
+    localStore.set('checkinSync', { running: false, serverCount: 88, profileTotal: 100, mergedThisRun: 0, outcome: 'done', complete: false,
+      binding: LINKED_BINDING });
     await setSettings({ token: '' });
-    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: 'error' });
-    expect(localStore.get('checkinSync')).toMatchObject({ outcome: 'error' });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null });
+    expect(localStore.get('checkinSync')).toMatchObject({ outcome: null });
     expect(console.warn).toHaveBeenCalledWith('[beer-overlay] sync badge update failed', expect.any(Error));
   });
 
@@ -893,5 +906,141 @@ describe('#934 scheduler wiring', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(fetchMock).toHaveBeenCalledTimes(0);
     expect(localStore.has(INTENT_KEY)).toBe(false);
+  });
+});
+
+// #924 §4–§6: the worker without a Telegram token — sync into IndexedDB, status, Clear.
+describe('#924 local mode in the worker', () => {
+  const NAV = '<a data-href=":user/profile" href="/user/bob">My Profile</a>';
+  const withNav = (html: string) => html.replace('<body>', `<body>${NAV}`);
+  const P1 = 'https://untappd.com/user/bob';
+  const P2 = 'https://untappd.com/profile/more_feed/bob/580?v2=true';
+  const P3 = 'https://untappd.com/profile/more_feed/bob/550?v2=true';
+  const PAGES: Record<string, string> = {
+    'https://untappd.com/': withNav('<html><body></body></html>'),
+    [P1]: withNav(feedPageOf([600, 590, 580], { total: 9, rating: 4 })),
+    [P2]: feedPageOf([570, 560, 550], { total: 9 }),
+    [P3]: feedPageOf([540, 530, 520], { total: 9 }),
+  };
+  const untappd = () => vi.fn(async (url: string) => (url in PAGES ? new Response(PAGES[url]) : new Response('', { status: 404 })));
+  const anonBinding = { username: '', linkRevision: 0, credential: 'bfc0241d7945d212b82c069d6153ed25e97f7f351bdf09a7f098c5e3f2f839ee' };
+  const localRecord = async (over: Record<string, unknown> = {}) => ({ running: false, serverCount: 9, profileTotal: 9, mergedThisRun: 9,
+    outcome: 'done', complete: true, caughtUp: true,
+    binding: { username: 'bob', linkRevision: await currentGeneration(), token: '', baseUrl: 'https://api.test' }, ...over });
+  const putRows = (bids: number[]) => inPageTx(async (tx) => {
+    for (const [i, bid] of bids.entries()) {
+      await tx.putCheckin({ checkin_id: String(9000 + i), bid, beer_name: 'N', brewery_name: 'B', user_rating: null, checkin_at: '2026-10-01T10:00:00.000Z' });
+    }
+  });
+
+  beforeEach(async () => {
+    await setSettings({ token: '' });
+    await clearLocalDb();
+    invalidateHadIndex();
+  });
+
+  // Spec test 8: three pages, and not one request to our /checkins/*.
+  it('a full sync fills this browser only: every request goes to untappd.com, none to /checkins/*', async () => {
+    const fetchMock = untappd();
+    vi.stubGlobal('fetch', fetchMock);
+    const state = vi.mocked(client.getCheckinSyncState);
+    state.mockClear();
+    const post = vi.spyOn(client, 'postCheckinSyncPage');
+    await cacheStore.setCached('kept', { raw: { brewery: 'B', name: 'N' }, matched_beer: null, is_drunk: false,
+      drunk_uncertain: false, user_rating: null, source: null, searched: true, cacheBinding: anonBinding });
+
+    await handleCheckinSyncStart();
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }), { timeout: 15000 });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['https://untappd.com/', P1, P2, P3]);
+    expect(state).toHaveBeenCalledTimes(0);
+    expect(post).toHaveBeenCalledTimes(0);
+    expect(await localStats()).toMatchObject({ checkins: 9, beers: 9 });
+    // The index sees the pages without a manual invalidation, and the anonymous cache stays.
+    expect((await hadIndex()).get(600)).toBe(4);
+    expect(await getCached('kept')).toMatchObject({ cacheBinding: anonBinding });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ running: false, outcome: 'done', caughtUp: true, serverCount: 9, username: 'bob' });
+  }, 20000);
+
+  it('the status of this database is read from storage alone, with no request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    localStore.set('checkinSync', await localRecord());
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: 'done', caughtUp: true, username: 'bob' });
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it('a record of a database that was cleared since reads as a fresh start', async () => {
+    localStore.set('checkinSync', await localRecord({ binding: { username: 'bob', linkRevision: (await currentGeneration()) - 1, token: '', baseUrl: 'https://api.test' } }));
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false, username: null });
+  });
+
+  it('a local record is no linked account: a new Telegram token starts fresh, not "account changed"', async () => {
+    localStore.set('checkinSync', await localRecord());
+    await setSettings({ token: 'tok' });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false, username: 'bob' });
+  });
+
+  it('a linked record after the token is removed reads as a fresh local start and is reset', async () => {
+    localStore.set('checkinSync', { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 0, outcome: 'done',
+      complete: true, caughtUp: true, binding: LINKED_BINDING });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false, username: null });
+    expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  });
+
+  // Spec test 9.
+  it('Clear empties the database, the index and the status; the next sync makes a new owner', async () => {
+    await putRows([101, 102]);
+    expect((await hadIndex()).size).toBe(2);
+    localStore.set('checkinSync', await localRecord());
+    expect(await handleLocalDbClear()).toEqual({ type: 'local-db:cleared', ok: true });
+    expect(await localStats()).toEqual({ checkins: 0, beers: 0, meta: null });
+    expect((await hadIndex()).size).toBe(0);
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html><body><a data-href=":user/profile" href="/user/alice">My Profile</a></body></html>')));
+    await handleCheckinSyncStart();
+    await vi.waitFor(async () => expect((await localStats()).meta).toMatchObject({ username: 'alice' }));
+    await handleCheckinSyncStop();
+    await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
+  });
+
+  it('Clear in the middle of a sync stops it and leaves a fresh status, not the old run', async () => {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => url === P1
+      ? new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      })
+      : Promise.resolve(new Response(PAGES[url])));
+    vi.stubGlobal('fetch', fetchMock);
+    await handleCheckinSyncStart();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith(P1, expect.anything()));
+    expect(await handleLocalDbClear()).toEqual({ type: 'local-db:cleared', ok: true });
+    await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false, serverCount: 0 });
+    expect(await localStats()).toEqual({ checkins: 0, beers: 0, meta: null });
+  });
+
+  it('Clear with a Telegram token does nothing: linked check-ins live on the server', async () => {
+    await putRows([101]);
+    await setSettings({ token: 'tok' });
+    expect(await handleLocalDbClear()).toEqual({ type: 'local-db:cleared', ok: false });
+    expect((await localStats()).checkins).toBe(1);
+  });
+
+  it('stats count check-ins and distinct beers, with the last sync time and the owner', async () => {
+    await putRows([101, 101, 102]);
+    await inPageTx((tx) => tx.putMeta({ username: 'bob', generation: 0, profileTotal: 3, oldestId: 1, updatedAt: '2026-11-07T10:05:00.000Z' }));
+    expect(await handleLocalDbStats()).toEqual({ type: 'local-db:stats:ok', mode: 'local', checkins: 3, beers: 2,
+      lastSync: '2026-11-07T10:05:00.000Z', username: 'bob' });
+    await setSettings({ token: 'tok' });
+    expect(await handleLocalDbStats()).toEqual({ type: 'local-db:stats:ok', mode: 'linked', checkins: 0, beers: 0, lastSync: null, username: null });
+  });
+
+  it('the 6-hourly check runs without a Telegram token', async () => {
+    permissionsContains.mockResolvedValue(true);
+    const fetchMock = vi.fn(async () => new Response(SIGNED_OUT));
+    vi.stubGlobal('fetch', fetchMock);
+    onAlarm({ name: CHECK_ALARM });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('https://untappd.com/', expect.anything()));
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
   });
 });

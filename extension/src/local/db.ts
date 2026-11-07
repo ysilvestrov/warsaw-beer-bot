@@ -127,6 +127,17 @@ export async function allCheckins(): Promise<LocalCheckin[]> {
   return done(db.transaction(CHECKINS, 'readonly').objectStore(CHECKINS).getAll()) as Promise<LocalCheckin[]>;
 }
 
+/** Options: how much this browser holds, and for whom. `beers` counts distinct bids. */
+export async function localStats(): Promise<{ checkins: number; beers: number; meta: LocalMeta | null }> {
+  const db = await openLocalDb();
+  const tx = db.transaction([CHECKINS, META], 'readonly');
+  const [rows, meta] = await Promise.all([
+    done(tx.objectStore(CHECKINS).getAll()) as Promise<LocalCheckin[]>,
+    done(tx.objectStore(META).get(STATE_KEY)) as Promise<LocalMeta | undefined>,
+  ]);
+  return { checkins: rows.length, beers: new Set(rows.map((r) => r.bid)).size, meta: meta ?? null };
+}
+
 let clearing: Promise<void> = Promise.resolve();
 
 // Clear: stop the running sync, move to a new generation, then delete. A page that was in flight
