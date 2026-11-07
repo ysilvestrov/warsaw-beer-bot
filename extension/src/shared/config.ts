@@ -50,6 +50,14 @@ export function authToken(
   return s.installDeletionPending || s.installBaseUrl !== s.baseUrl ? '' : s.installToken;
 }
 
+/**
+ * #924: the mode is the token, with no switch in the UI. A Telegram token syncs check-ins to the
+ * server (`linked`); without one they live only in this browser's IndexedDB (`local`).
+ */
+export function syncMode(s: Pick<Settings, 'token'>): 'linked' | 'local' {
+  return s.token ? 'linked' : 'local';
+}
+
 /** #923: a registration would happen now — statistics on, nothing pending, no token of either kind. */
 export function wantsRegistration(s: Settings): boolean {
   return s.installRegistration && !s.installDeletionPending && !s.token && !s.installToken;

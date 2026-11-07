@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { feedFailure, runCheckinSync, type CheckinSyncDeps } from './handle-checkin-sync';
+import { FeedVerdict, feedFailure, runCheckinSync, type CheckinSyncDeps } from './handle-checkin-sync';
 import { ApiError } from '../api/client';
 import type { CheckinSyncPageResult, CheckinSyncState } from '../api/types';
 
@@ -111,6 +111,21 @@ describe('runCheckinSync', () => {
     const getState = vi.fn(async () => { throw Object.assign(new Error(), { code: 'not_linked' }); });
     const out = await runCheckinSync(baseDeps({ getState }));
     expect(out.status).toBe('not_linked');
+  });
+
+  // #924: the session request of local mode, made inside getState.
+  it.each(['blocked', 'feed_unavailable', 'capped'] as const)('surfaces a %s verdict from getState, before any page', async (status) => {
+    const fetchFeed = vi.fn(async () => '');
+    const getState = vi.fn(async () => { throw new FeedVerdict(status); });
+    const out = await runCheckinSync(baseDeps({ getState, fetchFeed }));
+    expect(out.status).toBe(status);
+    expect(fetchFeed).toHaveBeenCalledTimes(0);
+  });
+
+  it('a blocked ApiError from getState (the server answering 502) still reads as an error', async () => {
+    const getState = vi.fn(async () => { throw new ApiError('blocked'); });
+    const out = await runCheckinSync(baseDeps({ getState }));
+    expect(out.status).toBe('error');
   });
 
   it('surfaces blocked from submitPage', async () => {

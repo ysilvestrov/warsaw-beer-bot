@@ -31,6 +31,8 @@ domains + `beer-api` + optional hosts) — paste the consolidated text from
   — each product's own page fetched in the background for the same beer/brewery data; HTML
   of the user's own Untappd check-in feed when they use Sync). The shop's domain sent with a
   match request (#923) is the same page content: the server already receives these beers.
+  Without a bot token (#924), Sync reads the same feed and stores the drinks and ratings only in
+  the browser's IndexedDB — nothing of it leaves the device, and «User activity» stays NO.
 - Personally identifiable info, health, financial, personal communications, location, web
   history, user activity (analytics-style) — NO.
 

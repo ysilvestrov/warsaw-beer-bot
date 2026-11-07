@@ -127,6 +127,44 @@ export async function allCheckins(): Promise<LocalCheckin[]> {
   return done(db.transaction(CHECKINS, 'readonly').objectStore(CHECKINS).getAll()) as Promise<LocalCheckin[]>;
 }
 
+/** The database's owner record; null until the first sync in this generation. */
+export async function localMeta(): Promise<LocalMeta | null> {
+  const db = await openLocalDb();
+  const meta = (await done(db.transaction(META, 'readonly').objectStore(META).get(STATE_KEY))) as LocalMeta | undefined;
+  return meta ?? null;
+}
+
+// Distinct keys of an index, walked one unique key at a time: no record is loaded.
+function countUniqueKeys(index: IDBIndex): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let n = 0;
+    const req = index.openKeyCursor(null, 'nextunique');
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor === null) { resolve(n); return; }
+      n += 1;
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/**
+ * Options: how much this browser holds, and for whom. `beers` counts distinct bids. Counts come from
+ * the store and its bid index, so a history of tens of thousands of check-ins is never loaded whole.
+ */
+export async function localStats(): Promise<{ checkins: number; beers: number; meta: LocalMeta | null }> {
+  const db = await openLocalDb();
+  const tx = db.transaction([CHECKINS, META], 'readonly');
+  const checkins = tx.objectStore(CHECKINS);
+  const [count, beers, meta] = await Promise.all([
+    done(checkins.count()),
+    countUniqueKeys(checkins.index('bid')),
+    done(tx.objectStore(META).get(STATE_KEY)) as Promise<LocalMeta | undefined>,
+  ]);
+  return { checkins: count, beers, meta: meta ?? null };
+}
+
 let clearing: Promise<void> = Promise.resolve();
 
 // Clear: stop the running sync, move to a new generation, then delete. A page that was in flight
