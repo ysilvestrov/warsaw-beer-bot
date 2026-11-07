@@ -2,7 +2,8 @@ import { authToken, getSettings, syncMode, wantsRegistration, type Settings } fr
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, DEFAULT_TIMEOUT_MS, getCheckinSyncState, postCheckinSyncPage, type MatchClient } from '../api/client';
 import { ensureInstall, extensionVersion, forgetInstallToken } from './install';
-import { feedFailure, runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
+import { FeedVerdict, feedFailure, runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
+import { isBlockPage } from '../../../src/shared/untappd/block';
 import {
   CHECK_ALARM, CHECK_PERIOD_MINUTES, INTENT_KEY, WATCHDOG_ALARM, createSyncScheduler,
   type SchedulerReport, type StepRequest,
@@ -487,11 +488,17 @@ async function launchCheckinSync(step: StepRequest): Promise<{ reply: CheckinSyn
   if (step.signal.aborted) controller.abort();
   else step.signal.addEventListener('abort', () => controller.abort(), { once: true });
   // #924: the database adapter of local mode — the same walk, decided over IndexedDB, with no request to us.
+  // The session request is a request to untappd.com like any page: it spends the silent budget
+  // first, and a block page or a refusal is a verdict on the step, not a sign-out (#934 rules).
   const local = isLocal ? localSyncDeps({
     fetchText: async (url) => {
+      if (step.beforeFetch && !(await step.beforeFetch())) throw new FeedVerdict('capped');
       const res = await fetch(url, { credentials: 'include', signal: controller.signal });
-      if (!res.ok) throw new ApiError('feed_unavailable');
-      return res.text();
+      const failure = feedFailure(false, res);
+      if (failure) throw new FeedVerdict(failure);
+      const html = await res.text();
+      if (isBlockPage(html)) throw new FeedVerdict('blocked');
+      return html;
     },
   }) : null;
   try {

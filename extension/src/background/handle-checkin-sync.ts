@@ -19,6 +19,18 @@ export function feedFailure(isMoreFeed: boolean, res: { ok: boolean; status: num
   return null;
 }
 
+/**
+ * #924: local mode learns the session from untappd.com inside `getState`. That request gets the same
+ * verdicts as a feed page — blocked, unavailable, or no budget left — and this carries them out of
+ * `getState` unchanged. The server client never throws it, so linked mode maps its errors as before.
+ */
+export class FeedVerdict extends Error {
+  constructor(public status: 'blocked' | 'feed_unavailable' | 'capped') {
+    super(status);
+    this.name = 'FeedVerdict';
+  }
+}
+
 export interface SyncOutcome {
   status: SyncStatus;
   complete: boolean;
@@ -68,6 +80,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     state = await deps.getState();
   } catch (e) {
     if (deps.signal?.aborted) return finish('cancelled');
+    if (e instanceof FeedVerdict) return finish(e.status);
     const code = errCode(e);
     // #924: local mode learns the session and the database owner here, before any page:
     // no signed-in untappd.com user, or another one than the database belongs to.

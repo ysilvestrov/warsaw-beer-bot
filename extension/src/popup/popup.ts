@@ -27,8 +27,12 @@ export interface SyncStatusView {
   mode?: 'linked' | 'local';
 }
 
-/** #924: the same question Options asks before the same deletion. */
-export const CLEAR_QUESTION = 'Delete the check-ins stored in this browser? Your Untappd account is not affected.';
+/**
+ * #924: asked before Clear and sync. Cancel never deletes: it keeps the check-ins and syncs as before,
+ * which is the way back for someone who has signed in again to the account they belong to.
+ */
+export const CLEAR_QUESTION = 'Delete the check-ins stored in this browser and sync this account?\n\n'
+  + 'Cancel keeps them and only syncs — for when you have signed back in to the account they belong to.';
 
 export const UNTAPPD_HOME = 'https://untappd.com/';
 
@@ -350,13 +354,8 @@ async function initPopup(): Promise<void> {
         syncBtn.disabled = false;
         return;
       }
-      if (clearFirst) {
-        // After the permission request: the gesture is spent on it, and confirm() needs none.
-        if (!window.confirm(CLEAR_QUESTION)) {
-          syncStatus.textContent = '';
-          syncBtn.disabled = false;
-          return;
-        }
+      // After the permission request: the gesture is spent on it, and confirm() needs none.
+      if (clearFirst && window.confirm(CLEAR_QUESTION)) {
         const cleared = await new Promise<boolean>((resolve) => {
           chrome.runtime.sendMessage({ type: 'local-db:clear' }, (reply?: { ok?: boolean }) => {
             void chrome.runtime.lastError;
@@ -368,8 +367,8 @@ async function initPopup(): Promise<void> {
           syncBtn.disabled = false;
           return;
         }
-        syncStatus.textContent = 'Starting…';
       }
+      syncStatus.textContent = 'Starting…';
       await requestSyncStart((callback) => {
         chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => {
           void chrome.runtime.lastError;

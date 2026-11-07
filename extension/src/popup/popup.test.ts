@@ -309,25 +309,24 @@ describe('initPopup', () => {
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'checkin-sync:start' }, expect.any(Function)));
     const types = send.mock.calls.map(([m]) => m.type);
     expect(types.slice(0, 2)).toEqual(['local-db:clear', 'checkin-sync:start']);
-    expect(ask).toHaveBeenCalledWith('Delete the check-ins stored in this browser? Your Untappd account is not affected.');
+    expect(ask).toHaveBeenCalledWith('Delete the check-ins stored in this browser and sync this account?\n\n'
+      + 'Cancel keeps them and only syncs — for when you have signed back in to the account they belong to.');
     // The permission prompt needs the click gesture, so it comes first; the question, before anything is sent.
     expect(chromeStub.permissions.request.mock.invocationCallOrder[0]).toBeLessThan(ask.mock.invocationCallOrder[0]);
     expect(ask.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
     vi.unstubAllGlobals();
   });
 
-  it('without a token: Clear and sync answered no deletes nothing and starts nothing (#924)', async () => {
+  it('without a token: Clear and sync answered Cancel keeps the check-ins and only syncs (#924)', async () => {
     const reply = { type: 'checkin-sync:status:ok', running: false, serverCount: 5, profileTotal: 5, mergedThisRun: 0,
       outcome: 'account_changed', complete: false, caughtUp: false, gapMissing: null, pausedUntil: null, quiet: false, username: 'alice' };
     await bootPopup('', reply);
     const send = vi.fn((_m: { type?: string }, callback?: (r?: object) => void) => { callback?.(reply); });
     (globalThis.chrome as unknown as { runtime: Record<string, unknown> }).runtime.sendMessage = send;
     vi.stubGlobal('confirm', vi.fn(() => false));
-    const syncBtn = document.getElementById('syncCheckins') as HTMLButtonElement;
-    syncBtn.click();
-    await vi.waitFor(() => expect(syncBtn.disabled).toBe(false));
-    expect(send).toHaveBeenCalledTimes(0);
-    expect(document.getElementById('syncStatus')?.textContent).toBe('');
+    (document.getElementById('syncCheckins') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'checkin-sync:start' }, expect.any(Function)));
+    expect(send).not.toHaveBeenCalledWith({ type: 'local-db:clear' }, expect.any(Function));
     vi.unstubAllGlobals();
   });
 

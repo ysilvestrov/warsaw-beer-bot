@@ -69,8 +69,9 @@ link your account in the bot: being logged in on untappd.com is enough.
   Untappd account is not affected. Uninstalling the extension deletes them too.
 - If you're logged in to untappd.com as a **different account**, the popup says `Untappd account
   changed`, names the account whose check-ins are stored, and gives two ways out: sign back in to
-  it on untappd.com, or **"Clear and sync"** — after a confirmation the stored check-ins are deleted
-  and the new account's sync starts.
+  it on untappd.com, or **"Clear and sync"**. The button asks first: "OK" deletes the stored
+  check-ins and syncs the new account, "Cancel" deletes nothing and just syncs — use it once you've
+  signed back in to the account the check-ins belong to.
 - Until you press "Sync my check-ins" once, the extension does not read your Untappd feed at all.
 - On another computer or browser, sync again. To have your history everywhere and get
   recommendations from the bot, get a token (Part 1.4).

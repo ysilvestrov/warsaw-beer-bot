@@ -949,6 +949,8 @@ describe('#924 local mode in the worker', () => {
     await cacheStore.setCached('kept', { raw: { brewery: 'B', name: 'N' }, matched_beer: null, is_drunk: false,
       drunk_uncertain: false, user_rating: null, source: null, searched: true, cacheBinding: anonBinding });
 
+    // An index built before the sync (a shop page opened earlier) must not outlive it.
+    expect((await hadIndex()).size).toBe(0);
     await handleCheckinSyncStart();
     await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }), { timeout: 15000 });
 
@@ -1019,6 +1021,33 @@ describe('#924 local mode in the worker', () => {
     });
     localStore.set('checkinSync', await localRecord({ outcome: 'account_changed', binding: { username: '', linkRevision: await currentGeneration(), token: '', baseUrl: 'https://api.test' } }));
     expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: 'account_changed', username: 'alice' });
+  });
+
+  it.each([
+    ['a 429 on the session request', () => new Response('', { status: 429 })],
+    ['a Cloudflare page with 200 on the session request', () => new Response('<html><head><title>Just a moment...</title></head><body><div id="cf-wrapper">Attention Required! | Cloudflare</div></body></html>')],
+  ])('%s is blocked, not a sign-out, and pauses the checks', async (_name, answer) => {
+    vi.stubGlobal('fetch', vi.fn(async () => answer()));
+    await handleCheckinSyncStart();
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'blocked' }));
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
+  });
+
+  it('the session request of a silent check spends the silent budget before it goes out', async () => {
+    await inPageTx(async (tx) => {
+      await tx.putMeta({ username: 'bob', generation: await currentGeneration(), profileTotal: 9, oldestId: null, updatedAt: '2026-11-07T10:00:00.000Z' });
+    });
+    permissionsContains.mockResolvedValue(true);
+    let release!: () => void;
+    const fetchMock = vi.fn((url: string) => (url === 'https://untappd.com/'
+      ? new Promise<Response>((resolve) => { release = () => resolve(new Response(PAGES[url])); })
+      : Promise.resolve(new Response(PAGES[url] ?? '', { status: url in PAGES ? 200 : 404 }))));
+    vi.stubGlobal('fetch', fetchMock);
+    onAlarm({ name: CHECK_ALARM });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('https://untappd.com/', expect.anything()));
+    expect(localStore.get(INTENT_KEY)).toMatchObject({ kind: 'silent', silentPagesUsed: 1 });
+    release();
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false), { timeout: 15000 });
   });
 
   it('the silent check reads nothing before the first sync into this browser', async () => {
