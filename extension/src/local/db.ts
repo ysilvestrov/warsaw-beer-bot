@@ -134,15 +134,35 @@ export async function localMeta(): Promise<LocalMeta | null> {
   return meta ?? null;
 }
 
-/** Options: how much this browser holds, and for whom. `beers` counts distinct bids. */
+// Distinct keys of an index, walked one unique key at a time: no record is loaded.
+function countUniqueKeys(index: IDBIndex): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let n = 0;
+    const req = index.openKeyCursor(null, 'nextunique');
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor === null) { resolve(n); return; }
+      n += 1;
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/**
+ * Options: how much this browser holds, and for whom. `beers` counts distinct bids. Counts come from
+ * the store and its bid index, so a history of tens of thousands of check-ins is never loaded whole.
+ */
 export async function localStats(): Promise<{ checkins: number; beers: number; meta: LocalMeta | null }> {
   const db = await openLocalDb();
   const tx = db.transaction([CHECKINS, META], 'readonly');
-  const [rows, meta] = await Promise.all([
-    done(tx.objectStore(CHECKINS).getAll()) as Promise<LocalCheckin[]>,
+  const checkins = tx.objectStore(CHECKINS);
+  const [count, beers, meta] = await Promise.all([
+    done(checkins.count()),
+    countUniqueKeys(checkins.index('bid')),
     done(tx.objectStore(META).get(STATE_KEY)) as Promise<LocalMeta | undefined>,
   ]);
-  return { checkins: rows.length, beers: new Set(rows.map((r) => r.bid)).size, meta: meta ?? null };
+  return { checkins: count, beers, meta: meta ?? null };
 }
 
 let clearing: Promise<void> = Promise.resolve();

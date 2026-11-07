@@ -171,11 +171,12 @@ async function initOptionsPage(): Promise<void> {
   const localStats = el<HTMLElement>('localDbStats');
   const localClear = el<HTMLButtonElement>('localDbClear');
   const localStatus = el<HTMLElement>('localDbStatus');
-  let showLocalDb: ((hasToken: boolean) => Promise<void>) | null = null;
-  if (localSection && localStats && localClear && localStatus) {
-    void initLocalDb({ section: localSection, stats: localStats, clear: localClear, status: localStatus },
-      s.token !== '', sendToWorker, (q) => window.confirm(q)).then((show) => { showLocalDb = show; });
-  }
+  // A Save that comes before the block has its first counts waits for them, then applies the token
+  // it saved — so a slow worker cannot leave the block on the token the page opened with.
+  const localDbReady = localSection && localStats && localClear && localStatus
+    ? initLocalDb({ section: localSection, stats: localStats, clear: localClear, status: localStatus },
+      s.token !== '', sendToWorker, (q) => window.confirm(q))
+    : Promise.resolve(null);
 
   const stats = el<HTMLInputElement>('installRegistration');
   const installStatus = el<HTMLElement>('installStatus');
@@ -191,7 +192,7 @@ async function initOptionsPage(): Promise<void> {
 
   el<HTMLButtonElement>('save')?.addEventListener('click', async () => {
     await setSettings({ token: tokenInput.value.trim(), baseUrl: urlInput.value.trim() });
-    await showLocalDb?.(tokenInput.value.trim() !== '');
+    await (await localDbReady)?.(tokenInput.value.trim() !== '');
     // Best-effort: request permission for a custom (non-default) host so the worker can
     // fetch it. Skipped in the store build, which has no 'https://*/*' to grant.
     if (!IS_STORE_BUILD) {
