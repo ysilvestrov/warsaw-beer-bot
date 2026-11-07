@@ -150,11 +150,11 @@ describe('initLocalDb (#924)', () => {
 
   it('Clear on no sends nothing', async () => {
     const n = nodes();
-    const send = vi.fn(async () => full);
+    const send = vi.fn(async (_m: { type: string }) => full);
     await initLocalDb(n, false, send, () => false);
     n.clear.click();
     await new Promise((r) => setTimeout(r, 0));
-    expect(send.mock.calls.map(([m]) => (m as { type: string }).type)).toEqual(['local-db:stats']);
+    expect(send.mock.calls.map(([m]) => m.type)).toEqual(['local-db:stats']);
     expect(n.status.textContent).toBe('');
   });
 
