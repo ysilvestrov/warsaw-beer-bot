@@ -68,8 +68,10 @@ link your account in the bot: being logged in on untappd.com is enough.
   **"Local check-ins"**. **"Clear local check-ins"** (after a confirmation) deletes them; your
   Untappd account is not affected. Uninstalling the extension deletes them too.
 - If you're logged in to untappd.com as a **different account**, the popup says `Untappd account
-  changed` and offers **"Clear and sync"**: the previous account's check-ins are deleted and the
-  new account's sync starts.
+  changed`, names the account whose check-ins are stored, and gives two ways out: sign back in to
+  it on untappd.com, or **"Clear and sync"** — after a confirmation the stored check-ins are deleted
+  and the new account's sync starts.
+- Until you press "Sync my check-ins" once, the extension does not read your Untappd feed at all.
 - On another computer or browser, sync again. To have your history everywhere and get
   recommendations from the bot, get a token (Part 1.4).
 ### 1.2. Link your Untappd account

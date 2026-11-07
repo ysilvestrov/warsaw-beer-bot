@@ -27,6 +27,9 @@ export interface SyncStatusView {
   mode?: 'linked' | 'local';
 }
 
+/** #924: the same question Options asks before the same deletion. */
+export const CLEAR_QUESTION = 'Delete the check-ins stored in this browser? Your Untappd account is not affected.';
+
 export const UNTAPPD_HOME = 'https://untappd.com/';
 
 export interface SyncWidgetView {
@@ -93,12 +96,13 @@ export function syncWidgetView(s: SyncStatusView, now: Date): SyncWidgetView {
     // stays — after signing in, the person must not wait for the next quiet check.
     case 'account_changed':
       // #924: in local mode the database belongs to one account; the person decides whether to drop it.
+      // Signing back in as the owner is the other way out, hence the link; Clear asks before deleting.
       if (s.mode === 'local') {
         return view('Untappd account changed', {
           detail: s.username !== null
-            ? `This browser's check-ins belong to ${s.username}. Clear them and sync this account?`
-            : 'Clear the check-ins stored in this browser and sync this account?',
-          action: { kind: 'clear', label: 'Clear and sync' },
+            ? `This browser's check-ins belong to ${s.username}. Sign in as ${s.username}, or clear them and sync this account.`
+            : 'Sign in to the account these check-ins belong to, or clear them and sync this account.',
+          link: untappd, action: { kind: 'clear', label: 'Clear and sync' },
         });
       }
       return view('Untappd account changed', {
@@ -347,6 +351,12 @@ async function initPopup(): Promise<void> {
         return;
       }
       if (clearFirst) {
+        // After the permission request: the gesture is spent on it, and confirm() needs none.
+        if (!window.confirm(CLEAR_QUESTION)) {
+          syncStatus.textContent = '';
+          syncBtn.disabled = false;
+          return;
+        }
         const cleared = await new Promise<boolean>((resolve) => {
           chrome.runtime.sendMessage({ type: 'local-db:clear' }, (reply?: { ok?: boolean }) => {
             void chrome.runtime.lastError;

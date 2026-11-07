@@ -67,10 +67,16 @@ export interface SchedulerDeps {
   clearMatchCache: () => Promise<void>;
   hasUntappdPermission: () => Promise<boolean>;
   hasToken: () => Promise<boolean>;
+  /**
+   * #924: whether a silent check may read the feed — false without a Telegram token until the person
+   * has synced into this browser once (a database exists). Only the check asks; an intent the person
+   * started goes on regardless.
+   */
+  mayCheckQuietly: () => Promise<boolean>;
   onReport: (r: SchedulerReport) => Promise<void>;
 }
 
-export type CheckResult = 'started' | 'no_permission' | 'no_token' | 'running' | 'paused' | 'daily_limit';
+export type CheckResult = 'started' | 'no_permission' | 'no_token' | 'never_synced' | 'running' | 'paused' | 'daily_limit';
 
 export function nextLocalMidnight(now: Date): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
@@ -241,6 +247,7 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       // Never asks for the permission itself: only uses one the person gave.
       if (!(await deps.hasUntappdPermission())) return 'no_permission';
       if (!(await deps.hasToken())) return 'no_token';
+      if (!(await deps.mayCheckQuietly())) return 'never_synced';
       if (loopPromise || (await readIntent())) return 'running';
       const now = deps.now();
       const pause = await deps.store.get<{ until: string }>(PAUSE_KEY);

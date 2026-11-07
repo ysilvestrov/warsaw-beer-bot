@@ -11,7 +11,7 @@ import { sessionUsername } from '../../../src/shared/untappd/session-user';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
 import { anonymous, hadIndex, invalidateHadIndex, overlayHad } from '../local/had';
-import { clearLocalDb, currentGeneration, localStats } from '../local/db';
+import { clearLocalDb, currentGeneration, localMeta, localStats } from '../local/db';
 import { localSyncDeps } from '../local/sync';
 
 export interface MatchMessage {
@@ -365,6 +365,9 @@ const syncScheduler = createSyncScheduler({
   hasUntappdPermission: () => chrome.permissions.contains({ origins: UNTAPPD_ORIGINS }),
   // #924: both modes have somewhere to sync to — the server with a Telegram token, this browser without.
   hasToken: async () => true,
+  // #924: without a Telegram token the feed is read quietly only once the person has synced into
+  // this browser — the privacy policy promises no Untappd read for someone who never pressed Sync.
+  mayCheckQuietly: async () => !(await isLocalMode()) || (await localMeta().catch(() => null)) !== null,
   onReport: reportSyncIntent,
 });
 
@@ -627,8 +630,10 @@ async function hasSyncIntent(): Promise<boolean> {
 // anywhere. A record shows only if it is of this database (a local binding at its generation).
 async function localSyncStatus(generation: number) {
   const status = await readSyncStatus();
-  if (status.binding?.token) {
-    // The Telegram token is gone: its record and its personal answers go with it.
+  // A local record carries its binding from the first write, so a running record without one is a
+  // linked run that has not learned its account yet.
+  if (status.binding?.token || (!status.binding && status.running)) {
+    // The Telegram token is gone: its record, its run and its personal answers go with it.
     if (generation !== syncGeneration) return syncStatusReply(emptySyncStatus());
     const invalidationGeneration = ++syncGeneration;
     syncAbortController?.abort();
@@ -643,14 +648,18 @@ async function localSyncStatus(generation: number) {
     return syncStatusReply(emptySyncStatus());
   }
   if (!status.binding || status.binding.linkRevision !== await currentGeneration()) return syncStatusReply(emptySyncStatus());
+  // The database's owner, for "This browser's check-ins belong to …": a run stopped by another
+  // account before it learned a name keeps an empty one in its record.
+  const owner = (await localMeta().catch(() => null))?.username || status.binding.username;
+  const shown = { ...status, binding: { ...status.binding, username: owner } };
   const orphaned = !syncStartPromise && !syncRunning && !syncAbortController && !syncScheduler.running;
   const intentStored = await hasSyncIntent();
   if (status.running && orphaned && !intentStored) {
     const recovered = { ...status, running: false, outcome: 'error' as const, complete: false };
     await enqueueSyncStatus(recovered, generation).catch(() => undefined);
-    return syncStatusReply(recovered);
+    return syncStatusReply({ ...recovered, binding: shown.binding });
   }
-  return syncStatusReply(status, intentStored);
+  return syncStatusReply(shown, intentStored);
 }
 
 export async function handleCheckinSyncStatus() {

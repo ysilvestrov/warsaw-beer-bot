@@ -113,15 +113,15 @@ describe('syncWidgetView', () => {
     expect(syncWidgetView({ ...base, outcome: 'account_changed' }, NOW).detail).toBe('Sign in to the linked account, then Sync');
   });
   // #924 §6: in local mode the database belongs to one account — the person chooses to drop it.
-  it('account_changed in local mode offers Clear and sync, naming the owner of the stored check-ins', () => {
+  it('account_changed in local mode names the owner, links to untappd.com and offers Clear and sync', () => {
     expect(syncWidgetView({ ...base, outcome: 'account_changed', username: 'alice', mode: 'local' }, NOW)).toEqual({ ...none,
-      label: 'Untappd account changed', detail: "This browser's check-ins belong to alice. Clear them and sync this account?",
-      action: { kind: 'clear', label: 'Clear and sync' } });
+      label: 'Untappd account changed', detail: "This browser's check-ins belong to alice. Sign in as alice, or clear them and sync this account.",
+      link: { text: 'Open untappd.com', href: 'https://untappd.com/' }, action: { kind: 'clear', label: 'Clear and sync' } });
   });
-  it('account_changed in local mode without a known owner still offers Clear and sync', () => {
+  it('account_changed in local mode without a known owner still offers both ways out', () => {
     expect(syncWidgetView({ ...base, outcome: 'account_changed', mode: 'local' }, NOW)).toEqual({ ...none,
-      label: 'Untappd account changed', detail: 'Clear the check-ins stored in this browser and sync this account?',
-      action: { kind: 'clear', label: 'Clear and sync' } });
+      label: 'Untappd account changed', detail: 'Sign in to the account these check-ins belong to, or clear them and sync this account.',
+      link: { text: 'Open untappd.com', href: 'https://untappd.com/' }, action: { kind: 'clear', label: 'Clear and sync' } });
   });
   it('not_linked points to /link', () => {
     expect(syncWidgetView({ ...base, outcome: 'not_linked' }, NOW)).toEqual({ ...none,
@@ -303,12 +303,32 @@ describe('initPopup', () => {
       callback?.(m.type === 'local-db:clear' ? { type: 'local-db:cleared', ok: true } : reply);
     });
     chromeStub.runtime.sendMessage = send;
+    const ask = vi.fn(() => true);
+    vi.stubGlobal('confirm', ask);
     (document.getElementById('syncCheckins') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'checkin-sync:start' }, expect.any(Function)));
     const types = send.mock.calls.map(([m]) => m.type);
     expect(types.slice(0, 2)).toEqual(['local-db:clear', 'checkin-sync:start']);
-    // The permission prompt needs the click gesture, so it comes before anything is sent.
-    expect(chromeStub.permissions.request.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
+    expect(ask).toHaveBeenCalledWith('Delete the check-ins stored in this browser? Your Untappd account is not affected.');
+    // The permission prompt needs the click gesture, so it comes first; the question, before anything is sent.
+    expect(chromeStub.permissions.request.mock.invocationCallOrder[0]).toBeLessThan(ask.mock.invocationCallOrder[0]);
+    expect(ask.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
+    vi.unstubAllGlobals();
+  });
+
+  it('without a token: Clear and sync answered no deletes nothing and starts nothing (#924)', async () => {
+    const reply = { type: 'checkin-sync:status:ok', running: false, serverCount: 5, profileTotal: 5, mergedThisRun: 0,
+      outcome: 'account_changed', complete: false, caughtUp: false, gapMissing: null, pausedUntil: null, quiet: false, username: 'alice' };
+    await bootPopup('', reply);
+    const send = vi.fn((_m: { type?: string }, callback?: (r?: object) => void) => { callback?.(reply); });
+    (globalThis.chrome as unknown as { runtime: Record<string, unknown> }).runtime.sendMessage = send;
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    const syncBtn = document.getElementById('syncCheckins') as HTMLButtonElement;
+    syncBtn.click();
+    await vi.waitFor(() => expect(syncBtn.disabled).toBe(false));
+    expect(send).toHaveBeenCalledTimes(0);
+    expect(document.getElementById('syncStatus')?.textContent).toBe('');
+    vi.unstubAllGlobals();
   });
 
   it('without a token: a refused Clear does not start a sync (#924)', async () => {
@@ -319,9 +339,11 @@ describe('initPopup', () => {
       callback?.(m.type === 'local-db:clear' ? { type: 'local-db:cleared', ok: false } : reply);
     });
     (globalThis.chrome as unknown as { runtime: Record<string, unknown> }).runtime.sendMessage = send;
+    vi.stubGlobal('confirm', vi.fn(() => true));
     (document.getElementById('syncCheckins') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(document.getElementById('syncStatus')?.textContent).toBe('Could not clear the check-ins stored in this browser.'));
     expect(send).not.toHaveBeenCalledWith({ type: 'checkin-sync:start' }, expect.any(Function));
+    vi.unstubAllGlobals();
   });
 
   it('without a token: the auth block leads and the guide sits inside it (#519, #522)', async () => {

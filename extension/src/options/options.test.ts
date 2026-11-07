@@ -89,8 +89,14 @@ describe('localDbSummary (#924)', () => {
   });
 
   it('one check-in of one beer reads in the singular', () => {
-    expect(localDbSummary({ checkins: 1, beers: 1, lastSync: '2026-01-02T00:00:00.000Z' }))
+    expect(localDbSummary({ checkins: 1, beers: 1, lastSync: '2026-01-02T12:00:00.000Z' }))
       .toBe('1 check-in · 1 beer · last sync 2026-01-02');
+  });
+
+  it('the day is the local one: a sync just after local midnight is that day, not the UTC one before', () => {
+    // Built from local fields, so the expectation holds in every time zone the tests run in.
+    const justAfterMidnight = new Date(2026, 10, 8, 0, 5).toISOString();
+    expect(localDbSummary({ checkins: 2, beers: 2, lastSync: justAfterMidnight })).toBe('2 check-ins · 2 beers · last sync 2026-11-08');
   });
 
   it('check-ins without a recorded sync (an interrupted first run) show the counts alone', () => {
@@ -123,6 +129,19 @@ describe('initLocalDb (#924)', () => {
     expect(n.section.hidden).toBe(false);
     expect(send).toHaveBeenCalledWith({ type: 'local-db:stats' });
     expect(n.stats.textContent).toBe(`12${N}407 check-ins · 9${N}031 beers · last sync 2026-11-07`);
+  });
+
+  it('saving a token hides the block; removing it shows the block with fresh counts', async () => {
+    const n = nodes();
+    const send = vi.fn(async () => full);
+    const show = await initLocalDb(n, true, send, () => true);
+    expect(n.section.hidden).toBe(true);
+    await show(false);
+    expect(n.section.hidden).toBe(false);
+    expect(n.stats.textContent).toBe(`12${N}407 check-ins · 9${N}031 beers · last sync 2026-11-07`);
+    await show(true);
+    expect(n.section.hidden).toBe(true);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it('an unexpected reply (worker asleep, no answer) reads as empty', async () => {

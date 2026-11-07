@@ -56,11 +56,17 @@ function plural(n: number, one: string): string {
   return n === 1 ? `1 ${one}` : `${count(n)} ${one}s`;
 }
 
-/** #924 §6: one line on what this browser keeps — counts and the day of the last sync. */
+function localDay(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** #924 §6: one line on what this browser keeps — counts and the local day of the last sync. */
 export function localDbSummary(s: LocalDbCounts): string {
   if (s.checkins === 0) return 'Empty — open the popup and tap Sync my check-ins.';
   const counts = `${plural(s.checkins, 'check-in')} · ${plural(s.beers, 'beer')}`;
-  return s.lastSync !== null ? `${counts} · last sync ${s.lastSync.slice(0, 10)}` : counts;
+  return s.lastSync !== null ? `${counts} · last sync ${localDay(s.lastSync)}` : counts;
 }
 
 export interface LocalDbNodes {
@@ -82,18 +88,22 @@ function countsOf(reply: unknown): LocalDbCounts {
 
 /**
  * #924 §6: the "Local check-ins" block. Shown only without a Telegram token — with one, check-ins
- * live on the server and there is nothing in this browser to show or clear.
+ * live on the server and there is nothing in this browser to show or clear. Returns the switch the
+ * page calls after Save, so the block follows a token saved or removed without a reload.
  */
 export async function initLocalDb(nodes: LocalDbNodes, hasToken: boolean, send: SendMessage,
-  ask: (question: string) => boolean): Promise<void> {
-  nodes.section.hidden = hasToken;
-  if (hasToken) return;
+  ask: (question: string) => boolean): Promise<(hasToken: boolean) => Promise<void>> {
   let current = EMPTY_COUNTS;
   const refresh = async () => {
     current = countsOf(await send({ type: 'local-db:stats' }));
     nodes.stats.textContent = localDbSummary(current);
   };
-  await refresh();
+  const show = async (token: boolean) => {
+    nodes.section.hidden = token;
+    nodes.status.textContent = '';
+    if (!token) await refresh();
+  };
+  await show(hasToken);
   nodes.clear.addEventListener('click', async () => {
     const what = current.checkins > 0 ? plural(current.checkins, 'check-in') : 'the check-ins';
     if (!ask(`Delete ${what} stored in this browser? Your Untappd account is not affected.`)) return;
@@ -103,6 +113,7 @@ export async function initLocalDb(nodes: LocalDbNodes, hasToken: boolean, send: 
     await refresh();
     nodes.clear.disabled = false;
   });
+  return show;
 }
 
 function sendToWorker(message: { type: string }): Promise<unknown> {
@@ -160,9 +171,10 @@ async function initOptionsPage(): Promise<void> {
   const localStats = el<HTMLElement>('localDbStats');
   const localClear = el<HTMLButtonElement>('localDbClear');
   const localStatus = el<HTMLElement>('localDbStatus');
+  let showLocalDb: ((hasToken: boolean) => Promise<void>) | null = null;
   if (localSection && localStats && localClear && localStatus) {
     void initLocalDb({ section: localSection, stats: localStats, clear: localClear, status: localStatus },
-      s.token !== '', sendToWorker, (q) => window.confirm(q));
+      s.token !== '', sendToWorker, (q) => window.confirm(q)).then((show) => { showLocalDb = show; });
   }
 
   const stats = el<HTMLInputElement>('installRegistration');
@@ -179,6 +191,7 @@ async function initOptionsPage(): Promise<void> {
 
   el<HTMLButtonElement>('save')?.addEventListener('click', async () => {
     await setSettings({ token: tokenInput.value.trim(), baseUrl: urlInput.value.trim() });
+    await showLocalDb?.(tokenInput.value.trim() !== '');
     // Best-effort: request permission for a custom (non-default) host so the worker can
     // fetch it. Skipped in the store build, which has no 'https://*/*' to grant.
     if (!IS_STORE_BUILD) {

@@ -127,6 +127,13 @@ export async function allCheckins(): Promise<LocalCheckin[]> {
   return done(db.transaction(CHECKINS, 'readonly').objectStore(CHECKINS).getAll()) as Promise<LocalCheckin[]>;
 }
 
+/** The database's owner record; null until the first sync in this generation. */
+export async function localMeta(): Promise<LocalMeta | null> {
+  const db = await openLocalDb();
+  const meta = (await done(db.transaction(META, 'readonly').objectStore(META).get(STATE_KEY))) as LocalMeta | undefined;
+  return meta ?? null;
+}
+
 /** Options: how much this browser holds, and for whom. `beers` counts distinct bids. */
 export async function localStats(): Promise<{ checkins: number; beers: number; meta: LocalMeta | null }> {
   const db = await openLocalDb();

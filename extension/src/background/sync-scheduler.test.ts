@@ -63,6 +63,7 @@ function setup(over: Partial<SchedulerDeps> = {}, store = memoryStore()) {
     clearMatchCache,
     hasUntappdPermission: async () => true,
     hasToken: async () => true,
+    mayCheckQuietly: async () => true,
     onReport: async (r) => { reports.push(r); },
     ...over,
   };
@@ -372,6 +373,22 @@ describe('check conditions', () => {
     const t = setup({ runStep, hasToken: async () => false });
     expect(await t.scheduler.check()).toBe('no_token');
     expect(runStep).toHaveBeenCalledTimes(0);
+  });
+
+  // #924: no Telegram token and nothing synced into this browser yet — the feed is not read.
+  it('before the first sync into this browser makes no request and counts no check', async () => {
+    const runStep = vi.fn(async () => outcome('done'));
+    const t = setup({ runStep, mayCheckQuietly: async () => false });
+    expect(await t.scheduler.check()).toBe('never_synced');
+    expect(runStep).toHaveBeenCalledTimes(0);
+    expect(t.store.data.has(CHECKS_KEY)).toBe(false);
+  });
+
+  it('an intent the person started goes on even when a silent check would not', async () => {
+    const runStep = vi.fn(async () => outcome('done'));
+    const t = setup({ runStep, mayCheckQuietly: async () => false });
+    await t.scheduler.startManual();
+    await vi.waitFor(() => expect(runStep).toHaveBeenCalledTimes(1));
   });
 
   it('does not start a second sync while one is wanted', async () => {

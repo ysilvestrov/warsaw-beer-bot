@@ -984,8 +984,62 @@ describe('#924 local mode in the worker', () => {
   it('a linked record after the token is removed reads as a fresh local start and is reset', async () => {
     localStore.set('checkinSync', { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 0, outcome: 'done',
       complete: true, caughtUp: true, binding: LINKED_BINDING });
+    await cacheStore.setCached('personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null, is_drunk: true,
+      drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
     expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false, username: null });
     expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+    // The server's personal answers go with the token.
+    expect(await cacheStore.getCached('personal')).toBe(undefined);
+  });
+
+  it('a linked run that has not learned its account yet stops when the token is removed', async () => {
+    await setSettings({ token: 'tok' });
+    let answerState!: (s: Awaited<ReturnType<typeof client.getCheckinSyncState>>) => void;
+    vi.spyOn(client, 'getCheckinSyncState').mockReturnValue(new Promise((resolve) => { answerState = resolve; }));
+    const post = vi.spyOn(client, 'postCheckinSyncPage');
+    post.mockClear();
+    const fetchMock = untappd();
+    vi.stubGlobal('fetch', fetchMock);
+    await handleCheckinSyncStart();
+    await vi.waitFor(() => expect(client.getCheckinSyncState).toHaveBeenCalledTimes(1));
+    expect(localStore.get('checkinSync')).toMatchObject({ running: true, binding: null });
+
+    await setSettings({ token: '' });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, serverCount: 0 });
+    answerState({ username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 0, profileTotal: 9 });
+    await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expect(post).toHaveBeenCalledTimes(0);
+  });
+
+  it('another account names the owner of this database even when the run stopped before learning a name', async () => {
+    await inPageTx(async (tx) => {
+      await tx.putMeta({ username: 'alice', generation: await currentGeneration(), profileTotal: 9, oldestId: null, updatedAt: '2026-11-07T10:00:00.000Z' });
+    });
+    localStore.set('checkinSync', await localRecord({ outcome: 'account_changed', binding: { username: '', linkRevision: await currentGeneration(), token: '', baseUrl: 'https://api.test' } }));
+    expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: 'account_changed', username: 'alice' });
+  });
+
+  it('the silent check reads nothing before the first sync into this browser', async () => {
+    permissionsContains.mockResolvedValue(true);
+    const fetchMock = untappd();
+    vi.stubGlobal('fetch', fetchMock);
+    onAlarm({ name: CHECK_ALARM });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+  });
+
+  it('the silent check reads the feed once this browser holds a database', async () => {
+    await inPageTx(async (tx) => {
+      await tx.putMeta({ username: 'bob', generation: await currentGeneration(), profileTotal: 9, oldestId: null, updatedAt: '2026-11-07T10:00:00.000Z' });
+    });
+    permissionsContains.mockResolvedValue(true);
+    const fetchMock = untappd();
+    vi.stubGlobal('fetch', fetchMock);
+    onAlarm({ name: CHECK_ALARM });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith(P1, expect.anything()));
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false), { timeout: 15000 });
   });
 
   // Spec test 9.

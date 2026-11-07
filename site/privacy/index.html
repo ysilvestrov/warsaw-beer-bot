@@ -85,8 +85,10 @@
       Without a bot token, the same button keeps your check-ins in this browser only: the extension
       reads your own Untappd feed within your logged-in session and stores the beers you have drunk
       and your ratings in the browser's local database (IndexedDB). This history is not sent
-      anywhere. You can delete it with "Clear local check-ins" on the options page; uninstalling the
-      extension deletes it too.
+      anywhere. After your first sync, the extension also looks for new check-ins in the background a
+      few times a day and stores them the same way; before you press the button, it reads nothing from
+      Untappd. You can delete the history with "Clear local check-ins" on the options page;
+      uninstalling the extension deletes it too.
     </p>
 
     <h2>Anonymous usage statistics (on by default, can be switched off)</h2>
