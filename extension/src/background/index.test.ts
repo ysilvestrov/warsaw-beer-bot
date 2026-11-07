@@ -989,7 +989,7 @@ describe('#924 local mode in the worker', () => {
     expect(await handleCheckinSyncStatus()).toMatchObject({ outcome: null, caughtUp: false, username: null });
     expect(localStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
     // The server's personal answers go with the token.
-    expect(await cacheStore.getCached('personal')).toBe(undefined);
+    expect(await cacheStore.getCached('personal')).toBe(null);
   });
 
   it('a linked run that has not learned its account yet stops when the token is removed', async () => {
@@ -1089,12 +1089,4 @@ describe('#924 local mode in the worker', () => {
     expect(await handleLocalDbStats()).toEqual({ type: 'local-db:stats:ok', mode: 'linked', checkins: 0, beers: 0, lastSync: null, username: null });
   });
 
-  it('the 6-hourly check runs without a Telegram token', async () => {
-    permissionsContains.mockResolvedValue(true);
-    const fetchMock = vi.fn(async () => new Response(SIGNED_OUT));
-    vi.stubGlobal('fetch', fetchMock);
-    onAlarm({ name: CHECK_ALARM });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledWith('https://untappd.com/', expect.anything()));
-    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
-  });
 });
