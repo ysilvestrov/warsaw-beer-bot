@@ -31,7 +31,7 @@
   </head>
   <body>
     <h1>Warsaw Beer Overlay — Privacy Policy</h1>
-    <p class="updated">Last updated: 31 October 2026</p>
+    <p class="updated">Last updated: 7 November 2026</p>
 
     <p>
       Warsaw Beer Overlay ("the extension") is a browser extension that shows, on supported
@@ -73,13 +73,21 @@
       time from the extension's options.
     </p>
 
-    <h2>Check-in sync (optional, only when you press "Sync")</h2>
+    <h2>Check-in sync (optional, needs access to untappd.com)</h2>
     <p>
       The popup's "Sync my check-ins" button fetches the HTML of your own Untappd check-in feed
       using your logged-in Untappd session and sends it to <code>beer-api.ysilvestrov-ai.uk</code>,
-      where the server records which beers you have drunk and your ratings under your account. This
-      runs only when you press the button and grant access to <code>untappd.com</code>. If you never
-      press it, no Untappd data is read.
+      where the server records which beers you have drunk and your ratings under your account.
+      Reading the feed needs access to <code>untappd.com</code>, which you grant yourself: when you
+      first press the button, or when you turn on "Find missing beers via Untappd" (that feature
+      asks for the same access).
+    </p>
+    <p>
+      With a bot token, once that access is granted, the extension also looks for new check-ins in
+      the background — when the browser starts and every six hours, at most four times a day — and
+      sends them the same way, even if you have never pressed the button. Without that access, no
+      Untappd data is read. Turning "Find missing beers via Untappd" off withdraws the access, and so
+      does removing it in Chrome's settings for the extension.
     </p>
     <p>
       Without a bot token, the same button keeps your check-ins in this browser only: the extension
@@ -138,7 +146,9 @@
       <li>"Clear all cache" in the popup removes locally cached match data.</li>
       <li>"Clear local check-ins" on the options page deletes the check-ins kept in this browser.</li>
       <li>Leave "Find missing beers via Untappd" off (or uncheck it) to disable enrichment.</li>
-      <li>Simply never press "Sync my check-ins" to avoid reading your Untappd feed.</li>
+      <li>To keep your Untappd feed from being read, do not grant access to <code>untappd.com</code>:
+        never press "Sync my check-ins" and leave "Find missing beers via Untappd" off. Without a
+        bot token, the feed is read only after you have pressed "Sync my check-ins" at least once.</li>
       <li>Uninstall the extension to remove all locally stored data.</li>
     </ul>
 

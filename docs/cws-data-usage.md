@@ -5,8 +5,9 @@ https://ysilvestrov.github.io/warsaw-beer-bot/privacy/
 
 ## Single purpose
 Show, on supported craft-beer shop pages, which beers the user has already drunk and their
-ratings, by matching page beers against the user's personal history held by the Warsaw Beer
-Crawler bot.
+ratings, by matching page beers against the user's personal Untappd history — kept in the
+browser after "Sync my check-ins" (#924) or held by the Warsaw Beer Crawler bot with a token.
+(The dashboard field takes the shorter wording from `cws-listing.md`.)
 
 ## Permission justifications
 Dashboard reality: `storage` and `activeTab` each get their own field; **all host
@@ -17,10 +18,14 @@ domains + `beer-api` + optional hosts) — paste the consolidated text from
 - **storage** — cache match results and store the user's token/settings locally.
 - **activeTab** — the popup reads the active tab's URL and messages its content script to
   refresh badges on the current page.
+- **alarms** (#934, new in 0.22.0) — resume an interrupted check-in sync and run the 6-hourly
+  check for new check-ins; the text to paste is in [`cws-listing.md`](./cws-listing.md).
 - **host `beer-api.ysilvestrov-ai.uk`** — the extension's own API: matching and (optional)
   enrichment/check-in submission.
-- **optional host `untappd.com`** — only if the user enables enrichment or presses "Sync":
-  read the user's own Untappd check-in feed / run searches from their session.
+- **optional host `untappd.com`** — requested only when the user enables enrichment or presses
+  "Sync": read the user's own Untappd check-in feed / run searches from their session. Once
+  granted, the 6-hourly check (#934) reads the feed for new check-ins too — with a bot token
+  right away, without one only after the first manual Sync (#924).
 - **optional host `*.algolia.net`** — Untappd's search backend, used by the optional
   enrichment feature to find missing beers.
 

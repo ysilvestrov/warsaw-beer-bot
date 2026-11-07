@@ -48,12 +48,14 @@ that is still being checked from one that came back with no answer.
 
 You can see the list of supported beer shops directly in the extension UI.
 
-No account needed to start: global ⭐ ratings appear immediately. To unlock your
-personal "already drank" ✅ badges, connect the companion Telegram bot (it imports
-your own Untappd history) and paste the token into the extension's options.
+No account needed to start: global ⭐ ratings appear immediately. Press "Sync my
+check-ins" to see ✅ on the beers you've already had, with your own rating: your
+check-ins are read from your Untappd session and kept in this browser. Connecting the
+companion Telegram bot (paste its token into the options) adds recommendations and sync
+across devices.
 
-Optional extras (off by default, ask for permission when enabled): find beers missing
-from the catalog via your Untappd session, and sync your check-ins.
+Optional extra (off by default, asks for permission when enabled): find beers missing
+from the catalog via your Untappd session.
 
 Clicking any badge opens the beer on Untappd (or a prefilled search). Your data stays
 yours — see the privacy policy.
@@ -76,6 +78,7 @@ field per host. Fill them as follows.
 
 - **storage** — `Caches beer-match results and stores the user's API token and settings locally, so pages show badges quickly without re-querying.`
 - **activeTab** — `The popup's "Refresh this page" button and status readout act only on the tab where the user clicks the extension icon.`
+- **alarms** (new in 0.22.0) — `Wakes the extension to continue a "Sync my check-ins" run that was interrupted, for example by a browser restart, and every six hours to look for new check-ins on the user's own Untappd feed. Unless the user has granted access to untappd.com, the wake-up reads nothing.`
 
 ### Host permission justification (one combined field — paste verbatim)
 
