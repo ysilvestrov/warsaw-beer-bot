@@ -1,5 +1,8 @@
+import 'fake-indexeddb/auto';
 import { webcrypto } from 'node:crypto';
 import * as cacheStore from '../cache/store';
+import { clearLocalDb, inPageTx } from '../local/db';
+import { invalidateHadIndex } from '../local/had';
 import { afterEach, beforeEach, describe, it, expect, vi, type Mock } from 'vitest';
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
@@ -124,6 +127,91 @@ describe('handleMatch', () => {
     await expect(handleMatch({ type: 'match', cards })).resolves.toEqual({ type: 'match:ok', results: [{ ...orphan, cacheBinding }] });
     expect(client.postMatch).toHaveBeenCalledTimes(1);
     expect(client.postMatch).toHaveBeenCalledWith('https://api.test', 'tok', cards, client.DEFAULT_TIMEOUT_MS, { version: '9.9.9' });
+  });
+});
+
+// #924 §5, test 7: local mode lays the person's ✅ over an anonymous answer and an anonymous cache.
+describe('#924 local ✅ on /match and the cache', () => {
+  // The cache binding of no token at all (credential = sha256 of [baseUrl, '']), as the worker proves it.
+  const anonBinding = { username: '', linkRevision: 0, credential: 'bfc0241d7945d212b82c069d6153ed25e97f7f351bdf09a7f098c5e3f2f839ee' };
+  const answer = (bid: number, source: 'exact' | 'fuzzy' = 'exact'): MatchResult => ({
+    raw: { brewery: 'B', name: String(bid) },
+    matched_beer: { id: bid, brewery: 'B', name: String(bid), rating_global: 3.8, untappd_id: bid },
+    is_drunk: false, drunk_uncertain: false, user_rating: null, source, searched: true,
+  });
+  const had = (bid: number, rating: number | null) => inPageTx(async (tx) => {
+    await tx.putCheckin({ checkin_id: String(1000 + bid), bid, beer_name: 'N', brewery_name: 'B', user_rating: rating, checkin_at: '2026-10-01T10:00:00.000Z' });
+  });
+
+  beforeEach(async () => {
+    await setSettings({ token: '' });
+    await clearLocalDb();
+    invalidateHadIndex();
+    await had(101, 4.5);
+  });
+
+  it('a fresh answer gets ✅ and the rating, and /match is asked exactly as an anonymous client', async () => {
+    vi.spyOn(client, 'postMatch').mockResolvedValue([answer(101)]);
+    const cards = [{ brewery: 'B', name: '101' }];
+    expect(await handleMatch({ type: 'match', cards })).toEqual({ type: 'match:ok',
+      results: [{ ...answer(101), is_drunk: true, user_rating: 4.5, cacheBinding: anonBinding }] });
+    expect(client.postMatch).toHaveBeenCalledWith('https://api.test', '', cards, client.DEFAULT_TIMEOUT_MS, { version: '9.9.9' });
+  });
+
+  it('a cached write is stored anonymous and read back with ✅ laid over it', async () => {
+    const shown = { ...answer(101), is_drunk: true, user_rating: 4.5, cacheBinding: anonBinding };
+    await handleCacheSet('k', shown);
+    expect(await getCached('k')).toEqual({ ...answer(101), cacheBinding: anonBinding });
+    const { handleCacheGetMany } = await import('./index');
+    expect(await handleCacheGetMany(['k'])).toEqual([shown]);
+  });
+
+  it('a batch write is stored anonymous too', async () => {
+    await handleCacheSetMany([{ key: 'b', result: { ...answer(101), is_drunk: true, user_rating: 4.5, cacheBinding: anonBinding } }]);
+    expect(await getCached('b')).toEqual({ ...answer(101), cacheBinding: anonBinding });
+  });
+
+  it('a sync between the write and the read shows without touching the cache', async () => {
+    await handleCacheSet('k', { ...answer(202), cacheBinding: anonBinding });
+    await had(202, null);
+    invalidateHadIndex();
+    const { handleCacheGetMany } = await import('./index');
+    expect(await handleCacheGetMany(['k'])).toEqual([{ ...answer(202), is_drunk: true, cacheBinding: anonBinding }]);
+  });
+
+  it('a conditional write with the overlaid ❓ as expected replaces an unchanged anonymous entry', async () => {
+    await handleCacheSet('c', { ...answer(101, 'fuzzy'), cacheBinding: anonBinding });
+    const expected = { ...answer(101, 'fuzzy'), drunk_uncertain: true, cacheBinding: anonBinding };
+    const next = { ...answer(101), is_drunk: true, user_rating: 4.5, cacheBinding: anonBinding };
+    expect(await handleCacheSetIfMatching('c', expected, next)).toBe(true);
+    expect(await getCached('c')).toEqual({ ...answer(101), cacheBinding: anonBinding });
+  });
+
+  it('an unreadable local database answers anonymously instead of failing', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await clearLocalDb();
+    invalidateHadIndex();
+    vi.spyOn(indexedDB, 'open').mockImplementation(() => {
+      const req = {} as IDBOpenDBRequest;
+      setTimeout(() => {
+        Object.defineProperty(req, 'error', { value: new DOMException('blocked', 'UnknownError') });
+        req.onerror?.call(req, new Event('error'));
+      }, 0);
+      return req;
+    });
+    vi.spyOn(client, 'postMatch').mockResolvedValue([answer(101)]);
+    expect(await handleMatch({ type: 'match', cards: [{ brewery: 'B', name: '101' }] }))
+      .toEqual({ type: 'match:ok', results: [{ ...answer(101), cacheBinding: anonBinding }] });
+  });
+
+  it('with a Telegram token nothing is laid over or reset', async () => {
+    await setSettings({ token: 'tok' });
+    const personal = { ...answer(303), is_drunk: true, user_rating: 3 };
+    vi.spyOn(client, 'postMatch').mockResolvedValue([personal]);
+    expect(await handleMatch({ type: 'match', cards: [{ brewery: 'B', name: '303' }] }))
+      .toEqual({ type: 'match:ok', results: [{ ...personal, cacheBinding }] });
+    await handleCacheSet('p', { ...personal, cacheBinding });
+    expect(await getCached('p')).toEqual({ ...personal, cacheBinding });
   });
 });
 

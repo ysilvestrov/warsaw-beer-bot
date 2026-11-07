@@ -1,4 +1,4 @@
-import { authToken, getSettings, wantsRegistration, type Settings } from '../shared/config';
+import { authToken, getSettings, syncMode, wantsRegistration, type Settings } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, DEFAULT_TIMEOUT_MS, getCheckinSyncState, postCheckinSyncPage, type MatchClient } from '../api/client';
 import { ensureInstall, extensionVersion, forgetInstallToken } from './install';
@@ -10,6 +10,7 @@ import {
 import { sessionUsername } from '../../../src/shared/untappd/session-user';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
+import { anonymous, hadIndex, overlayHad } from '../local/had';
 
 export interface MatchMessage {
   type: 'match';
@@ -53,13 +54,31 @@ function sameCacheBinding(a: MatchCacheBinding | undefined, b: MatchCacheBinding
   return a?.username === b.username && a.linkRevision === b.linkRevision && a.credential === b.credential;
 }
 
+// #924 §5: in local mode the /match answer and the cache stay anonymous; the person's ✅/❓/rating is
+// laid over them on every read, so a fresh sync shows without touching the cache.
+async function isLocalMode(): Promise<boolean> {
+  return syncMode(await getSettings()) === 'local';
+}
+
+async function withHad<T extends MatchResult | null>(results: T[]): Promise<T[]> {
+  if (!(await isLocalMode())) return results;
+  const index = await hadIndex();
+  return results.map(r => (r ? overlayHad(r, index) : r) as T);
+}
+
+// A write — and the expected value of a conditional one, which the content script takes from the
+// overlaid result it shows — goes back to the anonymous answer before the cache sees it.
+async function forCache<T extends MatchResult>(results: T[]): Promise<T[]> {
+  return (await isLocalMode()) ? results.map(r => anonymous(r) as T) : results;
+}
+
 export async function handleCacheGetMany(keys: string[]): Promise<(MatchResult | null)[]> {
   if (keys.length === 0) return [];
   try {
     const binding = await currentCacheBinding();
     const results = await Promise.all(keys.map(key => getCached(key)));
     if (!sameCacheBinding(binding, await currentCacheBinding())) return keys.map(() => null);
-    return results.map(result => result && sameCacheBinding(result.cacheBinding, binding) ? result : null);
+    return await withHad(results.map(result => result && sameCacheBinding(result.cacheBinding, binding) ? result : null));
   } catch {
     return keys.map(() => null);
   }
@@ -67,12 +86,14 @@ export async function handleCacheGetMany(keys: string[]): Promise<(MatchResult |
 
 export const handleCacheSet = (key: string, result: MatchResult) =>
   enqueueCacheMutation(async () => {
-    if (sameCacheBinding(result.cacheBinding, await currentCacheBinding())) await setCached(key, result);
+    if (sameCacheBinding(result.cacheBinding, await currentCacheBinding())) await setCached(key, (await forCache([result]))[0]);
   });
 export const handleCacheSetMany = (entries: { key: string; result: MatchResult }[]) =>
   enqueueCacheMutation(async () => {
     const binding = await currentCacheBinding();
-    await setCachedMany(entries.filter(entry => sameCacheBinding(entry.result.cacheBinding, binding)));
+    const kept = entries.filter(entry => sameCacheBinding(entry.result.cacheBinding, binding));
+    const results = await forCache(kept.map(entry => entry.result));
+    await setCachedMany(kept.map((entry, i) => ({ key: entry.key, result: results[i] })));
   });
 export const handleCacheClearKeys = (keys: string[]) =>
   enqueueCacheMutation(async () => { await clearKeys(keys); });
@@ -81,7 +102,8 @@ export const handleCacheSetIfMatching = (key: string, expected: MatchResult, res
   enqueueCacheMutation(async () => {
     const binding = await currentCacheBinding();
     if (!sameCacheBinding(expected.cacheBinding, binding) || !sameCacheBinding(result.cacheBinding, binding)) return false;
-    return setCachedIfMatching(key, expected, result);
+    const [cachedExpected, cachedResult] = await forCache([expected, result]);
+    return setCachedIfMatching(key, cachedExpected, cachedResult);
   });
 
 // #923: the shop the cards came from, for per-shop accounting. The server caps it at 64 characters
@@ -116,7 +138,7 @@ export async function handleMatch(msg: MatchMessage, shop?: string): Promise<Mat
     const results = await postMatchAs(settings, msg.cards, client);
     const current = await currentCacheBinding();
     if (!sameCacheBinding(binding, current)) throw new ApiError(binding.credential !== current.credential ? 'unauthorized' : 'server');
-    return { type: 'match:ok', results: results.map(result => ({ ...result, cacheBinding: binding })) };
+    return { type: 'match:ok', results: await withHad(results.map(result => ({ ...result, cacheBinding: binding }))) };
   } catch (e) {
     const rawCode = e instanceof ApiError ? e.code : 'server';
     const code: 'unauthorized' | 'server' | 'network' =
