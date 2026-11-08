@@ -23,7 +23,7 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
-## [Unreleased]
+## [0.22.0] - 2026-11-08
 
 - Without a Telegram token you can now tap “Sync my check-ins”: your check-ins are kept only in this browser, and shop pages show ✅ for beers you've had and your rating. Clear them any time on the options page.
 
