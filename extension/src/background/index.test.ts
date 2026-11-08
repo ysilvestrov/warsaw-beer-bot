@@ -1177,6 +1177,7 @@ describe('#965 the first Sync press survives the closed popup', () => {
     await handleAwaitingPermission();
     vi.setSystemTime(new Date('2026-11-08T12:02:00.000Z'));
     expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(true);
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
   });
 
   it('a mark that is not a time starts nothing and goes', async () => {
@@ -1206,6 +1207,7 @@ describe('#965 the first Sync press survives the closed popup', () => {
     await handleAwaitingPermission();
     await handleCheckinSyncStart();
     await vi.waitFor(async () => expect(await mark()).toBe(undefined));
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
   });
 
   it('an unreadable session store means no mark: nothing starts, nothing throws', async () => {
