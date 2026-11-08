@@ -402,6 +402,9 @@ async function reportSyncIntent(r: SchedulerReport): Promise<void> {
 export const AWAITING_PERMISSION_KEY = 'syncAwaitingPermissionAt';
 export const AWAITING_PERMISSION_MS = 120_000;
 const UNTAPPD_ORIGIN = 'https://untappd.com/*';
+// Every start counts here, so a grant handler that yielded while a popup that survived the prompt
+// started (and maybe already finished) its sync knows the press was served and starts no second one.
+let syncStarts = 0;
 
 export async function handleAwaitingPermission(): Promise<void> {
   await chrome.storage.session.set({ [AWAITING_PERMISSION_KEY]: new Date().toISOString() });
@@ -415,6 +418,7 @@ export async function handleNotStarting(): Promise<void> {
 // followed within the window by the options' search toggle also starts the sync (spec #965).
 export async function handleUntappdPermissionAdded(origins: readonly string[] | undefined): Promise<boolean> {
   if (!origins?.includes(UNTAPPD_ORIGIN)) return false;
+  const startsBefore = syncStarts;
   let at: unknown;
   try {
     at = (await chrome.storage.session.get(AWAITING_PERMISSION_KEY))[AWAITING_PERMISSION_KEY];
@@ -425,6 +429,7 @@ export async function handleUntappdPermissionAdded(origins: readonly string[] | 
   await handleNotStarting();
   const age = Date.now() - (typeof at === 'string' ? Date.parse(at) : NaN);
   if (!(age >= 0 && age <= AWAITING_PERMISSION_MS)) return false;
+  if (syncStarts !== startsBefore) return false;
   await handleCheckinSyncStart();
   return true;
 }
@@ -432,6 +437,7 @@ export async function handleUntappdPermissionAdded(origins: readonly string[] | 
 export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
   // #965: the press is served, so its mark must not start a sync later. Not awaited: two starts
   // at once must both meet syncStartPromise before either yields.
+  syncStarts += 1;
   void handleNotStarting();
   if (syncStartPromise) {
     try {

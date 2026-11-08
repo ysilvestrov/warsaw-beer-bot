@@ -1189,10 +1189,27 @@ describe('#965 the first Sync press survives the closed popup', () => {
 
   it('a grant of the search backend alone starts nothing and keeps the mark', async () => {
     await handleAwaitingPermission();
+    const before = await mark();
     expect(await handleUntappdPermissionAdded(['https://*.algolia.net/*'])).toBe(false);
     expect(await handleUntappdPermissionAdded(undefined)).toBe(false);
     expect(localStore.has(INTENT_KEY)).toBe(false);
-    expect(typeof (await mark())).toBe('string');
+    expect(await mark()).toBe(before);
+  });
+
+  it('a popup start that runs while the grant handler waits serves the press: no second sync', async () => {
+    const fetchMock = vi.fn(async () => new Response(SIGNED_OUT));
+    vi.stubGlobal('fetch', fetchMock);
+    await handleAwaitingPermission();
+    let releaseRemove!: () => void;
+    const remove = vi.mocked(chrome.storage.session.remove);
+    remove.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseRemove = resolve; }));
+    const granted = handleUntappdPermissionAdded(UNTAPPD);
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+    await handleCheckinSyncStart();
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'no_session' }));
+    releaseRemove();
+    expect(await granted).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('a popup that did not start (declined) drops the mark, so a later grant starts nothing', async () => {
