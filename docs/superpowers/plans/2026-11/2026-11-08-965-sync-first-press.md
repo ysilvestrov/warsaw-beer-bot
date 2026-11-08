@@ -39,9 +39,9 @@ untappd.com і позначкою ≤ 120 с → `handleCheckinSyncStart()`.
 `handleUntappdPermissionAdded(origins: readonly string[] | undefined): Promise<boolean>`
 (true — синк стартовано); повідомлення `checkin-sync:awaiting-permission`, `checkin-sync:not-starting`.
 
-- [ ] **Крок 1: стаби.** `tests/setup.ts`: `chrome.storage.session` (get/set/remove на окремій
+- [x] **Крок 1: стаби.** `tests/setup.ts`: `chrome.storage.session` (get/set/remove на окремій
   `Map`, очищення в `beforeEach`), `chrome.permissions.onAdded = { addListener: vi.fn() }`.
-- [ ] **Крок 2: тести** (`describe('#965 the first Sync press survives the closed popup')`):
+- [x] **Крок 2: тести** (`describe('#965 the first Sync press survives the closed popup')`):
   - позначка + `onAdded(['https://untappd.com/*'])` → `true`, синк стартував (статус `running`
     або intent `manual`), позначки немає;
   - без позначки → `false`, intent не з'явився;
@@ -54,7 +54,7 @@ untappd.com і позначкою ≤ 120 с → `handleCheckinSyncStart()`.
   - тихий крок біжить (`onAlarm(CHECK_ALARM)`), позначка, `onAdded` → intent `manual`, fetch один;
   - зареєстрований слухач: `vi.mocked(chrome.permissions.onAdded.addListener).mock.calls[0][0]`
     з позначкою стартує синк.
-- [ ] **Крок 3: реалізація** в `index.ts` поруч із `handleCheckinSyncStart`:
+- [x] **Крок 3: реалізація** в `index.ts` поруч із `handleCheckinSyncStart`:
 
 ```ts
 // #965: Chrome's permission prompt closes the popup, so the code after its permissions.request
@@ -92,17 +92,17 @@ export async function handleUntappdPermissionAdded(origins: readonly string[] | 
   одночасні старти обидва пройдуть перевірку `syncStartPromise`). Слухачі на верхньому рівні:
   `chrome.permissions.onAdded.addListener((p) => { void handleUntappdPermissionAdded(p.origins); });`
   і дві гілки в `onMessage`, що відповідають `{ ok: true | false }`.
-- [ ] **Крок 4:** гейт розширення, коміт.
+- [x] **Крок 4:** гейт розширення, коміт.
 
 ### Задача 2 — попап і документи
 
 **Файли:** `extension/src/popup/popup.ts`, `extension/src/popup/popup.test.ts`; документи.
 
-- [ ] **Крок 1: тести попапа:** звичайне натискання шле `{type:'checkin-sync:awaiting-permission'}`
+- [x] **Крок 1: тести попапа:** звичайне натискання шле `{type:'checkin-sync:awaiting-permission'}`
   раніше за `permissions.request` (`invocationCallOrder`); відмова (`request → false`) шле
   `checkin-sync:not-starting` і текст «Allow access…»; «Clear and sync» не шле
   `awaiting-permission` (наявний тест порядку `['local-db:clear', 'checkin-sync:start']` лишається).
-- [ ] **Крок 2: реалізація** в обробнику кнопки, перед `await chrome.permissions.request`:
+- [x] **Крок 2: реалізація** в обробнику кнопки, перед `await chrome.permissions.request`:
 
 ```ts
 // #965: the permission prompt can close the popup before the start below runs; the worker
@@ -112,10 +112,23 @@ if (!clearFirst) chrome.runtime.sendMessage({ type: 'checkin-sync:awaiting-permi
 ```
 
   У гілці `!granted` першим рядком — те саме з `checkin-sync:not-starting`.
-- [ ] **Крок 3: документи:**
+- [x] **Крок 3: документи:**
   - `spec.md` §2 після абзацу про повтор start: перше натискання без дозволу, позначка 2 хв, старт
     фоновим процесом; «Clear and sync» без позначки (друге натискання питає); виняток із пошуком.
   - `docs/extension-install-uk.md` / `-en.md`: синк почнеться сам після дозволу (попап закриється —
     відкрий, щоб бачити прогрес); прибрати обіцянку тексту після відмови.
   - `extension/CHANGELOG.md` `[Unreleased]`: рядок про перше натискання.
-- [ ] **Крок 4:** гейт розширення, коміт.
+- [x] **Крок 4:** гейт розширення, коміт.
+
+## Рішення під час реалізації
+
+- Тести, що стартують синк, чекають його кінця (`outcome: 'done'`): інакше незавершений крок
+  лишався в модулі й наступний тест (тихий крок) не стартував.
+- Cross-review codex @ 5f64140, 2 знахідки, обидві виправлено:
+  1. P2 — гонка: обробник дозволу чекав на видалення позначки, а popup, що пережив вікно, за цей
+     час стартував і завершив синк; обробник стартував другий. Тепер кожен старт збільшує лічильник
+     `syncStarts`, і обробник нічого не робить, якщо той зрушив. Тест із затриманим `remove`;
+     мутація (без перевірки лічильника) його валить.
+  2. P3 — тест «keeps the mark» порівнював тип, не значення; тепер точна рівність.
+- Мутації: усі сім із плану й лічильник ловляться своїми тестами; без реєстрації `onAdded` тестовий
+  файл падає ще на зборі.
