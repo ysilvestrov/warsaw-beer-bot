@@ -1,6 +1,8 @@
 import { vi, beforeEach } from 'vitest';
 
 const store = new Map<string, unknown>();
+// #965: chrome.storage.session — gone with the browser, kept across worker restarts.
+const sessionStore = new Map<string, unknown>();
 
 (globalThis as unknown as { chrome: unknown }).chrome = {
   storage: {
@@ -29,6 +31,20 @@ const store = new Map<string, unknown>();
         for (const k of Array.isArray(keys) ? keys : [keys]) store.delete(k);
       }),
     },
+    session: {
+      get: vi.fn(async (keys?: string | string[]) => {
+        const ks = keys === undefined ? [...sessionStore.keys()] : Array.isArray(keys) ? keys : [keys];
+        const out: Record<string, unknown> = {};
+        for (const k of ks) if (sessionStore.has(k)) out[k] = sessionStore.get(k);
+        return out;
+      }),
+      set: vi.fn(async (obj: Record<string, unknown>) => {
+        for (const [k, v] of Object.entries(obj)) sessionStore.set(k, v);
+      }),
+      remove: vi.fn(async (keys: string | string[]) => {
+        for (const k of Array.isArray(keys) ? keys : [keys]) sessionStore.delete(k);
+      }),
+    },
   },
   // #934: the background worker registers the sync alarms at import.
   alarms: {
@@ -37,7 +53,8 @@ const store = new Map<string, unknown>();
     get: vi.fn(async () => undefined),
     onAlarm: { addListener: vi.fn() },
   },
-  permissions: { contains: vi.fn(async () => false) },
+  // #965: onAdded — the worker starts the sync a closed popup could not.
+  permissions: { contains: vi.fn(async () => false), onAdded: { addListener: vi.fn() } },
   action: { setBadgeText: vi.fn(async () => {}), setBadgeBackgroundColor: vi.fn(async () => {}) },
   runtime: {
     onMessage: { addListener: vi.fn() },
@@ -51,4 +68,5 @@ const store = new Map<string, unknown>();
 
 beforeEach(() => {
   store.clear();
+  sessionStore.clear();
 });

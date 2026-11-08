@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, it, expect, vi, type Mock } from 'vite
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
   handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleLocalDbClear, handleLocalDbStats, handleMatch,
-  restoreSyncBadge,
+  restoreSyncBadge, AWAITING_PERMISSION_KEY, handleAwaitingPermission, handleNotStarting, handleUntappdPermissionAdded,
 } from './index';
 import { setSettings } from '../shared/config';
 import { CHECK_ALARM, INTENT_KEY, WATCHDOG_ALARM } from './sync-scheduler';
@@ -1119,4 +1119,112 @@ describe('#924 local mode in the worker', () => {
     expect(await handleLocalDbStats()).toEqual({ type: 'local-db:stats:ok', mode: 'linked', checkins: 0, beers: 0, lastSync: null, username: null });
   });
 
+});
+
+describe('#965 the first Sync press survives the closed popup', () => {
+  const UNTAPPD = ['https://untappd.com/*'];
+  const onAdded = vi.mocked(chrome.permissions.onAdded.addListener).mock.calls[0][0] as (p: chrome.permissions.Permissions) => void;
+  const mark = async () => (await chrome.storage.session.get(AWAITING_PERMISSION_KEY))[AWAITING_PERMISSION_KEY];
+  const page = { merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: null, nextCursor: null, profileTotal: 100, serverCount: 12, complete: false };
+
+  beforeEach(() => {
+    permissionsContains.mockResolvedValue(true);
+    vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue(page);
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a press, then the grant: the worker starts the sync to the end and drops the mark', async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response(FEED, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await handleAwaitingPermission();
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(true);
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['https://untappd.com/user/bob']);
+    expect(await mark()).toBe(undefined);
+  });
+
+  it('the registered grant listener is the one that starts it', async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response(FEED, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await handleAwaitingPermission();
+    onAdded({ origins: UNTAPPD, permissions: [] });
+    await vi.waitFor(() => expect(localStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('a grant with no press behind it starts nothing', async () => {
+    const fetchMock = vi.fn(async () => new Response(FEED));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(false);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+  });
+
+  it('a press older than two minutes starts nothing and its mark goes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-08T12:00:00.000Z'));
+    await handleAwaitingPermission();
+    vi.setSystemTime(new Date('2026-11-08T12:02:01.000Z'));
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(false);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+    expect(await mark()).toBe(undefined);
+  });
+
+  it('a press exactly two minutes old still starts the sync', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(FEED)));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-08T12:00:00.000Z'));
+    await handleAwaitingPermission();
+    vi.setSystemTime(new Date('2026-11-08T12:02:00.000Z'));
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(true);
+  });
+
+  it('a mark that is not a time starts nothing and goes', async () => {
+    await chrome.storage.session.set({ [AWAITING_PERMISSION_KEY]: 'not-a-date' });
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(false);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+    expect(await mark()).toBe(undefined);
+  });
+
+  it('a grant of the search backend alone starts nothing and keeps the mark', async () => {
+    await handleAwaitingPermission();
+    expect(await handleUntappdPermissionAdded(['https://*.algolia.net/*'])).toBe(false);
+    expect(await handleUntappdPermissionAdded(undefined)).toBe(false);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+    expect(typeof (await mark())).toBe('string');
+  });
+
+  it('a popup that did not start (declined) drops the mark, so a later grant starts nothing', async () => {
+    await handleAwaitingPermission();
+    await handleNotStarting();
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(false);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+  });
+
+  it('a start from the popup drops the mark', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(FEED)));
+    await handleAwaitingPermission();
+    await handleCheckinSyncStart();
+    await vi.waitFor(async () => expect(await mark()).toBe(undefined));
+  });
+
+  it('an unreadable session store means no mark: nothing starts, nothing throws', async () => {
+    vi.mocked(chrome.storage.session.get).mockRejectedValueOnce(new Error('gone'));
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(false);
+    expect(localStore.has(INTENT_KEY)).toBe(false);
+  });
+
+  it('a grant during a silent step makes it manual, with no second run', async () => {
+    let releaseFeed!: () => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { releaseFeed = () => resolve(new Response(FEED)); }));
+    vi.stubGlobal('fetch', fetchMock);
+    onAlarm({ name: CHECK_ALARM });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await handleAwaitingPermission();
+    expect(await handleUntappdPermissionAdded(UNTAPPD)).toBe(true);
+    expect(localStore.get(INTENT_KEY)).toMatchObject({ kind: 'manual' });
+    releaseFeed();
+    await vi.waitFor(() => expect(localStore.has(INTENT_KEY)).toBe(false));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -397,7 +397,42 @@ async function reportSyncIntent(r: SchedulerReport): Promise<void> {
   }, generation).catch(() => undefined);
 }
 
+// #965: Chrome's permission prompt closes the popup, so the code after its permissions.request
+// never runs. The popup marks the press before asking; the grant event starts the sync.
+export const AWAITING_PERMISSION_KEY = 'syncAwaitingPermissionAt';
+export const AWAITING_PERMISSION_MS = 120_000;
+const UNTAPPD_ORIGIN = 'https://untappd.com/*';
+
+export async function handleAwaitingPermission(): Promise<void> {
+  await chrome.storage.session.set({ [AWAITING_PERMISSION_KEY]: new Date().toISOString() });
+}
+
+export async function handleNotStarting(): Promise<void> {
+  await chrome.storage.session.remove(AWAITING_PERMISSION_KEY).catch(() => undefined);
+}
+
+// The mark says only "Sync was pressed lately", not which prompt was answered: a declined prompt
+// followed within the window by the options' search toggle also starts the sync (spec #965).
+export async function handleUntappdPermissionAdded(origins: readonly string[] | undefined): Promise<boolean> {
+  if (!origins?.includes(UNTAPPD_ORIGIN)) return false;
+  let at: unknown;
+  try {
+    at = (await chrome.storage.session.get(AWAITING_PERMISSION_KEY))[AWAITING_PERMISSION_KEY];
+  } catch {
+    return false;
+  }
+  if (at === undefined) return false;
+  await handleNotStarting();
+  const age = Date.now() - (typeof at === 'string' ? Date.parse(at) : NaN);
+  if (!(age >= 0 && age <= AWAITING_PERMISSION_MS)) return false;
+  await handleCheckinSyncStart();
+  return true;
+}
+
 export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
+  // #965: the press is served, so its mark must not start a sync later. Not awaited: two starts
+  // at once must both meet syncStartPromise before either yields.
+  void handleNotStarting();
   if (syncStartPromise) {
     try {
       await syncStartPromise;
@@ -760,6 +795,7 @@ chrome.runtime.onStartup.addListener(() => {
   void ensureCheckAlarm();
   void syncScheduler.check();
 });
+chrome.permissions.onAdded.addListener((p) => { void handleUntappdPermissionAdded(p.origins); });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === WATCHDOG_ALARM) void syncScheduler.resume();
   if (alarm.name === CHECK_ALARM) void syncScheduler.check();
@@ -785,6 +821,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleCacheSetIfMatching(message.key, message.expected, message.result).then((written) => sendResponse({ written }), () => sendResponse({ written: false })); return true;
   }
   if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
+  if (t === 'checkin-sync:awaiting-permission') { handleAwaitingPermission().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
+  if (t === 'checkin-sync:not-starting') { handleNotStarting().then(() => sendResponse({ ok: true })); return true; }
   if (t === 'checkin-sync:stop') { handleCheckinSyncStop().then(sendResponse); return true; }
   if (t === 'checkin-sync:status') { handleCheckinSyncStatus().then(sendResponse); return true; }
   if (t === 'local-db:stats') { handleLocalDbStats().then(sendResponse); return true; }
