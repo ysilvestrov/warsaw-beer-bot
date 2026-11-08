@@ -29,6 +29,8 @@
 
 - “Sync my check-ins” now finishes on its own: one press syncs even a large history to the end, with no “Continue” to keep pressing, and it carries on after a browser restart. New check-ins are picked up by themselves when the browser starts and during the day, so ✅ shows up without pressing Sync; an amber “!” on the extension icon tells you when there are too many to pick up quietly. The popup now shows a progress bar, and “✓ Fully synced” only once your whole history is really in.
 
+- The first “Sync my check-ins”, when the browser asks for access to Untappd, now starts the sync too. Before, it only granted the access, and nothing happened until you opened the popup and pressed Sync again.
+
 - “Find missing beers via Untappd” now works without a bot token: the extension gets a random, anonymous install ID for it, and the popup says “Works without Telegram”. The new “Anonymous usage statistics” option on the options page lets you switch this off at any time, which also deletes the ID from the server.
 
 - Fixed beers on Piwne Mosty being marked as “Not beer” (the grey ✕) when listed under the shop's temporary category, such as PINTA Barrel Brewing releases. Their ratings and check-in badges now appear normally.

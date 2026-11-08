@@ -308,6 +308,7 @@ describe('initPopup', () => {
     (document.getElementById('syncCheckins') as HTMLButtonElement).click();
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'checkin-sync:start' }, expect.any(Function)));
     const types = send.mock.calls.map(([m]) => m.type);
+    // #965: no waiting mark — a closed popup could not ask the question the deletion needs.
     expect(types.slice(0, 2)).toEqual(['local-db:clear', 'checkin-sync:start']);
     expect(ask).toHaveBeenCalledWith('Delete the check-ins stored in this browser and sync this account?\n\n'
       + 'Cancel keeps them and only syncs — for when you have signed back in to the account they belong to.');
@@ -315,6 +316,29 @@ describe('initPopup', () => {
     expect(chromeStub.permissions.request.mock.invocationCallOrder[0]).toBeLessThan(ask.mock.invocationCallOrder[0]);
     expect(ask.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]);
     vi.unstubAllGlobals();
+  });
+
+  it('a press tells the worker it is waiting for the permission before asking for it (#965)', async () => {
+    await bootPopup('');
+    const chromeStub = globalThis.chrome as unknown as { runtime: Record<string, unknown>; permissions: { request: Mock } };
+    const send = vi.fn((_m: { type?: string }, callback?: (r?: object) => void) => { callback?.(); });
+    chromeStub.runtime.sendMessage = send;
+    (document.getElementById('syncCheckins') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith({ type: 'checkin-sync:start' }, expect.any(Function)));
+    expect(send.mock.calls[0][0]).toEqual({ type: 'checkin-sync:awaiting-permission' });
+    expect(send.mock.invocationCallOrder[0]).toBeLessThan(chromeStub.permissions.request.mock.invocationCallOrder[0]);
+  });
+
+  it('a declined permission withdraws the press and starts nothing (#965)', async () => {
+    await bootPopup('');
+    const chromeStub = globalThis.chrome as unknown as { runtime: Record<string, unknown>; permissions: { request: Mock } };
+    chromeStub.permissions.request.mockResolvedValue(false);
+    const send = vi.fn((_m: { type?: string }, callback?: (r?: object) => void) => { callback?.(); });
+    chromeStub.runtime.sendMessage = send;
+    (document.getElementById('syncCheckins') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.getElementById('syncStatus')?.textContent)
+      .toBe('Allow access to untappd.com to sync your check-ins.'));
+    expect(send.mock.calls.map(([m]) => m.type)).toEqual(['checkin-sync:awaiting-permission', 'checkin-sync:not-starting']);
   });
 
   it('without a token: Clear and sync answered Cancel keeps the check-ins and only syncs (#924)', async () => {

@@ -348,8 +348,13 @@ async function initPopup(): Promise<void> {
       // shared with enrichment). Request it in this user-gesture context so a user
       // who never enabled enrichment can still sync. Must be the first await so the
       // gesture isn't consumed.
+      // #965: the prompt can close the popup before the start below runs; the worker then starts
+      // the sync itself when access is granted. Not for Clear and sync: deleting needs the
+      // question, and only a live popup can ask it. Sent without awaiting, so the gesture stays.
+      if (!clearFirst) chrome.runtime.sendMessage({ type: 'checkin-sync:awaiting-permission' }, () => { void chrome.runtime.lastError; });
       const granted = await chrome.permissions.request({ origins: ['https://untappd.com/*'] });
       if (!granted) {
+        chrome.runtime.sendMessage({ type: 'checkin-sync:not-starting' }, () => { void chrome.runtime.lastError; });
         syncStatus.textContent = 'Allow access to untappd.com to sync your check-ins.';
         syncBtn.disabled = false;
         return;

@@ -359,8 +359,9 @@ Supporter.
   browser and are not sent to the bot — see "Without Telegram" below.
 - **The first time**, the browser will ask for permission to access
   `untappd.com` (to read your feed within your session) — click
-  **Allow**. If you decline, you'll see "Allow access to untappd.com to
-  sync your check-ins." and the sync won't start.
+  **Allow**. The popup closes and the sync starts on its own; open the
+  popup again to see the progress. If you decline, the sync won't
+  start — press **Sync** again when you're ready to allow access.
 - **What it does:** pages through your check-in feed from newest to oldest
   and uploads to the bot the ones it doesn't have yet. Progress is shown
   right there: a bar and `Syncing… 42 %`.
