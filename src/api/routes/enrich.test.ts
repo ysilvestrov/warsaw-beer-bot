@@ -1654,8 +1654,10 @@ describe('POST /enrich/result â€” install token: verified, positive-only (#923 Â
     global_rating: 3.71, beer_slug: 'pinta-atak-chmielu', brewery_alias: [], alias_alt: [], rating_count: 15873,
   };
   // Probe 2 of the spec: a real bid relayed under a name rewritten to fit the card.
-  const BERQUELL = { brewery: 'Berquell Brewery', name: 'Erdbeer', abv: 4.2 };
-  const forgedHit = { bid: 46157, beer_name: 'Erdbeer', brewery_name: 'Berquell Brewery', type_name: 'Fruit Beer', beer_abv: 4.2, rating_score: 3.6 };
+  // The card's brewery must have no curated alias to Bergquell: the probe used the
+  // Berquell typo card until #918 made that pairing legitimate.
+  const FORGED_CARD = { brewery: 'Browar Pinta', name: 'Erdbeer', abv: 4.2 };
+  const forgedHit = { bid: 46157, beer_name: 'Erdbeer', brewery_name: 'Browar Pinta', type_name: 'Fruit Beer', beer_abv: 4.2, rating_score: 3.6 };
   const bergquellRecord: HydratedBeer = {
     bid: 46157, beer_name: 'Erdbeer Porter', brewery_name: 'Bergquell Brauerei LÃ¶bau', style: 'Porter - Other',
     abv: 4.8, global_rating: 3.6, beer_slug: 'bergquell-erdbeer-porter', brewery_alias: [], alias_alt: [],
@@ -1677,7 +1679,7 @@ describe('POST /enrich/result â€” install token: verified, positive-only (#923 Â
 
   it('a forged hit is judged by the hydrated record: not_found and beers untouched', async () => {
     const { app, db } = setupAs(INSTALL, { hydrateByBid: hydrateWith(bergquellRecord) });
-    const res = await post(app, '/enrich/result', relay(BERQUELL, forgedHit));
+    const res = await post(app, '/enrich/result', relay(FORGED_CARD, forgedHit));
     expect(await res.json()).toEqual({ status: 'not_found' });
     expect(beersSnapshot(db)).toEqual([]);
     expect(db.prepare('SELECT COUNT(*) AS c FROM enrich_failures').get()).toEqual({ c: 0 });
@@ -1685,7 +1687,7 @@ describe('POST /enrich/result â€” install token: verified, positive-only (#923 Â
 
   it('the same forged hit from a Telegram user is still trusted, as before (regression)', async () => {
     const { app } = setupAs(USER, { hydrateByBid: hydrateWith(bergquellRecord) });
-    const res = await post(app, '/enrich/result', relay(BERQUELL, forgedHit));
+    const res = await post(app, '/enrich/result', relay(FORGED_CARD, forgedHit));
     expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 46157 });
   });
 
