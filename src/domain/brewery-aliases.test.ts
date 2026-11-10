@@ -13,6 +13,7 @@ const KNOWN_HUBS = new Set([
   'kauno alus',
   'cydrownia',
   'maryensztadt',
+  'bergquell lobau',
 ]);
 
 // KNOWN_HUBS is the single exemption authority for all three batch blocks below —
@@ -464,3 +465,24 @@ describe('Curated brewery alias batch for cider producers Vinkon and Cydr Royal 
   });
 });
 
+describe('Single-character brewery typo Berquell (#918)', () => {
+  test('resolves berquell <-> bergquell lobau symmetrically', () => {
+    expect(aliasNeighbors('berquell')).toEqual(['bergquell lobau']);
+    expect(aliasNeighbors('bergquell lobau')).toContain('berquell');
+  });
+
+  // The #329 typo `bergqell` and this one are two spokes of the same brewery.
+  test('bergquell lobau is a hub of exactly its two typo spokes', () => {
+    expect(aliasNeighbors('bergquell lobau').sort()).toEqual(['bergqell', 'berquell']);
+  });
+
+  test('the two typo spokes are not neighbours of each other', () => {
+    expect(aliasNeighbors('berquell')).not.toContain('bergqell');
+    expect(aliasNeighbors('bergqell')).toEqual(['bergquell lobau']);
+  });
+
+  test('normalizes raw labels to alias keys (#918)', () => {
+    expect(normalizeBrewery('Berquell Brewery')).toBe('berquell');
+    expect(normalizeBrewery('Bergquell Brauerei Löbau')).toBe('bergquell lobau');
+  });
+});

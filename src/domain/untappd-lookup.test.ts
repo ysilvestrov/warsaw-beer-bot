@@ -2416,6 +2416,29 @@ describe('#665 Czech grade lookup context', () => {
     });
   });
 
+  describe('Issue #918 brewery typo Berquell', () => {
+    // Candidates as returned live by Algolia for `Berquell Erdbeer` on 2026-11-10.
+    const candidates = [
+      { bid: 46157, beer_name: 'Erdbeer Porter', brewery_name: 'Bergquell Brauerei Löbau', style: 'Porter - Other', abv: 4, global_rating: 2.91, rating_count: 9294 },
+      { bid: 1387326, beer_name: 'Erdbeer Porter Alkoholfrei', brewery_name: 'Bergquell Brauerei Löbau', style: 'Non-Alcoholic Beer - Porter / Stout', abv: null, global_rating: 3.1, rating_count: 120 },
+    ];
+
+    test('matches Berquell Brewery / Erdbeer @4.2 to Bergquell Erdbeer Porter over the alcohol-free sibling', async () => {
+      const out = await lookupBeer({ brewery: 'Berquell Brewery', name: 'Erdbeer', abv: 4.2, search: fakeSearch(() => candidates) });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(46157);
+    });
+
+    test('rejects an Erdbeer Porter from an unrelated brewery', async () => {
+      const out = await lookupBeer({
+        brewery: 'Berquell Brewery', name: 'Erdbeer', abv: 4.2,
+        search: fakeSearch(() => [{ ...candidates[0], bid: 9999992, brewery_name: 'Browar Kazimierz' }]),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+  });
+
   describe('Issue #826 and #832 cider producers Vinkon and Cydr Royal', () => {
     test('matches Vinkon / Cydr Bursztynowy to Potęga Tradycji Cydr Bursztynowy over perry siblings (#826)', async () => {
       const search = fakeSearch(() => [

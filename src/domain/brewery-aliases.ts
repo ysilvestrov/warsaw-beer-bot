@@ -157,6 +157,8 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // Curated brewery alias batch for cider makers (#826, #832).
   ['vinkon', 'potega tradycji'],                          // 38958 Bursztynowy -> Potęga Tradycji Cydr Bursztynowy (bid 2724671, 4.5% = 4.5%) (#826)
   ['cydr royal', 'royal apple'],                          // 192 Cydr Jabłko -> Royal Apple Cydr Jabłkowy (bid 5965384, 5.0% vs 4.5%) (#832)
+  // Single-character brewery typo (#918), proven by a live replay against the orphan's candidates.
+  ['berquell', 'bergquell lobau'],                     // 68135 Erdbeer -> Bergquell Erdbeer Porter (bid 46157, 4.2% vs 4.0%)
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
