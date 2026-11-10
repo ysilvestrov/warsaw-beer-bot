@@ -86,7 +86,7 @@ function externalIcon(): SVGSVGElement {
 export function renderSupportedShops(
   container: HTMLElement,
   languages: readonly string[],
-  open: ShopOpener = openShopWindow,
+  open: ShopOpener = openShopTab,
 ): number {
   container.replaceChildren();
   let count = 0;
@@ -106,7 +106,7 @@ export function renderSupportedShops(
       link.href = shop.url;
       link.target = '_blank';
       link.rel = 'noopener';
-      link.setAttribute('aria-label', `Open ${shop.name} in a new window`);
+      link.setAttribute('aria-label', `Open ${shop.name} in a new tab`);
       link.append(document.createTextNode(shop.name), externalIcon());
       link.addEventListener('click', (event) => {
         event.preventDefault();
@@ -120,22 +120,12 @@ export function renderSupportedShops(
   return count;
 }
 
-interface WindowCreator {
-  create(createData: chrome.windows.CreateData): Promise<chrome.windows.Window | undefined>;
-}
-
 interface TabCreator {
   create(createProperties: chrome.tabs.CreateProperties): Promise<chrome.tabs.Tab>;
 }
 
-export async function openShopWindow(
-  url: string,
-  windowsApi: WindowCreator = chrome.windows,
-  tabsApi?: TabCreator,
-): Promise<void> {
-  try {
-    await windowsApi.create({ focused: true, url });
-  } catch {
-    await (tabsApi ?? chrome.tabs).create({ active: true, url });
-  }
+// A new active tab in the window the popup belongs to, never a separate window: one window
+// per shop piled up after a few picks.
+export async function openShopTab(url: string, tabsApi: TabCreator = chrome.tabs): Promise<void> {
+  await tabsApi.create({ active: true, url });
 }

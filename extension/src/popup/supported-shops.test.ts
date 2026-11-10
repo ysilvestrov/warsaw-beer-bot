@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ADAPTERS } from '../sites/registry';
 import {
   browserLanguages,
-  openShopWindow,
+  openShopTab,
   renderSupportedShops,
   supportedShopGroups,
 } from './supported-shops';
@@ -68,25 +68,18 @@ describe('renderSupportedShops', () => {
   });
 });
 
-describe('openShopWindow', () => {
-  it('opens the chosen shop in a separate focused browser window', async () => {
-    const create = vi.fn(async () => ({} as chrome.windows.Window));
+describe('openShopTab', () => {
+  it('opens the chosen shop in a new active tab, exactly once', async () => {
+    const create = vi.fn(async () => ({} as chrome.tabs.Tab));
 
-    await openShopWindow('https://beerfreak.org/', { create });
+    await openShopTab('https://beerfreak.org/', { create });
 
-    expect(create).toHaveBeenCalledWith({ focused: true, url: 'https://beerfreak.org/' });
+    expect(create.mock.calls).toEqual([[{ active: true, url: 'https://beerfreak.org/' }]]);
   });
 
-  it('opens a new tab when creating a separate window fails', async () => {
-    const windowsCreate = vi.fn(async () => { throw new Error('window unavailable'); });
-    const tabsCreate = vi.fn(async () => ({} as chrome.tabs.Tab));
+  it('passes a tab failure to the caller', async () => {
+    const create = vi.fn(async () => { throw new Error('tab unavailable'); });
 
-    await openShopWindow(
-      'https://beerfreak.org/',
-      { create: windowsCreate },
-      { create: tabsCreate },
-    );
-
-    expect(tabsCreate).toHaveBeenCalledWith({ active: true, url: 'https://beerfreak.org/' });
+    await expect(openShopTab('https://beerfreak.org/', { create })).rejects.toThrow('tab unavailable');
   });
 });

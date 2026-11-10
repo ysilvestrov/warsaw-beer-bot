@@ -317,8 +317,7 @@ housekeeping one at the bottom:
   — and clearing the cache no longer wipes that explanation away.
 - **"Supported shops · 10"** — click this row to expand or collapse the shop
   directory. Shops are grouped by the country they ship from. Select any shop
-  to open it in a separate focused browser window; if the browser cannot create
-  one, the extension opens a new tab instead. Beershop appears once and chooses
+  to open it in a new tab of the current browser window. Beershop appears once and chooses
   the storefront that best matches your browser languages.
 - **"Clear all cache"** (the quiet button at the bottom, under a thin rule —
   once a token is saved, the "Read the setup guide →" link sits just above it)
