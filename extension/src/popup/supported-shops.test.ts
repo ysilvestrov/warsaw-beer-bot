@@ -45,7 +45,7 @@ describe('supportedShopGroups', () => {
 });
 
 describe('renderSupportedShops', () => {
-  it('renders country headings and opens the selected shop from its link', () => {
+  it('renders country headings, prevents default navigation, and opens the selected shop from its link', () => {
     const container = document.createElement('div');
     const open = vi.fn();
 
@@ -62,9 +62,62 @@ describe('renderSupportedShops', () => {
     const flasker = Array.from(container.querySelectorAll<HTMLAnchorElement>('.shop-link'))
       .find((link) => link.textContent?.includes('Flasker'))!;
 
-    flasker.click();
+    expect(flasker.getAttribute('aria-label')).toBe('Open Flasker in a new tab');
+    const event = new MouseEvent('click', { cancelable: true });
+    flasker.dispatchEvent(event);
 
+    expect(event.defaultPrevented).toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
     expect(open).toHaveBeenCalledWith('https://flasker.com.ua/');
+  });
+
+  it('uses openShopTab by default when open argument is omitted', () => {
+    const create = vi.fn(async () => ({} as chrome.tabs.Tab));
+    vi.stubGlobal('chrome', { tabs: { create } });
+    try {
+      const container = document.createElement('div');
+      renderSupportedShops(container, ['en-GB']);
+      const link = container.querySelector<HTMLAnchorElement>('.shop-link')!;
+
+      const event = new MouseEvent('click', { cancelable: true });
+      link.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledWith({ active: true, url: 'https://beerfreak.org/' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['Cmd', { metaKey: true }],
+    ['Shift', { shiftKey: true }],
+  ])('leaves a %s+click to the browser: no preventDefault, no opener call', (_name, modifier) => {
+    const container = document.createElement('div');
+    const open = vi.fn();
+    renderSupportedShops(container, ['en-GB'], open);
+    const link = container.querySelector<HTMLAnchorElement>('.shop-link')!;
+
+    const event = new MouseEvent('click', { ...modifier, cancelable: true });
+    link.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('intercepts an Alt+click like a plain click, so the browser does not download the page', () => {
+    const container = document.createElement('div');
+    const open = vi.fn();
+    renderSupportedShops(container, ['en-GB'], open);
+    const link = container.querySelector<HTMLAnchorElement>('.shop-link')!;
+
+    const event = new MouseEvent('click', { altKey: true, cancelable: true });
+    link.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(open.mock.calls).toEqual([['https://beerfreak.org/']]);
   });
 });
 
