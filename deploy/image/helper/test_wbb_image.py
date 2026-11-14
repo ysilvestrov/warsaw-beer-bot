@@ -979,6 +979,7 @@ TEMPLATE = (f'# activate fills in @@DIGEST@@, @@UID@@ and @@GID@@\n[Container]\n
 WRITTEN = (f'# activate fills in @@DIGEST@@, @@UID@@ and @@GID@@\n[Container]\nImage={REPO}@{D1}\n'
            f'  ; @@UID@@ is numeric\nUser={UID}\nGroup={GID}\n')
 RELOAD = [SYSTEMCTL, 'daemon-reload']
+RESET_FAILED = [SYSTEMCTL, 'reset-failed', 'warsaw-beer-bot.service']
 RESTART = [SYSTEMCTL, 'restart', 'warsaw-beer-bot.service']
 
 
@@ -996,22 +997,22 @@ class Activate(HelperCase):
             return f.read(), stat.S_IMODE(os.stat(self.quadlet).st_mode)
 
     def test_first_activation_writes_the_template_reloads_checks_and_restarts(self):
-        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done(), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner), (0, f'ACTIVATED {D1}\n', ''))
         self.assertEqual(runner.calls, [(INSPECT_ARGV, 60, True), (SHOW_ARGV, 30, True), (RELOAD, 60, True),
-                                        (SHOW_ARGV, 30, True), (RESTART, 180, True)])
+                                        (SHOW_ARGV, 30, True), (RESET_FAILED, 30, True), (RESTART, 180, True)])
         self.assertEqual((self.read_quadlet(), sorted(os.listdir(self.dir))),
                          ((WRITTEN, 0o644), ['scratch', 'snap', 'template', 'warsaw-beer-bot.container']))
 
     def test_replaces_the_file_of_a_quadlet_unit(self):
         self.write_quadlet(f'Image={REPO}@{D2}\n')
-        runner = FakeRunner(INSPECT_D1, self.ours(), done(), self.ours(), done())
+        runner = FakeRunner(INSPECT_D1, self.ours(), done(), self.ours(), done(), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner), (0, f'ACTIVATED {D1}\n', ''))
         self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
 
     def test_creates_the_quadlet_directory_when_there_is_none(self):
         self.quadlet = os.path.join(self.dir, 'containers', 'systemd', 'warsaw-beer-bot.container')
-        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done(), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
         self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
 
@@ -1020,7 +1021,7 @@ class Activate(HelperCase):
         with open(target, 'w', encoding='utf-8') as f:
             f.write('untouched')
         os.symlink(target, self.quadlet + '.tmp')
-        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done(), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
         with open(target, encoding='utf-8') as f:
             self.assertEqual(f.read(), 'untouched')
@@ -1163,19 +1164,39 @@ class Activate(HelperCase):
                                  '(sudo bash deploy/install-image.sh)\n'))
 
     def test_a_restart_that_fails_is_a_verdict_on_the_activated_image(self):
-        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(),
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done(),
                             done(1, stderr='Job for warsaw-beer-bot.service failed.\nSee "journalctl -xeu".\n'))
         self.assertEqual(self.main(['activate', '--digest', D1], runner),
                          (1, 'ACTIVATE FAILED: restart exited 1: Job for warsaw-beer-bot.service failed. '
                              'See "journalctl -xeu".\n', ''))
-        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV, RESTART])
+        self.assertEqual(self.argvs(runner), [INSPECT_ARGV, SHOW_ARGV, RELOAD, SHOW_ARGV, RESET_FAILED, RESTART])
         self.assertEqual(self.read_quadlet(), (WRITTEN, 0o644))
+
+    # V16: a unit that crash-looped into the start limit refuses `restart` until reset-failed; that one is best
+    # effort, so its own failure never stands in for the restart's verdict.
+    def test_a_reset_failed_that_fails_or_times_out_still_restarts_and_the_restart_decides(self):
+        for reset in (done(1, stderr='Failed to reset failed state: Access denied\n'),
+                      subprocess.TimeoutExpired('systemctl', 30)):
+            for restart, result in ((done(), (0, f'ACTIVATED {D1}\n', '')),
+                                    (done(1, stderr='Start request repeated too quickly.\n'),
+                                     (1, 'ACTIVATE FAILED: restart exited 1: Start request repeated too quickly.\n', ''))):
+                with self.subTest(reset=reset, restart=restart.returncode):
+                    runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), reset, restart)
+                    self.assertEqual(self.main(['activate', '--digest', D1], runner), result)
+                    self.assertEqual(runner.calls[-2:], [(RESET_FAILED, 30, True), (RESTART, 180, True)])
+
+    def test_reset_failed_names_the_unit_read_when_activate_runs(self):
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done(), done())
+        with mock.patch.object(wi, 'UNIT', 'other.service'):
+            self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
+        self.assertEqual(self.argvs(runner)[-2:], [[SYSTEMCTL, 'reset-failed', 'other.service'],
+                                                   [SYSTEMCTL, 'restart', 'other.service']])
 
     def test_a_failing_reload_or_a_restart_timeout_is_tempfail(self):
         for answers, message in (
             ([done(1, stderr='Access denied\n'), done()], 'systemctl daemon-reload exited 1: Access denied'),
             ([subprocess.TimeoutExpired('systemctl', 60), done()], 'systemctl daemon-reload timed out after 60s'),
-            ([done(), self.ours(), subprocess.TimeoutExpired('systemctl', 180)],
+            ([done(), self.ours(), done(), subprocess.TimeoutExpired('systemctl', 180)],
              'systemctl restart warsaw-beer-bot.service timed out after 180s'),
         ):
             with self.subTest(message=message):
@@ -1190,7 +1211,7 @@ class Activate(HelperCase):
 
     def test_the_real_template_activates_into_a_file_current_reads_back(self):
         self.template = os.path.join(os.path.dirname(HERE), 'warsaw-beer-bot.container')
-        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done())
+        runner = FakeRunner(INSPECT_D1, show('not-found', '', ''), done(), self.ours(), done(), done())
         self.assertEqual(self.main(['activate', '--digest', D1], runner)[0], 0)
         lines = self.read_quadlet()[0].splitlines()
         self.assertEqual(([line for line in lines if line.startswith(('Image=', 'User=', 'Group='))],

@@ -39,6 +39,16 @@ export interface HostPatchFacts {
   packages: { nodejs: string | null; cloudflared: string | null; litestream: string | null };
 }
 
+/** Spec 2026-10-11 §10, the collector's image.json; a part it could not read is null. */
+export interface ImageFacts {
+  unit: 'quadlet' | 'foreign' | 'absent' | null;
+  runningDigest: string | null;  // sha256:<64 hex>
+  deployedDigest: string | null; // sha256:<64 hex>, the operator's image-state.env DEPLOYED_DIGEST
+  /** An open deploy window's candidate and what ran before it (WINDOW_DIGEST, WINDOW_PREV_DIGEST); null outside one. */
+  windowDigest: string | null;
+  windowPrevDigest: string | null;
+}
+
 export type HostPatchRead = { kind: 'ok'; facts: HostPatchFacts } | { kind: 'stale' } | { kind: 'unavailable' };
 
 // Cycle lengths come from the fest jobs' own constants (filled in by the collector), so the
@@ -80,6 +90,7 @@ export interface StatusInputs {
   bugReports: { summary: BugReportSummary; paused: { since: string; status: number } | null; pausedUnreadable?: boolean } | null; // null = no repo configured
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
   hostPatch: Avail<HostPatchFacts>; // #469 stage 2: the root collector's summary
+  hostImage: ImageFacts | null;     // spec 2026-10-11 §10: the collector's image.json; null = no fresh readable one
   upstream: HostUpstream;           // #469 stage 2: Node/litestream releases, fetched daily
   runtimeNode: string;             // process.versions.node of the bot (spec 2026-10-11 §10)
   fest: FestInputs | null;         // null = no current or upcoming fest

@@ -98,6 +98,8 @@ REMOVE_TIMEOUT_S = 60
 DAEMON_RELOAD_TIMEOUT_S = 60
 # A restart waits for the new bot's readiness (Type=notify); its start takes ~21 s on the production DB (V13).
 RESTART_TIMEOUT_S = 180
+# reset-failed only clears systemd's memory of the unit; it is best effort, so it gets a short limit (V16).
+RESET_FAILED_TIMEOUT_S = 30
 TRIAL_TIMEOUT_S = 180
 # start-check's own limit, and the container's: start-check answers within START_CHECK_S plus its stop.
 START_CHECK_S = 90
@@ -775,6 +777,15 @@ def activate(host, digest):
         _restore(host, previous)
         raise Refused(f'after daemon-reload {UNIT} was {after}, not generated from {host.quadlet_path}; '
                       'the previous file is back, not restarted')
+    # A unit that crash-looped into systemd's start limit refuses `restart` without trying it, whatever file it
+    # now names (V16: a sick candidate's 6 starts in 2.4 s, then the healthy previous file, reloaded, still got
+    # "Start request repeated too quickly"; reset-failed first, and it started). So the rollback to the previous
+    # image would fail with the bot down. Best effort: a reset-failed that fails or times out proves nothing about
+    # the restart, and the restart's own result stays the verdict.
+    try:
+        host.run([host.systemctl, 'reset-failed', UNIT], timeout=RESET_FAILED_TIMEOUT_S, text=True)
+    except subprocess.TimeoutExpired:
+        pass
     r = _call(host, [host.systemctl, 'restart', UNIT], RESTART_TIMEOUT_S, f'systemctl restart {UNIT}')
     if r.returncode != 0:
         # The file names D and systemd could not start it: a verdict on D in production (stage б rolls back).

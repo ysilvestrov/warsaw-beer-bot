@@ -7,6 +7,9 @@ Type=oneshot
 # Root: needrestart -b and canonical-livepatch need it. Its own unit is also what lets the
 # snap CLI start at all (spec C15). No PrivateTmp/ProtectSystem/NoNewPrivileges: the bot must
 # see /var/tmp/wbb-host-patch, and snap confinement breaks under those.
-ExecStart=/usr/bin/python3 -B /usr/local/libexec/wbb-host-patch-collect
+# The operator's image-state.env (spec 2026-10-11 §10): install-host-patch-collector.sh sets it in the
+# drop-in wbb-host-patch.service.d/image-state.conf. Unset, the collector reports deployed_digest as null.
+Environment=WBB_IMAGE_STATE=
+ExecStart=/usr/bin/python3 -B /usr/local/libexec/wbb-host-patch-collect --image-state=${WBB_IMAGE_STATE}
 TimeoutStartSec=15min
 Nice=10

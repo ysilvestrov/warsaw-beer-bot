@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import {
-  chmodSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -26,11 +25,6 @@ function write(path: string, content = ''): void {
   writeFileSync(path, content);
 }
 
-function executable(path: string, content: string): void {
-  write(path, content);
-  chmodSync(path, 0o755);
-}
-
 function filesBelow(root: string, relative = ''): string[] {
   return readdirSync(join(root, relative), { withFileTypes: true }).flatMap((entry) => {
     const path = join(relative, entry.name);
@@ -42,11 +36,13 @@ afterEach(() => {
   for (const path of temporaryDirectories.splice(0)) rmSync(path, { recursive: true });
 });
 
+// The flat tree's payload, as deploy/rsync-filter defines it. The flat deploy.sh that ran this rsync
+// was replaced by the image wrapper in stage «в»; the filter stays until stage В2 (ships.sh reads it),
+// so it is driven here with the flags that deploy.sh used.
 describe('deploy rsync payload', () => {
   test('deploys only the allowlisted build and runtime files', () => {
     const source = temporaryDirectory('wbb-deploy-source-');
     const destination = temporaryDirectory('wbb-deploy-destination-');
-    const fakeBin = temporaryDirectory('wbb-deploy-bin-');
 
     cpSync(join(REPO_ROOT, 'deploy'), join(source, 'deploy'), { recursive: true });
     for (const path of [
@@ -66,33 +62,9 @@ describe('deploy rsync payload', () => {
     }
     write(join(destination, 'tmp/stale.db'));
 
-    executable(
-      join(fakeBin, 'sudo'),
-      [
-        '#!/usr/bin/env bash',
-        'if [ "$1" = rsync ]; then',
-        '  shift',
-        '  args=()',
-        '  while [ "$#" -gt 1 ]; do args+=("$1"); shift; done',
-        '  /usr/bin/rsync "${args[@]}" "$WBB_TEST_DESTINATION/"',
-        'fi',
-        '',
-      ].join('\n'),
-    );
-    executable(join(fakeBin, 'git'), '#!/usr/bin/env bash\necho dirty\n');
-    executable(join(fakeBin, 'journalctl'), '#!/usr/bin/env bash\nexit 0\n');
-    executable(join(source, 'deploy/record-deployed.sh'), '#!/usr/bin/env bash\nexit 0\n');
-    const result = spawnSync('bash', ['deploy/deploy.sh'], {
-      cwd: source,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
-        WBB_TEST_DESTINATION: destination,
-        // deploy.sh takes the merge-deploy lock (R4); never the real one.
-        XDG_STATE_HOME: temporaryDirectory('wbb-deploy-state-'),
-      },
-    });
+    const result = spawnSync('rsync', [
+      '-a', '--delete', '--delete-excluded', '--filter=merge deploy/rsync-filter', './', `${destination}/`,
+    ], { cwd: source, encoding: 'utf8' });
 
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
@@ -102,8 +74,6 @@ describe('deploy rsync payload', () => {
       'deploy/db-snapshot.sh',
       'deploy/deploy.sh',
       'deploy/image/Dockerfile',
-      'deploy/image/autodeploy.sh',
-      'deploy/image/deploy.sh',
       'deploy/image/helper/bounded.py',
       'deploy/image/helper/test_bounded.py',
       'deploy/image/helper/test_wbb_image.py',
@@ -123,6 +93,7 @@ describe('deploy rsync payload', () => {
       'deploy/litestream.env.example',
       'deploy/litestream.service',
       'deploy/litestream.yml',
+      'deploy/migrate-state-to-image.sh',
       'deploy/read-env.sh',
       'deploy/record-deployed.sh',
       'deploy/refresh-cookie.sh',

@@ -1,8 +1,8 @@
-import { chmodSync, linkSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readHostPatch } from './host-patch';
+import { readHostImage, readHostPatch } from './host-patch';
 
 /** #469 stage 2 — the summary written by scripts/ops/host_patch_collect.py. */
 let directory: string;
@@ -147,5 +147,110 @@ describe('readHostPatch', () => {
   it('refuses a summary over 16 KiB', () => {
     write({ ...summary, stale_services: Array.from({ length: 200 }, (_, k) => ({ unit: `u${k}`.padEnd(90, 'x'), since: 1 })) });
     expect(readHostPatch(now, path, owner())).toEqual({ kind: 'unavailable' });
+  });
+});
+
+// Spec 2026-10-11 §10: image.json, the collector's own file next to the summary (so the summary keeps its shape).
+const FIXTURES = resolve(__dirname, '../../scripts/ops/fixtures/host-patch');
+const D1 = `sha256:${'1'.repeat(64)}`;
+const D2 = `sha256:${'2'.repeat(64)}`;
+const image = { version: 1, timestamp: 1_791_439_000, unit: 'quadlet', running_digest: D1, deployed_digest: D2 };
+const imageV2 = { ...image, version: 2, window_digest: D1, window_prev_digest: D2 };
+
+describe('the collector\'s files, as scripts/ops/test_host_patch_collect.py pins them byte for byte', () => {
+  const copy = (name: string): void => {
+    writeFileSync(path, readFileSync(join(FIXTURES, name)), { mode: 0o644 });
+    chmodSync(path, 0o644);
+  };
+  const fixtureNow = new Date(1_791_440_000_000);
+
+  // Rollback: every release since #469 reads summary.json with this strict reader, unchanged by image.json.
+  it('the strict summary reader accepts the summary the new collector writes', () => {
+    copy('collector-summary.json');
+    expect(readHostPatch(fixtureNow, path, owner())).toEqual({
+      kind: 'ok',
+      facts: {
+        timestamp: 1_791_440_000,
+        kernel: { running: '6.8.0-142-generic', newestInstalled: '6.8.0-142-generic' },
+        rebootRequired: null,
+        livepatch: { state: 'nothing-to-apply', upgradeRequiredDate: '2027-10-02' },
+        staleServices: [{ unit: 'code-server@ysi.service', since: 1_791_440_000 }],
+        unattended: { lastRun: 1_791_439_429, securityPending: 0 },
+        packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: '0.5.11' },
+      },
+    });
+  });
+
+  it('the image reader accepts the image.json it writes', () => {
+    copy('collector-image.json');
+    expect(readHostImage(fixtureNow, path, owner())).toEqual({
+      unit: 'quadlet', runningDigest: D2, deployedDigest: D1, windowDigest: D2, windowPrevDigest: D1,
+    });
+  });
+});
+
+describe('readHostImage', () => {
+  it('maps a fresh version 1 image.json, which has no window', () => {
+    write(image);
+    expect(readHostImage(now, path, owner())).toEqual({ unit: 'quadlet', runningDigest: D1, deployedDigest: D2, windowDigest: null, windowPrevDigest: null });
+  });
+
+  it('maps a fresh version 2 image.json with its window', () => {
+    write(imageV2);
+    expect(readHostImage(now, path, owner())).toEqual({
+      unit: 'quadlet', runningDigest: D1, deployedDigest: D2, windowDigest: D1, windowPrevDigest: D2,
+    });
+  });
+
+  it.each([
+    ['version 1 with window keys', { ...image, window_digest: null, window_prev_digest: null }],
+    ['version 2 without them', { ...image, version: 2 }],
+    ['version 2 with a bad window digest', { ...imageV2, window_digest: 'x' }],
+  ])('is null for %s', (_what, value) => {
+    write(value);
+    expect(readHostImage(now, path, owner())).toBe(null);
+  });
+
+  it('keeps every unreadable part null', () => {
+    write({ ...image, unit: null, running_digest: null, deployed_digest: null });
+    expect(readHostImage(now, path, owner())).toEqual({ unit: null, runningDigest: null, deployedDigest: null, windowDigest: null, windowPrevDigest: null });
+  });
+
+  it('accepts one exactly three hours old and drops one a second older', () => {
+    write({ ...image, timestamp: 1_791_440_000 - 10_800 });
+    const fresh = readHostImage(now, path, owner());
+    write({ ...image, timestamp: 1_791_440_000 - 10_801 });
+    expect([fresh, readHostImage(now, path, owner())]).toEqual([{ unit: 'quadlet', runningDigest: D1, deployedDigest: D2, windowDigest: null, windowPrevDigest: null }, null]);
+  });
+
+  it.each([
+    ['from the future', { timestamp: 1_791_440_001 }],
+    ['version 3', { version: 3 }],
+    ['an unknown unit', { unit: 'flat' }],
+    ['a digest without its algorithm', { running_digest: '1'.repeat(64) }],
+    ['a short digest', { deployed_digest: D1.slice(0, -1) }],
+    ['a missing part', { deployed_digest: undefined }],
+    ['an extra key', { deployed_sha: 'x' }],
+  ])('is null for one %s', (_what, patch) => {
+    write({ ...image, ...patch });
+    expect(readHostImage(now, path, owner())).toBe(null);
+  });
+
+  it('is null when the file is missing', () => {
+    expect(readHostImage(now, path, owner())).toBe(null);
+  });
+
+  it('trusts only root by default', () => {
+    write(image);
+    expect(readHostImage(now, path)).toBe(null);
+  });
+
+  it.each([
+    ['a 0600 file', () => chmodSync(path, 0o600)],
+    ['a 0777 directory', () => chmodSync(directory, 0o777)],
+  ])('is null for %s', (_what, spoil) => {
+    write(image);
+    spoil();
+    expect(readHostImage(now, path, owner())).toBe(null);
   });
 });

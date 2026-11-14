@@ -1,0 +1,46 @@
+# Quadlet template of the rehearsal kit (plan
+# docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-harness.md, "Рішення" п.1; spec
+# docs/superpowers/specs/2026-10/2026-10-11-wbb-image-deployment-design.md §3.2, §6.3). Never installed:
+# wbb_image_rehearsal.py points the checkout's helper at it, and `activate` writes it to
+# /etc/containers/systemd/wbb-rehearsal.container with @@DIGEST@@, @@UID@@ and @@GID@@ filled in.
+# The keys are production's (deploy/image/warsaw-beer-bot.container) but for:
+# - no EnvironmentFile: the real .env is never mounted. The substitute environment of spec §6.3 instead (the
+#   helper's TRIAL_ENV with the kit's port and copy), with offline-telegram.cjs preloaded;
+#   `--require=` and not `--require `: systemd splits an Environment= value at a space;
+# - one Volume: the kit's copy of the production database, nothing else of the host;
+# - api.telegram.org resolves to 127.0.0.1. Network=host is there for /health on the kit's port, and with a
+#   network getMe of the fake token would answer 404 — a rejection offline-telegram.cjs does not tolerate (it
+#   tolerates only node-fetch's FetchError, which a refused or a mis-certified connection gives). Nothing of the
+#   rehearsal reaches Telegram;
+# - no [Install]: a cleanup killed before it removed this file, then a reboot, must not start a second bot.
+# API_PORT and the paths are wbb_image_rehearsal.py's KIT_PORT and KIT_ROOT (a test holds them equal).
+[Unit]
+Description=Warsaw Beer Crawler Bot (rehearsal of the image deploy)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=wbb-rehearsal
+Image=ghcr.io/ysilvestrov/warsaw-beer-bot@@@DIGEST@@
+Pull=never
+User=@@UID@@
+Group=@@GID@@
+ReadOnly=true
+Tmpfs=/tmp
+DropCapability=ALL
+NoNewPrivileges=true
+PodmanArgs=--stop-timeout=20 --add-host=api.telegram.org:127.0.0.1
+Network=host
+Environment=TELEGRAM_BOT_TOKEN=123456:abcdefghij
+Environment=OSRM_BASE_URL=http://x
+Environment=NOMINATIM_USER_AGENT=x
+Environment=DATABASE_PATH=/var/lib/wbb-rehearsal/data/bot.db
+Environment=WBB_RELEASE_REQUIRED=true
+Environment=API_PORT=3917
+Environment=NODE_OPTIONS=--require=/app/deploy/image/offline-telegram.cjs
+# The copy of the production database (VACUUM INTO, as the bot) and the pre snapshots of the rehearsal.
+Volume=/var/lib/wbb-rehearsal/data:/var/lib/wbb-rehearsal/data:rw
+
+[Service]
+Restart=on-failure
+TimeoutStopSec=20

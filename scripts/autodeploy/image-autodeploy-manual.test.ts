@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
@@ -22,7 +22,8 @@ const USAGE = 'usage: autodeploy.sh                     (no arguments: the timer
   + '       autodeploy.sh --manual deploy --target <sha> [--force] [--ack-incompatible]\n'
   + '       autodeploy.sh --manual bootstrap --target <sha>\n'
   + '       autodeploy.sh --manual resolve-incident --settled <sha>\n'
-  + '       autodeploy.sh --manual resolve-incident --flat\n';
+  + '       autodeploy.sh --manual resolve-incident --flat\n'
+  + '       autodeploy.sh --check-state       (validate image-state.env: STATE OK, or why not; changes nothing)\n';
 const GH = 'https://github.com/ysilvestrov/warsaw-beer-bot/pull';
 
 interface M { w: ImageWorld; x: string; img: Image; s: Image; pre: string }
@@ -100,6 +101,12 @@ describe('(а) usage: anything outside the grammar is 64 and does nothing', () =
     ['--flat with a value', ['--manual', 'resolve-incident', '--flat', X]],
     ['--flat in deploy', ['--manual', 'deploy', '--target', X, '--flat']],
     ['--flat in bootstrap', ['--manual', 'bootstrap', '--target', X, '--flat']],
+    // Plan 2026-10-22 v-core п.7: --check-state stands alone.
+    ['--check-state with a value', ['--check-state', X]],
+    ['--check-state twice', ['--check-state', '--check-state']],
+    ['--check-state after --manual', ['--manual', '--check-state']],
+    ['--check-state in a deploy', ['--manual', 'deploy', '--target', X, '--check-state']],
+    ['--check-state before --manual', ['--check-state', '--manual', 'deploy', '--target', X]],
   ])('%s', (_name, args) => {
     const w = imageWorld();
     const before = stateText(w);
@@ -422,6 +429,81 @@ describe('(и) production is not an ancestor of X', () => {
   });
 });
 
+/**
+ * Stage «в» audit: the ancestry facts of the flat deploy.sh (deploy-ancestry.test.ts) that (и) does not
+ * repeat. The manual entry is now the controller's own; its ancestry gate is the same question.
+ */
+describe('(и2) ancestry: the rest of the flat deploy.sh\'s facts', () => {
+  const MISSING = 'a'.repeat(40);
+
+  it('a divergent production (a side branch) refuses (1) without --force, changing nothing', () => {
+    const m = manualWorld();
+    git(m.w.seed, 'checkout', '-q', '-b', 'side', m.w.base);
+    const side = commitTo(m.w, { 'src/side.ts': 's\n' }, 'side', 'side');
+    patchState(m.w, { DEPLOYED_SHA: side });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1, `production (${short(side)}) is not an ancestor of ${short(m.x)} — a downgrade or a jump across histories; if it is deliberate, run again with --force\n`,
+      before, [], [],
+    ]);
+  });
+
+  it('a recorded commit the repository does not have refuses (1) without --force, changing nothing', () => {
+    const m = manualWorld();
+    patchState(m.w, { DEPLOYED_SHA: MISSING });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1, `production (aaaaaaa) is not an ancestor of ${short(m.x)} — a downgrade or a jump across histories; if it is deliberate, run again with --force\n`,
+      before, [], [],
+    ]);
+  });
+
+  // The flat deploy.sh admitted this recovery with --force alone. --force still releases the ancestry
+  // gate; the range from a commit git does not have cannot be read, so it is also unproven for a
+  // code-only rollback and asks for --ack-incompatible (spec §6.4), and then deploys.
+  it('with --force, a recorded commit the repository does not have passes ancestry; the unreadable range asks for --ack-incompatible', () => {
+    const m = manualWorld();
+    patchState(m.w, { DEPLOYED_SHA: MISSING });
+    const before = stateText(m.w);
+    const refused = deploy(m, ['--force']);
+    // git's own complaints about the missing object reach stderr too; their wording is git's, not ours.
+    const ours = refused.out.split('\n').filter((l) => !l.startsWith('fatal: ')).join('\n');
+    expect([refused.code, ours, stateText(m.w), events(m.w)]).toEqual([
+      1, contractRefusal({ ...m, w: { ...m.w, base: MISSING } }, ['could not list the changed paths', 'could not list the commits']), before, [],
+    ]);
+    const r = deploy(m, ['--force', '--ack-incompatible']);
+    expect([r.code, readState(m.w).DEPLOYED_SHA, readState(m.w).SETTLED_SHA]).toEqual([0, m.x, m.x]);
+  });
+
+  it('an unreadable state is STATE CORRUPT (3) even with --force: nothing runs', () => {
+    const m = manualWorld();
+    chmodSync(m.w.statePath, 0o000);
+    try {
+      const r = deploy(m, ['--force']);
+      expect([r.code, events(m.w), notes(m.w)]).toEqual([3, [], [
+        `[manual] 🔥 merge-deploy: STATE CORRUPT — ${m.w.statePath}: the file cannot be read. Nothing runs until a human repairs the file; it is never taken for a first start.`,
+      ]]);
+    } finally {
+      chmodSync(m.w.statePath, 0o644);
+    }
+    expect(readState(m.w)).toEqual(initial(m));
+  });
+
+  // The flat deploy.sh admitted a first deploy with no baseline; the image's first release is the
+  // bootstrap (spec §8 п.2), and a plain deploy names it.
+  it('with nothing settled, a deploy refuses (1) and names --bootstrap', () => {
+    const m = manualWorld();
+    seedState(m.w, { DEPLOYED_SHA: m.w.base });
+    const before = stateText(m.w);
+    const r = deploy(m);
+    expect([r.code, r.out, stateText(m.w), events(m.w), notes(m.w)]).toEqual([
+      1, 'there is no settled image yet — the first image release is bash deploy/deploy.sh --bootstrap\n', before, [], [],
+    ]);
+  });
+});
+
 describe('(і) X is what is deployed', () => {
   it('is up to date (0), and does nothing', () => {
     const w = imageWorld();
@@ -468,7 +550,7 @@ describe('(й) CI and the installed copies', () => {
       1,
       'the installed deployer is out of date — a merged fix is not live until it is installed.\n'
       + 'STALE: 1 installed file(s) differ from origin/main:\n'
-      + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)\n',
+      + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)\n',
       before, [], [],
     ]);
   });
@@ -1127,7 +1209,7 @@ describe('(б-к) plan b2 п.29: every refusal of the second run says how to bri
     ['stale installed copies', (b) => ({ WBB_INSTALLED_CHECK: stub(b.w.bin, 'installed-stale', 'echo "STALE: 1 installed file(s) differ from origin/main:"; exit 1') }),
       () => 'the installed deployer is out of date — a merged fix is not live until it is installed.\n'
         + 'STALE: 1 installed file(s) differ from origin/main:\n'
-        + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+        + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)',
       () => ['image current']],
     ['CI failed', (b) => ({ WBB_CHECKS_CMD: checksStub(b.w, 'checks-fail', ['ci\tcompleted\tfailure\t101', 'image\tcompleted\tsuccess\t101']) }),
       (b) => `CI failed on ${short(b.x)} — not deploying: ci=failure`, (b) => bootProbe(b).slice(0, 2)],

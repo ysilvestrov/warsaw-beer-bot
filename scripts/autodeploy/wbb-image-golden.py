@@ -153,10 +153,10 @@ def cases(fake):
         ('trial-tempfail', TRIAL,
          [INSPECT_D, INSPECT_S, TRIAL_OK, RM,
           done(75, stdout='START KILLED: bot killed by SIGKILL (out of memory?)\noutput tail:\n'), RM], None),
-        ('activate-activated', ['activate', '--digest', D], [INSPECT_D, ours, done(), ours, done()],
+        ('activate-activated', ['activate', '--digest', D], [INSPECT_D, ours, done(), ours, done(), done()],
          lambda: fake.write_quadlet(S)),
         ('activate-failed', ['activate', '--digest', D],
-         [INSPECT_D, ours, done(), ours,
+         [INSPECT_D, ours, done(), ours, done(),
           done(1, stderr='Job for warsaw-beer-bot.service failed because the control process exited with error code.\n'
                          'See "systemctl status warsaw-beer-bot.service" and "journalctl -xeu warsaw-beer-bot.service" '
                          'for details.\n')],

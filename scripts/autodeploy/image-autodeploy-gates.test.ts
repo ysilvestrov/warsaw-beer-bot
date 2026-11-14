@@ -3,19 +3,19 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  BOOT_ID, CHECKS_OK, DAY1, GOLDEN_DIR, SCRIPT,
+  BOOT_ID, CHECKS_OK, CORRUPT_STATES, DAY1, GOLDEN_DIR, SCRIPT,
   advance, checksStub, clonedMain, commitTo, events, git, golden, holdLock, hostSet, imageOf, imageWorld, notes, patchState,
   publish, push, readState, ready, reply, runImage, seedState, settledState, short, stateText, stub, syncs, tick,
   tickEnv, writeStateText, type Image, type ImageWorld,
 } from './image-autodeploy-harness';
 
-// Each test drives real bash ticks through real git (~1–3 s on a 4-core box); see autodeploy.test.ts.
+// Each test drives real bash ticks through real git (~1–3 s on a 4-core box): the default 5 s left too little headroom.
 vi.setConfig({ testTimeout: 20_000 });
 
 /**
- * The image controller deploy/image/autodeploy.sh, Task 1 of
+ * The image controller deploy/autodeploy.sh (under deploy/image/ until stage «в»), Task 1 of
  * docs/superpowers/plans/2026-10/2026-10-12-wbb-image-transition-b-core.md: its state, the gates carried
- * over from deploy/autodeploy.sh, CI with `image`, the incident gate, and resolve → attest → pull → noop.
+ * over from the flat deployer, CI with `image`, the incident gate, and resolve → attest → pull → noop.
  * Bullets (а)–(ї) of the task are the describe blocks below.
  */
 
@@ -246,7 +246,7 @@ describe('(а) installed copies (plan п.15)', () => {
     expect(readFileSync(args, 'utf8').split('\n').filter((l) => l !== '')).toEqual([
       w.repo,
       'origin/main',
-      `deploy/image/autodeploy.sh=${SCRIPT}`,
+      `deploy/autodeploy.sh=${SCRIPT}`,
       'deploy/read-env.sh=/opt/test/bin/wbb-read-env',
       'deploy/db-snapshot.sh=/opt/test/bin/wbb-db-snapshot',
       `deploy/installed-current.sh=${stale}`,
@@ -258,7 +258,7 @@ describe('(а) installed copies (plan п.15)', () => {
     expect(notes(w)).toEqual([
       '⚠️ merge-deploy is waiting: the installed deployer is out of date — a merged fix is not live until it is installed.\n'
       + 'STALE: 1 installed file(s) differ from origin/main:\n  deploy/image/helper/wbb_image.py\n'
-      + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+      + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)',
     ]);
   });
 
@@ -271,7 +271,7 @@ describe('(а) installed copies (plan п.15)', () => {
     expect(notes(w)).toEqual([
       '⚠️ merge-deploy: the installed deployer is out of date — a merged fix is not live until it is installed.\n'
       + 'STALE: 1 installed file(s) differ from origin/main:\n'
-      + 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)',
+      + 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)',
     ]);
     expect(readState(w).LAST_STALE_NOTICE).toBe(DAY1);
   });
@@ -280,11 +280,19 @@ describe('(а) installed copies (plan п.15)', () => {
 describe('(а) holds by path and by label, fail closed', () => {
   it.each([
     'deploy/sudoers.d/wbb-image',
+    'deploy/sudoers.d/warsaw-beer-bot',
+    'deploy/litestream.yml',
+    'deploy/litestream.service',
     'deploy/wbb-autodeploy.service',
+    'deploy/wbb-autodeploy.timer',
     'deploy/install-image.sh',
+    'deploy/install-autodeploy.sh',
     'deploy/rsync-filter',
     'deploy/autodeploy.sh',
-    'deploy/image/autodeploy.sh',
+    'deploy/ships.sh',
+    'deploy/read-env.sh',
+    'deploy/installed-current.sh',
+    'deploy/trial-migrate.cjs',
     'deploy/image/helper/wbb_image.py',
     'deploy/image/helper/bounded.py',
     'deploy/image/helper/wbb-image.sh',
@@ -302,11 +310,11 @@ describe('(а) holds by path and by label, fail closed', () => {
   });
 
   it.each([
-    'deploy/image/deploy.sh',
     'deploy/image/Dockerfile',
     'deploy/image/start-check.cjs',
     'deploy/warsaw-beer-bot.service',
     'deploy/deploy.sh',
+    'deploy/migrate-state-to-image.sh',
     'src/x.ts',
   ])('a change to %s does not hold', (path) => {
     const w = imageWorld();
@@ -368,6 +376,24 @@ describe('(а) holds by path and by label, fail closed', () => {
     tick(w);
     expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
   });
+
+  // Stage «в» audit (autodeploy.test.ts, "renames are seen from both ends"): a rename is a deletion of
+  // its source, and a held source holds although the destination is not held.
+  it('holds a commit that moves a held path away (the source side counts)', () => {
+    const w = imageWorld();
+    const added = push(w, { 'deploy/sudoers.d/warsaw-beer-bot': 'a\nb\nc\nd\n' }, 'add');
+    patchState(w, { DEPLOYED_SHA: added });
+    mkdirSync(join(w.seed, 'docs'), { recursive: true });
+    git(w.seed, 'mv', 'deploy/sudoers.d/warsaw-beer-bot', 'docs/sudoers-example');
+    git(w.seed, 'commit', '-q', '-m', 'rename');
+    git(w.seed, 'push', '-q', 'origin', 'main');
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual([]);
+    expect(notes(w)).toEqual([
+      `⏸ merge-deploy: production is behind main and HELD:\n• path deploy/sudoers.d/warsaw-beer-bot needs a human step\n${HOLD_TAIL}`,
+    ]);
+  });
 });
 
 describe('(в) a PR whose code-only rollback is not proven is a hold with --ack-incompatible', () => {
@@ -424,6 +450,28 @@ describe('(б) CI: ci AND image succeeded in one check suite', () => {
     ready(w, { WBB_CHECKS_CMD: checks });
     tick(w, { WBB_CHECKS_CMD: checks });
     expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  // Stage «в» audit (autodeploy.test.ts): `ci` itself is required, whatever else passed.
+  it('waits, silently, while the ci check has not appeared, even if image and others passed', () => {
+    const w = imageWorld();
+    const { x } = noopCandidate(w);
+    const checks = checksStub(w, 'checks-no-ci', ['image\tcompleted\tsuccess\t101', 'build (root)\tcompleted\tsuccess\t101']);
+    ready(w, { WBB_CHECKS_CMD: checks });
+    expect(tick(w, { WBB_CHECKS_CMD: checks }).code).toBe(0);
+    expect([events(w), notes(w)]).toEqual([[`checks ${x}`], []]);
+  });
+
+  // Stage «в» audit (autodeploy.test.ts): a failed check is no verdict on the commit — a green re-run releases it.
+  it('goes on once a failed check is re-run green', () => {
+    const w = imageWorld();
+    const { x, img } = noopCandidate(w);
+    const red = checksStub(w, 'checks-red', ['ci\tcompleted\tfailure\t101', 'image\tcompleted\tsuccess\t101']);
+    ready(w, { WBB_CHECKS_CMD: red });
+    tick(w, { WBB_CHECKS_CMD: red });
+    tick(w);
+    expect(events(w)).toEqual([`checks ${x}`, ...noopEvents(x, img, [w.settled.digest])]);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
   });
 
   it('reports a failed image check once per SHA and does not record LAST_FAILED_SHA', () => {
@@ -654,99 +702,8 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     ]);
   });
 
-  const good = (w: ImageWorld) => Object.entries(settledState(w.settled)).map(([k, v]) => `${k}=${v}\n`).join('');
-  const window = (w: ImageWorld) => `WINDOW_SHA=${w.base}\nWINDOW_MODE=auto\nWINDOW_PHASE=activating\n`;
-  /** A whole window of the given phase, every key it stands on. */
-  const fullWindow = (w: ImageWorld, phase: string, extra: string[] = []) => [
-    `WINDOW_SHA=${w.base}`, `WINDOW_DIGEST=${w.settled.digest}`, `WINDOW_ID=${w.settled.id}`, `WINDOW_CONTENT=${w.settled.content}`,
-    `WINDOW_OLD=${w.base}`, `WINDOW_PREV_DIGEST=${w.settled.digest}`, 'WINDOW_KIND=deploy', 'WINDOW_MODE=auto', `WINDOW_PHASE=${phase}`,
-    'WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_START=100000', `WINDOW_BOOT=${BOOT_ID}`,
-    'WINDOW_NRESTARTS=0', 'WINDOW_FAILS=0', 'WINDOW_LAST_READ=100000', ...extra, '',
-  ].join('\n');
-  const ROLLING = ['WINDOW_REASON=a reason', 'ROLLBACK_ATTEMPTS=0'];
-  /** A valid bootstrap window: nothing settled, manual, no rollback target. */
-  const bootWindow = (w: ImageWorld) => `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'activating')}`
-    .replace(/^WINDOW_PREV_DIGEST=.*\n/m, '').replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
-  /** The window of `text` as a resolve window: manual, and (unless `withPre`) without WINDOW_PRE. */
-  const resolveWindow = (_w: ImageWorld, text: string, withPre = false) => {
-    const t = text.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=resolve').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual');
-    return withPre ? t : t.replace(/^WINDOW_PRE=.*\n/m, '');
-  };
-  const CORRUPT: Array<[string, (w: ImageWorld) => string, string]> = [
-    ['an unknown key', (w) => `${good(w)}DEPLOYED_TAG=v1\n`, 'line 9: unknown key DEPLOYED_TAG'],
-    // Spec amendment 3 (V14): the key is gone; a state that still carries it was not written by this controller.
-    ['WINDOW_NRESTARTS_PRE, retired by V14', (w) => `${good(w)}WINDOW_NRESTARTS_PRE=0\n`, 'line 9: unknown key WINDOW_NRESTARTS_PRE'],
-    ['a duplicated key', (w) => `${good(w)}DEPLOYED_SHA=${w.base}\n`, 'line 9: duplicate key DEPLOYED_SHA'],
-    ['a truncated file', (w) => good(w).slice(0, -1), 'the last line has no newline (a truncated file)'],
-    ['a line that is not KEY=value', (w) => `# written by hand\n${good(w)}`, 'line 1 is not KEY=value'],
-    ['an empty file', () => '', 'the file is empty'],
-    ['a NUL byte', (w) => `${good(w)}\0`, 'the file holds a NUL byte'],
-    ['a SHA that is not 40 hex', (w) => good(w).replace(`DEPLOYED_SHA=${w.base}`, `DEPLOYED_SHA=${short(w.base)}`),
-      'DEPLOYED_SHA has a value that is not of its format'],
-    ['SETTLED_SHA without SETTLED_DIGEST', (w) => good(w).replace(/^SETTLED_DIGEST=.*\n/m, ''),
-      'SETTLED_SHA is set but SETTLED_DIGEST is not'],
-    ['WINDOW_PHASE without WINDOW_DIGEST', (w) => `${good(w)}${window(w)}`, 'WINDOW_PHASE is set but WINDOW_DIGEST is not'],
-    ['an unknown WINDOW_PHASE', (w) => `${good(w)}${window(w)}WINDOW_DIGEST=${w.settled.digest}\n`.replace('=activating', '=deploying'),
-      'WINDOW_PHASE has a value that is not of its format'],
-    ['an integer with a leading zero', (w) => `${good(w)}MAIN_SEEN_SHA=${w.base}\nMAIN_SEEN_S=0100000\n`,
-      'MAIN_SEEN_S has a value that is not of its format'],
-    // F7: what each phase stands on.
-    ['an activating window without WINDOW_PRE', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PRE=.*\n/m, ''),
-      'WINDOW_PHASE is set but WINDOW_PRE is not'],
-    ['a watching window without WINDOW_LAST_READ', (w) => `${good(w)}${fullWindow(w, 'watching')}`.replace(/^WINDOW_LAST_READ=.*\n/m, ''),
-      'WINDOW_PHASE is set but WINDOW_LAST_READ is not'],
-    ['a rolling-back window without ROLLBACK_ATTEMPTS', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ['WINDOW_REASON=a reason'])}`,
-      'WINDOW_PHASE is set but ROLLBACK_ATTEMPTS is not'],
-    ['a manual window rolling back', (w) => `${good(w)}${fullWindow(w, 'rolling-back', ROLLING)}`.replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
-      'WINDOW_PHASE is rolling-back but WINDOW_MODE is manual (a manual window never rolls back)'],
-    // Spec amendment 3 (§7.1): every window says where it came from.
-    ['a window without WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_KIND=.*\n/m, ''),
-      'WINDOW_PHASE is set but WINDOW_KIND is not'],
-    ['an unknown WINDOW_KIND', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_KIND=deploy', 'WINDOW_KIND=manual'),
-      'WINDOW_KIND has a value that is not of its format'],
-    // Plan b2 п.15: a resolve window (closing an incident) is manual, only watches, has no pre, and
-    // rolls back to the settled image exactly when there is one.
-    ['a resolve window in auto mode', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`).replace('WINDOW_MODE=manual', 'WINDOW_MODE=auto'),
-      'WINDOW_KIND is resolve but WINDOW_MODE is auto (a resolve window is always manual)'],
-    ['a resolve window that is activating', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'activating')}`),
-      'WINDOW_KIND is resolve but WINDOW_PHASE is activating (a resolve window only watches)'],
-    ['a resolve window with a pre snapshot', (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`, true),
-      'WINDOW_KIND is resolve but WINDOW_PRE is set (closing an incident takes no snapshot)'],
-    ['a resolve window without WINDOW_PREV_DIGEST while an image is settled',
-      (w) => resolveWindow(w, `${good(w)}${fullWindow(w, 'watching')}`).replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
-      'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
-    ['a resolve window with WINDOW_PREV_DIGEST while nothing is settled',
-      (w) => resolveWindow(w, `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'watching')}`),
-      'WINDOW_KIND is resolve and nothing is settled, but WINDOW_PREV_DIGEST is set'],
-    // Plan b2 п.15: the first image release is manual, has no rollback target, and exists only while nothing is settled.
-    ['a bootstrap window in auto mode', (w) => bootWindow(w).replace('WINDOW_MODE=manual', 'WINDOW_MODE=auto'),
-      'WINDOW_KIND is bootstrap but WINDOW_MODE is auto (the first image release is always manual)'],
-    ['a bootstrap window with WINDOW_PREV_DIGEST', (w) => `DEPLOYED_SHA=${w.base}\n${fullWindow(w, 'activating')}`
-      .replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
-      'WINDOW_KIND is bootstrap but WINDOW_PREV_DIGEST is set (the first image release has no rollback target)'],
-    ['a bootstrap window while an image is settled', (w) => `${good(w)}${fullWindow(w, 'activating')}`
-      .replace(/^WINDOW_PREV_DIGEST=.*\n/m, '').replace('WINDOW_KIND=deploy', 'WINDOW_KIND=bootstrap').replace('WINDOW_MODE=auto', 'WINDOW_MODE=manual'),
-      'WINDOW_KIND is bootstrap but SETTLED_DIGEST is set (a bootstrap window exists only while nothing is settled)'],
-    ['a bootstrap window without WINDOW_PRE', (w) => bootWindow(w).replace(/^WINDOW_PRE=.*\n/m, ''),
-      'WINDOW_PHASE is set but WINDOW_PRE is not'],
-    ['a deploy window without WINDOW_PREV_DIGEST', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace(/^WINDOW_PREV_DIGEST=.*\n/m, ''),
-      'WINDOW_PHASE is set but WINDOW_PREV_DIGEST is not'],
-    ['WINDOW_KIND without a window', (w) => `${good(w)}WINDOW_KIND=deploy\n`, 'WINDOW_KIND is set but WINDOW_PHASE is not'],
-    ['ACTIVATE_ATTEMPTS without a window', (w) => `${good(w)}ACTIVATE_ATTEMPTS=1\n`, 'ACTIVATE_ATTEMPTS is set but WINDOW_PHASE is not'],
-    // Round 2, item 3: snapshot paths — no glob character, no space, one space between list elements.
-    ['a PENDING_MARK path with a glob character', (w) => `${good(w)}PENDING_MARK=/s/*-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
-    // #867 AI review: a pending mark is an UNMARKED pre (a marked one would be renamed twice);
-    // a retained one is MARKED.
-    ['a PENDING_MARK path that is already marked', (w) => `${good(w)}PENDING_MARK=/s/a-rollback-pre.db\n`, 'PENDING_MARK has a value that is not of its format'],
-    ['a PENDING_PRE path that is already marked', (w) => `${good(w)}PENDING_PRE=/s/a-rollback-pre.db\n`, 'PENDING_PRE has a value that is not of its format'],
-    ['a RETAINED_PRE path that is not marked', (w) => `${good(w)}RETAINED_PRE=/s/a-pre.db\n`, 'RETAINED_PRE has a value that is not of its format'],
-    ['a RETAINED_PRE list with an empty element', (w) => `${good(w)}RETAINED_PRE=/s/a-rollback-pre.db  /s/b-rollback-pre.db\n`,
-      'RETAINED_PRE has a value that is not of its format'],
-    ['a WINDOW_PRE that is not a pre snapshot', (w) => `${good(w)}${fullWindow(w, 'activating')}`.replace('WINDOW_PRE=/s/19700102T035640Z-abcdef0-pre.db', 'WINDOW_PRE=/s/notes.txt'),
-      'WINDOW_PRE has a value that is not of its format'],
-  ];
 
-  it.each(CORRUPT)('STATE CORRUPT on %s: nothing runs, the file is untouched, 🔥 once a day, exit 3', (_name, build, problem) => {
+  it.each(CORRUPT_STATES)('STATE CORRUPT on %s: nothing runs, the file is untouched, 🔥 once a day, exit 3', (_name, build, problem) => {
     const w = imageWorld();
     const text = build(w);
     writeStateText(w, text);
@@ -774,6 +731,22 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     expect([events(w), clonedMain(w)]).toEqual([[], w.base]);
     expect(notes(w)).toEqual([
       `🔥 merge-deploy: STATE CORRUPT — ${w.statePath}: the path is a symlink. Nothing runs until a human repairs the file; it is never taken for a first start.`,
+    ]);
+  });
+
+  // Stage «в» (plan v-core Task 2): the read check comes before the NUL check, which reads the file too.
+  it('STATE CORRUPT on a file it cannot read, naming that: nothing runs, exit 3', () => {
+    const w = imageWorld();
+    noopCandidate(w);
+    chmodSync(w.statePath, 0o000);
+    try {
+      expect(tick(w).code).toBe(3);
+    } finally {
+      chmodSync(w.statePath, 0o644);
+    }
+    expect([events(w), clonedMain(w), readState(w)]).toEqual([[], w.base, settledState(w.settled)]);
+    expect(notes(w)).toEqual([
+      `🔥 merge-deploy: STATE CORRUPT — ${w.statePath}: the file cannot be read. Nothing runs until a human repairs the file; it is never taken for a first start.`,
     ]);
   });
 
@@ -810,6 +783,19 @@ describe('(і) the state: parsed, validated, written atomically', () => {
     } finally {
       chmodSync(w.stateDir, 0o755);
     }
+  });
+
+  // Stage «в» audit (autodeploy.test.ts): Telegram caps a message; the tick cuts it rather than lose it.
+  it('cuts a message longer than Telegram accepts at 3500 characters, saying so', () => {
+    const w = imageWorld();
+    const { x, img } = noopCandidate(w);
+    const detail = 'E'.repeat(5000);
+    reply(w, 'attest', img.digest, { code: 1, stderr: `${detail}\n` });
+    ready(w);
+    tick(w);
+    const full = `⛔ merge-deploy: the image of ${short(x)} (${img.digest}) did not pass attestation (exit 1) — not deploying it; `
+      + `NOT recorded as a failed commit.\n${detail}`;
+    expect(notes(w)).toEqual([`${full.slice(0, 3500)}\n… truncated`]);
   });
 
   it('refuses (exit 4) to write a value with a newline', () => {
@@ -950,6 +936,148 @@ describe('(а) the observed-production fence (#768)', () => {
     } finally {
       chmodSync(w.stateDir, 0o755);
     }
+  });
+});
+
+/**
+ * Stage «в» audit: the facts of the flat deployer's fence tests (autodeploy.test.ts, #768) that the
+ * block above did not repeat. The fence is carried over unchanged (spec §4), so they hold here too.
+ */
+describe('(а) the observed-production fence: the rest of the flat deployer\'s facts', () => {
+  const record = (w: ImageWorld, sha: string) => patchState(w, { DEPLOYED_SHA: sha });
+  function observed() {
+    const w = imageWorld();
+    const one = push(w, { 'src/a.ts': '2\n' }, 'one');
+    const two = push(w, { 'src/a.ts': '3\n' }, 'two');
+    record(w, two);
+    tick(w);
+    return { w, one, two };
+  }
+  const backwards = (notesNow: string[]) => notesNow.filter((m) => m.includes('production went BACKWARDS:'));
+  /** deploy/README.md → Operator acknowledgement: the observation and the fence are forgotten, nothing else. */
+  function acknowledge(w: ImageWorld): void {
+    const st = readState(w);
+    for (const k of ['LAST_SEEN_DEPLOYED_SHA', 'REGRESSION_FROM_SHA', 'REGRESSION_TO_SHA', 'LAST_HOLD_NOTICE']) delete st[k];
+    seedState(w, st);
+  }
+
+  it('reports an unknown PR count when even one lost commit cannot be looked up', () => {
+    const { w, one, two } = observed();
+    record(w, w.base);
+    const labels = stub(w.bin, 'lost-pr-fails', `[ "$1" != "${one}" ] || exit 1; printf '17\\t\\n'`);
+    tick(w, { WBB_PR_LABELS_CMD: labels });
+    expect(notes(w)[0]).toBe(`⚠️ merge-deploy: production went BACKWARDS: ${short(two)} → ${short(w.base)} (2 commits, unknown PRs no longer reachable) — `
+      + 'was this a deliberate rollback? Unattended deploys are HELD. Deploy main by hand to recover.');
+    expect([readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual([two, []]);
+  });
+
+  it('reports a further regression once and keeps the original recovery point', () => {
+    const { w, one, two } = observed();
+    record(w, one);
+    tick(w);
+    record(w, w.base);
+    tick(w);
+    ready(w);
+    tick(w);
+    const warnings = backwards(notes(w));
+    expect(warnings.length).toBe(2);
+    expect(warnings[1]).toBe(`⚠️ merge-deploy: production went BACKWARDS: ${short(one)} → ${short(w.base)} (1 commits, 1 PRs no longer reachable) — `
+      + 'was this a deliberate rollback? Unattended deploys are HELD. Deploy main by hand to recover.');
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).REGRESSION_TO_SHA, events(w)]).toEqual([two, w.base, []]);
+  });
+
+  it('keeps the last observation while no deployed commit is recorded, and judges the next record against it', () => {
+    const { w, two } = observed();
+    const st = readState(w);
+    delete st.DEPLOYED_SHA;
+    seedState(w, st);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    record(w, w.base);
+    tick(w);
+    expect([backwards(notes(w)).length, readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual([1, two, []]);
+  });
+
+  it('reports an unassessable previous observation rather than inventing a regression', () => {
+    const w = imageWorld();
+    seedState(w, { ...settledState(w.settled), LAST_SEEN_DEPLOYED_SHA: 'a'.repeat(40) });
+    tick(w);
+    expect(notes(w)).toEqual([
+      '⚠️ merge-deploy: cannot assess the deployed transition — previous observation (aaaaaaa) is not a locally available commit. '
+      + 'Keeping it; unattended deploys are blocked. Recover the Git history or deploy and verify intended main, '
+      + 'then follow deploy/README.md → Operator acknowledgement of a replacement baseline.',
+    ]);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual(['a'.repeat(40), undefined, []]);
+  });
+
+  it('releases the fence after a manual recovery to a strict descendant of the recovery point', () => {
+    const { w } = observed();
+    record(w, w.base);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual([]);
+    const newer = push(w, { 'src/a.ts': '4\n' }, 'newer main');
+    record(w, newer);
+    tick(w);
+    expect([readState(w).REGRESSION_FROM_SHA, readState(w).LAST_SEEN_DEPLOYED_SHA]).toEqual([undefined, newer]);
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  it('releases a divergent fence when production is main again, containing the recovery point', () => {
+    const { w, two } = observed();
+    git(w.seed, 'checkout', '-q', '-b', 'sibling', w.base);
+    const sibling = commitTo(w, { 'src/a.ts': 'other\n' }, 'sibling', 'sibling');
+    record(w, sibling);
+    tick(w);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    record(w, two);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA]).toEqual([two, undefined]);
+    git(w.seed, 'checkout', '-q', 'main');
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  it('resumes after the operator acknowledges a baseline main cannot contain (a squash-merged feature commit)', () => {
+    const w = imageWorld();
+    git(w.seed, 'checkout', '-q', '-b', 'feature');
+    const feature = commitTo(w, { 'src/a.ts': 'feature\n' }, 'feature', 'feature');
+    record(w, feature);
+    tick(w);
+    git(w.seed, 'checkout', '-q', 'main');
+    const main = push(w, { 'src/a.ts': 'feature\n' }, 'squash');
+    record(w, main);
+    ready(w);
+    tick(w);
+    expect([readState(w).REGRESSION_FROM_SHA, events(w)]).toEqual([feature, []]);
+    acknowledge(w);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA]).toEqual([main, undefined]);
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
+  });
+
+  it('resumes from a missing prior observation only after the operator acknowledges, keeping LAST_FAILED_SHA', () => {
+    const w = imageWorld();
+    const missing = 'a'.repeat(40);
+    seedState(w, { ...settledState(w.settled), LAST_SEEN_DEPLOYED_SHA: missing, LAST_FAILED_SHA: missing });
+    ready(w);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, events(w)]).toEqual([missing, []]);
+    acknowledge(w);
+    tick(w);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).LAST_FAILED_SHA]).toEqual([w.base, missing]);
+    const { x, img } = noopCandidate(w);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual(noopEvents(x, img, [w.settled.digest]));
   });
 });
 
@@ -1096,7 +1224,7 @@ describe('the harness host', () => {
 });
 
 describe('PR #866 review: the installed-copies check fails closed (item 1)', () => {
-  const ADVICE = 'Run: sudo bash deploy/install-autodeploy.sh (the deployer) and sudo bash deploy/install-image.sh (the image helper)';
+  const ADVICE = 'Run: sudo bash deploy/install-image.sh (the image helper), then sudo bash deploy/install-autodeploy.sh (the deployer: it refuses while the helper is stale)';
   it.each([
     ['missing', (w: ImageWorld) => join(w.bin, 'no-such-check')],
     ['not executable', (w: ImageWorld) => { const p = join(w.bin, 'not-executable'); writeFileSync(p, '#!/bin/sh\nexit 0\n'); return p; }],

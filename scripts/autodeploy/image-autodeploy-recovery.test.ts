@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BOOT_ID, DAY1,
-  events, fault, git, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply, runImage,
+  advance, events, fault, git, hostRead, hostSet, imageOf, imageWorld, notes, publish, push, readState, ready, reply, runImage,
   markThenKill, seedState, settledState, short, stub, tick, writes, type Image, type ImageWorld, type Reply,
 } from './image-autodeploy-harness';
 
@@ -289,6 +289,23 @@ describe('§7.2 row 7: interrupted during the rollback', () => {
     expect(tick(w).code).toBe(2);
     expect(events(w).filter((e) => e === `image activate --digest ${w.settled.digest}`).length).toBe(2);
     expect([readState(w).LAST_FAILED_SHA, readState(w).DEPLOYED_DIGEST]).toEqual([x, w.settled.digest]);
+  });
+
+  // Stage «в» audit (autodeploy.test.ts, #768): a rollback a killed tick left half-recorded is still the
+  // tick's own — the tick that finishes it, and the next, report no regression.
+  it('end to end: a rollback finished after a kill is not reported as production going backwards', () => {
+    const w = imageWorld();
+    const x = push(w, { 'src/a.ts': 'export const a = 2;\n' }, 'feat');
+    const img = publish(w, imageOf(x));
+    ready(w);
+    fault(w, 'health', 300, 99999, img.digest);
+    reply(w, 'activate', w.settled.digest, 'kill-after');
+    expect(tick(w).code).toBe(null);
+    expect(tick(w).code).toBe(2);
+    advance(w, 600);
+    expect(tick(w).code).toBe(0);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:') || m.includes('production DIVERGED:'))).toEqual([]);
+    expect([readState(w).LAST_SEEN_DEPLOYED_SHA, readState(w).REGRESSION_FROM_SHA]).toEqual([w.base, undefined]);
   });
 
   it('end to end: a tick killed after S started, before the final write — finished with no further restart', () => {

@@ -14,7 +14,7 @@ import { readTestDiagnostics } from './test-diagnostics';
 import { CANARY_STATE_KEY } from './enrich-orphans';
 import { TRIAGE_LAST_RESULT_KEY, TRIAGE_LAST_RUN_KEY } from './orphan-triage';
 import { UNLOCK_LAST_RESULT_KEY, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
-import { readHostPatch } from './host-patch';
+import { readHostImage, readHostPatch } from './host-patch';
 import { readHostUpstream } from './host-upstream';
 import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
 import { FEST_MENU_LAST_KEY } from './fest-poll';
@@ -28,6 +28,8 @@ export interface StatusInputOptions {
   testDiagnosticsUid?: number;
   hostPatchPath?: string;
   hostPatchUid?: number;
+  /** The collector's image.json (spec 2026-10-11 §10); trusted as the summary is, by hostPatchUid. */
+  hostImagePath?: string;
 }
 
 const parse = (raw: string | null): unknown => {
@@ -168,6 +170,7 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
   // published meanwhile is stamped after `now` — a "future" timestamp, i.e. unavailable data.
   const diag = readTestDiagnostics(now, opts.testDiagnosticsPath, opts.testDiagnosticsUid);
   const hostPatch = readHostPatchInput(now, opts);
+  const hostImage = readHostImage(now, opts.hostImagePath, opts.hostPatchUid);
   const metrics = collectStatus(db, now);
   const historyDays = 2 * STATUS_RULES.historyDays - 1; // flows compare d-13..d-7 with d-6..today
   return {
@@ -192,6 +195,7 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
       ? { ok: true, value: { bytesAvailable: diag.bytesAvailable, inodesFree: diag.inodesFree, pendingRuns: diag.pendingRuns } }
       : { ok: false, reason: diag.kind === 'stale' ? 'дані монітора застарілі' : 'дані монітора недоступні' },
     hostPatch,
+    hostImage,
     upstream: readHostUpstream(db, now),
     runtimeNode: process.versions.node,
     fest: readFest(db, now, opts.festEyes ?? { mcp: false, server: false }),

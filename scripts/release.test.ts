@@ -30,6 +30,19 @@ describe.skipIf(process.platform !== 'linux')('root image helper (deploy/image/h
   }, 70_000);
 });
 
+// Stage «в» harness (plan docs/superpowers/plans/2026-10/2026-10-22-wbb-image-transition-v-harness.md, Task 1): the
+// rehearsal shim runs the helper above under the kit's names. Its own directory: scripts/ops is discovered without
+// recursing (ops.test.ts), and the shim is tested where the helper it imports is.
+describe.skipIf(process.platform !== 'linux')('rehearsal shim of the image helper (scripts/ops/rehearsal)', () => {
+  it('passes its Python unit tests', () => {
+    const result = spawnSync('python3', ['-B', '-m', 'unittest', 'discover', '-s', 'scripts/ops/rehearsal', '-p', 'test_*.py', '-v'], {
+      cwd: root, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,
+    });
+    expect(result.error, result.stderr).toBe(undefined);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+  }, 70_000);
+});
+
 const workflow = readFileSync(resolve(root, '.github/workflows/ci.yml'), 'utf8').split('\n');
 
 // The lines of one top-level job: from `  <name>:` to the next two-space key.

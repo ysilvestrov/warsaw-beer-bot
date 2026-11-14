@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { HostPatchFacts, HostPatchRead } from '../domain/status/types';
+import type { HostPatchFacts, HostPatchRead, ImageFacts } from '../domain/status/types';
 import { readHardenedJson } from './hardened-json';
 
 // The root collector's summary (#469 stage 2, scripts/ops/host_patch_collect.py).
@@ -51,5 +51,37 @@ export function readHostPatch(now: Date, path = HOST_PATCH_PATH, trustedUid = RO
       unattended: { lastRun: s.unattended.last_run, securityPending: s.unattended.security_pending },
       packages: s.packages,
     },
+  };
+}
+
+// Spec 2026-10-11 §10: the collector's image.json, next to the summary and in a file of its own, so the summary
+// keeps the shape every release's strict reader accepts. Optional in every sense: missing, unreadable, malformed,
+// stale or from the future is null — the report then has no image line, and the host-patch verdict never reads it.
+const HOST_IMAGE_PATH = '/var/tmp/wbb-host-patch/image.json';
+const IMAGE_MAX_BYTES = 4_096;
+const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+const imageV1 = {
+  timestamp: seconds,
+  unit: z.enum(['quadlet', 'foreign', 'absent']).nullable(),
+  running_digest: digest.nullable(),
+  deployed_digest: digest.nullable(),
+};
+// Version 2 adds the deploy window's digests; version 1 (a collector from before them) still reads, without them.
+const imageSchema = z.union([
+  z.object({ version: z.literal(1), ...imageV1 }).strict(),
+  z.object({
+    version: z.literal(2), ...imageV1, window_digest: digest.nullable(), window_prev_digest: digest.nullable(),
+  }).strict(),
+]);
+
+export function readHostImage(now: Date, path = HOST_IMAGE_PATH, trustedUid = ROOT_UID): ImageFacts | null {
+  const parsed = imageSchema.safeParse(readHardenedJson(path, () => trustedUid, IMAGE_MAX_BYTES));
+  if (!parsed.success) return null;
+  const s = parsed.data;
+  const age = now.getTime() / 1000 - s.timestamp;
+  if (!Number.isFinite(age) || age < 0 || age > STALE_SECONDS) return null;
+  return {
+    unit: s.unit, runningDigest: s.running_digest, deployedDigest: s.deployed_digest,
+    windowDigest: s.version === 2 ? s.window_digest : null, windowPrevDigest: s.version === 2 ? s.window_prev_digest : null,
   };
 }
