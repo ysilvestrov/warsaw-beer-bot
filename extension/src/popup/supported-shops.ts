@@ -111,9 +111,7 @@ export function renderSupportedShops(
       link.addEventListener('click', (event) => {
         if (event.ctrlKey || event.metaKey || event.shiftKey) return;
         event.preventDefault();
-        void Promise.resolve(open(shop.url)).catch(() => {
-          window.open(shop.url, '_blank', 'noopener');
-        });
+        void open(shop.url);
       });
       section.append(link);
     }
@@ -132,4 +130,3 @@ interface TabCreator {
 export async function openShopTab(url: string, tabsApi: TabCreator = chrome.tabs): Promise<void> {
   await tabsApi.create({ active: true, url });
 }
-

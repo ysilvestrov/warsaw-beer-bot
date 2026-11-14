@@ -1,7 +1,7 @@
 # Магазин зі списку «Supported shops»: Ctrl/Cmd- і Shift-клік лишаються за браузером
 
 Дата: 2026-11-14
-Статус: чекає на затвердження
+Статус: затверджено 2026-11-14
 Spec-review: agy/gemini-4-argon @ 72de32a (author: claude) — 0 findings: 0 fixed, 0 rejected (fallback: codex — usage limit until 2026-11-15)
 
 Builder check (2026-11-14): питань, на які може відповісти лише власник, крім ручної перевірки

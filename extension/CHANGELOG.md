@@ -26,6 +26,7 @@
 ## [Unreleased]
 
 - Choosing a shop in the popup's “Supported shops” list now opens it in a new tab. Before, every shop opened in its own browser window, and after a few picks you had a pile of windows to close.
+- Ctrl-click (Cmd-click on a Mac) on a shop in the “Supported shops” list now opens it in a background tab, as with any link; Shift-click opens it in a new window. Before, every click opened the shop in a new tab and switched you to it.
 
 ## [0.22.0] - 2026-11-08
 

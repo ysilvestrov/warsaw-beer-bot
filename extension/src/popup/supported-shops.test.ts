@@ -84,53 +84,40 @@ describe('renderSupportedShops', () => {
 
       expect(event.defaultPrevented).toBe(true);
       expect(create).toHaveBeenCalledTimes(1);
-      expect(create).toHaveBeenCalledWith({ active: true, url: link.href });
+      expect(create).toHaveBeenCalledWith({ active: true, url: 'https://beerfreak.org/' });
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it('does not prevent default or call custom opener on Ctrl/Cmd/Shift clicks, but intercepts Alt+click', () => {
+  it.each([
+    ['Ctrl', { ctrlKey: true }],
+    ['Cmd', { metaKey: true }],
+    ['Shift', { shiftKey: true }],
+  ])('leaves a %s+click to the browser: no preventDefault, no opener call', (_name, modifier) => {
     const container = document.createElement('div');
     const open = vi.fn();
     renderSupportedShops(container, ['en-GB'], open);
     const link = container.querySelector<HTMLAnchorElement>('.shop-link')!;
 
-    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
-      const event = new MouseEvent('click', { ...modifier, cancelable: true });
-      link.dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(false);
-      expect(open).not.toHaveBeenCalled();
-    }
+    const event = new MouseEvent('click', { ...modifier, cancelable: true });
+    link.dispatchEvent(event);
 
-    const altEvent = new MouseEvent('click', { altKey: true, cancelable: true });
-    link.dispatchEvent(altEvent);
-    expect(altEvent.defaultPrevented).toBe(true);
-    expect(open).toHaveBeenCalledTimes(1);
-    expect(open).toHaveBeenCalledWith(link.href);
+    expect(event.defaultPrevented).toBe(false);
+    expect(open).not.toHaveBeenCalled();
   });
 
-  it('falls back to window.open when tabs.create rejects through the default opener', async () => {
-    const create = vi.fn(async () => { throw new Error('tab create failed'); });
-    vi.stubGlobal('chrome', { tabs: { create } });
-    const originalOpen = window.open;
-    const windowOpen = vi.fn();
-    window.open = windowOpen;
-    try {
-      const container = document.createElement('div');
-      renderSupportedShops(container, ['en-GB']);
-      const link = container.querySelector<HTMLAnchorElement>('.shop-link')!;
+  it('intercepts an Alt+click like a plain click, so the browser does not download the page', () => {
+    const container = document.createElement('div');
+    const open = vi.fn();
+    renderSupportedShops(container, ['en-GB'], open);
+    const link = container.querySelector<HTMLAnchorElement>('.shop-link')!;
 
-      link.click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    const event = new MouseEvent('click', { altKey: true, cancelable: true });
+    link.dispatchEvent(event);
 
-      expect(create).toHaveBeenCalledTimes(1);
-      expect(windowOpen).toHaveBeenCalledTimes(1);
-      expect(windowOpen).toHaveBeenCalledWith(link.href, '_blank', 'noopener');
-    } finally {
-      window.open = originalOpen;
-      vi.unstubAllGlobals();
-    }
+    expect(event.defaultPrevented).toBe(true);
+    expect(open.mock.calls).toEqual([['https://beerfreak.org/']]);
   });
 });
 
@@ -149,4 +136,3 @@ describe('openShopTab', () => {
     await expect(openShopTab('https://beerfreak.org/', { create })).rejects.toThrow('tab unavailable');
   });
 });
-
