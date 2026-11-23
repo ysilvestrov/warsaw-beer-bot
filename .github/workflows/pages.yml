@@ -31,24 +31,30 @@ jobs:
       - run: npm ci
       - run: npm run render-docs
       - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - id: upload
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
-      # 2026-11-23: deploy-pages lists the run's artifacts ~0.3 s after the
-      # upload is finalized and does not retry. Twice in a row the listing
+      # 2026-11-23 (#1000): deploy-pages lists the run's artifacts ~0.3 s after
+      # the upload is finalized and does not retry. Twice in a row the listing
       # still said "Found 0 artifact(s)" (it showed the artifact a minute
-      # later), and a re-run cannot recover: it adds a second artifact and
-      # fails on "Multiple artifacts". Wait until the listing shows it.
+      # later). Wait until the listing shows THIS job's artifact, by its id:
+      # a re-run already has the earlier attempt's artifact in the listing.
+      # (A re-run still fails in deploy-pages on "Multiple artifacts"; start
+      # a fresh run with workflow_dispatch instead.) A failed API call is
+      # retried like a miss, not fatal.
       - name: Wait until the artifact is listed
         env:
           GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
         run: |
+          : "${ARTIFACT_ID:?upload-pages-artifact gave no artifact_id}"
           for i in $(seq 1 24); do
-            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages" --jq '.total_count')
-            if [ "$n" -ge 1 ]; then echo "listed after $i check(s): $n"; exit 0; fi
+            ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages" --jq '.artifacts[].id') || ids=""
+            if printf '%s\n' "$ids" | grep -qx "$ARTIFACT_ID"; then echo "artifact $ARTIFACT_ID listed after $i check(s)"; exit 0; fi
             sleep 5
           done
-          echo "::error::github-pages artifact not listed after 2 minutes"
+          echo "::error::github-pages artifact $ARTIFACT_ID not listed after 2 minutes"
           exit 1
       - id: deployment
         uses: actions/deploy-pages@v5
