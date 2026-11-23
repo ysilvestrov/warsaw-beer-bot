@@ -28,6 +28,6 @@ jobs:
 
     steps:
       # A commit, not a tag, because this action receives the key.
-      - uses: ysilvestrov/detent@47db7e88f94f97a2cc545e2a0b0d4cb351ac654a # v0.5.0
+      - uses: ysilvestrov/detent@14a3d8d592e82988b28ef06b1a03a4f723df4da7 # v0.5.1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}

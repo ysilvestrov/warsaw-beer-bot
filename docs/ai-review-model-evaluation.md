@@ -53,7 +53,7 @@ From detent 0.5.0 a replay also takes the following.
 - `--find-only --save-findings <file>`, then `--verify-from <file>`, judges saved findings. It is the only way to compare judges without find's variance.
 - `AI_REVIEW_OPENROUTER_ONLY` and `AI_REVIEW_VERIFY_OPENROUTER_ONLY`, or `prReview.openrouterOnly` `{find, verify}` in `detent.json`, pin the host per stage (precondition 2). With another provider they exit 2.
 - `AI_REVIEW_FIND_MAX_TOKENS` and `AI_REVIEW_FIND_REASONING` tune find for a model that spends its limit on reasoning. They work in a replay only: a real review keeps 8,000.
-- `AI_REVIEW_CACHE=on` keeps the paid cache writes that are off by default on direct OpenAI for `gpt-5.6-sol`, `gpt-6.1-terra` and `gpt-6.1-sol`. Spend measured with and without them is not the same number.
+- `AI_REVIEW_CACHE=on` keeps the paid cache writes that are off by default on direct OpenAI for `gpt-5.6-sol`, `gpt-6.1-terra`, `gpt-6.1-sol` and, from detent 0.5.1, `gpt-6.2-sol`. Spend measured with and without them is not the same number.
 
 A whole pass against a spend ceiling is `scripts/eval/funnel.mjs` in detent, and `scripts/eval/summary.mjs` prints its tables.
 
@@ -182,8 +182,8 @@ starved context will recommend the wrong model.
 
 Prices seen 2026-09-22, for sizing only — recheck before spending on them: DeepSeek Pro
 $0.60/$1.80, GLM 5.3 FlashX $0.37/$1.25, DeepSeek Flash $0.12/$0.48, Kimi K2.6 $0.95/$4.00.
-Against the shipped default (`gpt-5.6-sol`, $4/$20) the headroom is real; against `terra`
-($2/$12) it is a factor of a few, not an order of magnitude.
+Against the shipped default (`gpt-6.2-sol` since detent 0.5.1, $2/$10, about `terra`'s $2/$12) the
+headroom is a factor of a few, not an order of magnitude; against the earlier `gpt-5.6-sol` ($4/$20) it was larger.
 
 **Take one OpenRouter account, not one account per vendor.** One key, one balance, one
 OpenAI-compatible endpoint, so `OPENAI_API_ENDPOINT` + `AI_REVIEW_MODEL` reach every
