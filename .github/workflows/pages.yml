@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -33,5 +34,21 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
+      # 2026-11-23: deploy-pages lists the run's artifacts ~0.3 s after the
+      # upload is finalized and does not retry. Twice in a row the listing
+      # still said "Found 0 artifact(s)" (it showed the artifact a minute
+      # later), and a re-run cannot recover: it adds a second artifact and
+      # fails on "Multiple artifacts". Wait until the listing shows it.
+      - name: Wait until the artifact is listed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 24); do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=github-pages" --jq '.total_count')
+            if [ "$n" -ge 1 ]; then echo "listed after $i check(s): $n"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::github-pages artifact not listed after 2 minutes"
+          exit 1
       - id: deployment
         uses: actions/deploy-pages@v5
