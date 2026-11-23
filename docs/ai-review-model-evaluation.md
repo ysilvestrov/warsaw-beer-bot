@@ -971,3 +971,67 @@ Spend was $0.89 for eight calls. OpenRouter's activity page, read before the las
 showed $5.81 and 68 requests against $5.455 and 64 in the records. The gap of $0.355 and four
 requests sits in the bar for 2026-11-03, before the records start. It looks like probes, not
 confirmed, and if so it is also missing from the big test's $27.48.
+
+## 2026-11-23, `gpt-6.2-sol` — the default moves to `gpt-6.2-sol` + `gpt-6.2-sol`
+
+The trigger was OpenAI's notice of 2026-11-23: `gpt-5.6-sol`'s promotional $4 / $0.40 / $20 ends
+on 2026-11-30. The pricing page says "available until November 30, 2026" with no time zone. From
+2026-12-01 the price is $5 / $0.50 / $30, and the notice recommends `gpt-6.2-sol` at
+$2 / $0.10 / $10 (write $2.50, read from the page the same day). This corrects the entry above,
+which said the promo ran "through 2026-11-21".
+
+Records, saved findings, blind scores, grader notes and the key are in `ysilvestrov/detent`
+under `docs/eval/2026-11/gpt-6.2-sol/`. The detent change is specified in
+`docs/specs/2026-11/2026-11-23-gpt-5.6-sol-promo-end-design.md` there. Spend: ≈$8.63 of a $10
+ceiling the owner approved before the run, at list.
+
+**What ran.** It ran on detent 0.5.0, the version this repo's workflow pins, whose `src/pr-review`
+is unchanged on detent's `main`. The baseline `gpt-5.6-sol` + `gpt-5.5` was re-measured in the same
+session as full runs: three on #418 at `584aa661`, three on #930 at `a5926a74`, and one on each of
+#344, #352, #356 and #358. The candidate's find ran the same draws with `--find-only
+--save-findings`. Each saved file was then judged twice with `--verify-from`, by `gpt-6.2-sol` and
+by `gpt-5.5`, so **both candidate rows rest on the same three find draws**. Paid cache writes were
+off for every model through `AI_REVIEW_CACHE_OFF_MODELS`. The first `gpt-6.2-sol` call
+showed the switch accepted, with no 400, `finishReason: stop`, 5.4k of the 8,000 limit and 0
+written tokens. Section 5: only test files went diff-only, on all six PRs.
+
+**Grading.** Three blind subagents graded, one each for #418, #930 and the corpus, by detent's
+`scripts/eval/grader-brief.md` with D5 read broadly. Ids were anonymised by the pass's own
+`anon.py`, not `anonymize.mjs`, which is tied to the big test's batch numbers. The agent that
+ran the pass checked the corpus grader's two flagged calls against the tree and agreed with both:
+W7 in a baseline item and T7 in the candidate's stay `unfalsifiable`. The owner has not reviewed
+the scores.
+
+| Find + verify | #418, of 5, per draw | #930, of 3, per draw | Corpus: published / real / false / unfalsifiable | First review #418 | #930 |
+|---|---|---|---|---|---|
+| `gpt-5.6-sol` + `gpt-5.5` | 5, 4, 5 | 2, 2, 2 | 11 / 9 / 0 / 2 | $0.46; $0.56 from Dec 1 | $0.40; $0.50 |
+| `gpt-6.2-sol` + `gpt-6.2-sol` | 5, 5, 5 | 3, 3, 3 | 32 / 19 / 0 / 13 | $0.19 | $0.22 |
+| `gpt-6.2-sol` + `gpt-5.5` | 5, 5, 5 | 3, 3, 3 | 35 / 20 / 0 / 15 | $0.47 | $0.47 |
+
+Unions over three draws: 5/5 on #418 for all three. On #930 it is 3/3 for all three, because the
+baseline misses a different defect each draw (R3, R3, R2). Costs are means of the draws at list,
+uncached. The baseline's December figure re-prices its own measured tokens.
+
+**Judges.** On the 15-entry verify corpus, both `gpt-6.2-sol` and `gpt-5.5` scored 15/15 in each of
+three draws, at 115.9k→3.8k tokens against 115.9k→10.0k ($0.27 against $0.66). The `gpt-6.2-sol`
+figure is computed from tokens, because the script had no price for it, and it ran without the
+cache-off switch. On identical gated findings the two judges differed in 11 verdicts of 133, 6 one
+way and 5 the other, all `confirmed` against `out_of_scope`.
+
+- **The rule passed, and the owner decided the volume separately.** The rule was set before the
+  numbers: any `false` rejects; switch only if the per-draw median is at least the baseline's on
+  both #418 and #930; a tie switches, because the baseline gets dearer on Dec 1. `gpt-6.2-sol`
+  meets it on both probes. But its find raises 16–18 findings a draw against 4–10 and publishes
+  11–16 a PR against 3–6. On the corpus, 13 of its 32 published are `unfalsifiable`, against 2 of
+  11. The rule did not anticipate that, so it went to the owner, who chose `gpt-6.2-sol` +
+  `gpt-6.2-sol` on 2026-11-23.
+- **`gpt-5.5` as judge buys nothing here.** It gives the same recall, publishes the same volume and
+  lets through no less noise, at about the baseline's price.
+- **#418 is a tie within noise; #930 carries the difference.**
+- **The baseline drifted since 2026-11-05.** On #418 it went 3, 5, 4 → 5, 4, 5, and on the corpus
+  17 → 11 published. That is section 4 again.
+- **`gpt-6.2-sol` reasons less than the incumbent and finds more.** It used 1.3–2.3k reasoning
+  tokens a find call against 2.5–4.1k.
+
+**Not measured:** the cost of the extra findings per PR (more fix rounds, more reruns), any project
+but this one, the `balanced` and `anthropic` profiles again, and more than one corpus draw.
