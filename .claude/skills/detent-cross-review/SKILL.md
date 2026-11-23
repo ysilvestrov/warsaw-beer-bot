@@ -22,6 +22,8 @@ You are Claude: pass --author claude.
 
 Once per PR or spec. Not after fixes in an open PR, not after amendments to an approved spec.
 
+`detent pr-review` in CI does not replace this review: it complements it on every push.
+
 A PR that changes only documentation is not reviewed: put `Cross-review: skipped (docs-only)` in
 its description.
 

@@ -1,55 +1,55 @@
 {
-  "detentVersion": "0.3.0",
+  "detentVersion": "0.5.1",
   "files": {
     ".agents/skills/detent-cross-review/SKILL.md": {
-      "sha256": "cb186faa68ff17fcb79ad9fa054f0c764455114566ff037faf8cc75d70944e70",
-      "version": "0.3.0"
+      "sha256": "7f813f324ec06f5f429b20ec3b04421fa5e5761fd668caf0700e9d984a8e37ce",
+      "version": "0.5.1"
     },
     ".agents/skills/detent-design-spec/SKILL.md": {
       "sha256": "a66e1873c601ab5e64670e1a07743d0d1d75490b4e1f41e0800c26415e259692",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".agents/skills/detent-design-spec/spec-format.md": {
       "sha256": "6f7b5655feffa34545d88480d6639863e968416fe487ef389dca91dd795d066d",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".agents/skills/detent-dev-cycle/SKILL.md": {
       "sha256": "95ca1a70e6091c9a164f1d12f86d88cb9eb27be4adebecdf7a0355e910864b77",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".agents/skills/detent-pr-slicing/SKILL.md": {
       "sha256": "4d3878c788fed56fa4b689e3f00c4fad00fe4ea2740c6cac6c3ea7fd046ef9cb",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".claude/skills/detent-cross-review/SKILL.md": {
-      "sha256": "e8d3159842babcb9fcd27cdad6dd3fedcb73c24a903f2f059de558b23d1278c5",
-      "version": "0.3.0"
+      "sha256": "2adc09e2f72c8cb290286ad8444253a6076aa5dde75d7004172f8feb57321873",
+      "version": "0.5.1"
     },
     ".claude/skills/detent-design-spec/SKILL.md": {
       "sha256": "a66e1873c601ab5e64670e1a07743d0d1d75490b4e1f41e0800c26415e259692",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".claude/skills/detent-design-spec/spec-format.md": {
       "sha256": "6f7b5655feffa34545d88480d6639863e968416fe487ef389dca91dd795d066d",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".claude/skills/detent-dev-cycle/SKILL.md": {
       "sha256": "95ca1a70e6091c9a164f1d12f86d88cb9eb27be4adebecdf7a0355e910864b77",
-      "version": "0.3.0"
+      "version": "0.5.1"
     },
     ".claude/skills/detent-pr-slicing/SKILL.md": {
       "sha256": "4d3878c788fed56fa4b689e3f00c4fad00fe4ea2740c6cac6c3ea7fd046ef9cb",
-      "version": "0.3.0"
+      "version": "0.5.1"
     }
   },
   "blocks": {
     "AGENTS.md": {
-      "sha256": "a8989b9f5347bbc3d559f82832b1ec4d5bb98d62b4b38706f38246f85900ac73",
-      "version": "0.3.0"
+      "sha256": "b30422f166c6a19fab6c01447cee606e9568e4b22091b4016e7ccdf0a95a0605",
+      "version": "0.5.1"
     },
     "CLAUDE.md": {
-      "sha256": "a8989b9f5347bbc3d559f82832b1ec4d5bb98d62b4b38706f38246f85900ac73",
-      "version": "0.3.0"
+      "sha256": "b30422f166c6a19fab6c01447cee606e9568e4b22091b4016e7ccdf0a95a0605",
+      "version": "0.5.1"
     }
   }
 }
