@@ -41,6 +41,33 @@ describe('runOverlay', () => {
     expect(cards[0].el.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
   });
 
+  // #994: the badge-cache key used to drop Cyrillic, so both cards below shared the key
+  // "|" and the cached second pass showed one beer's rating on the other.
+  it('keeps each Cyrillic beer of one brewery on its own result across a cached second pass', async () => {
+    const found = (name: string, id: number, rating: number): MatchResult => ({
+      raw: { brewery: 'Ципа', name },
+      matched_beer: { id, name, brewery: 'Ципа', rating_global: rating, untappd_id: id },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    });
+    const answers: Record<string, MatchResult> = {
+      'Орєнтал': found('Орєнтал', 501, 3.6),
+      'з огірками': found('з огірками', 502, 4.1),
+    };
+    const sendMatch = vi.fn(async (beers: RawBeer[]) => beers.map((b) => answers[b.name]));
+    const pass = (): Card[] => [
+      { el: cardEl(), brewery: 'Ципа', name: 'Орєнтал' },
+      { el: cardEl(), brewery: 'Ципа', name: 'з огірками' },
+    ];
+
+    await runOverlay(document, adapterFor(pass()), sendMatch);
+    document.body.innerHTML = '';
+    const second = pass();
+    await runOverlay(document, adapterFor(second), sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledTimes(1);
+    expect(second.map((c) => c.el.textContent)).toEqual(['3.6', '4.1']);
+  });
+
   it('uses the cache and does not call sendMatch for cached cards', async () => {
     const card: Card = { el: cardEl(), brewery: 'PINTA', name: 'Hazy Morning' };
     await setCached(normalizeKey('PINTA', 'Hazy Morning'), drunkResult('PINTA', 'Hazy Morning'));
