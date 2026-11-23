@@ -210,7 +210,7 @@ describe('extramagazin adapter', () => {
     `);
 
     expect(cards.map(({ brewery, name }) => normalizeKey(brewery, name))).toEqual([
-      'carlsberg ukraine|1715 lvivske 1715 bezalkoholne 0 0',
+      'carlsberg ukraine|львівське 1715 безалкогольне lvivske 1715 bezalkoholne 0 0',
       'carlsberg ukraine|1715',
     ]);
   });
@@ -621,12 +621,12 @@ describe('extramagazin adapter', () => {
 
     const opilliaKeys = opilliaCards.map((c) => normalizeKey(c.brewery, c.name));
     expect(opilliaKeys).toEqual([
-      'opillia|koryfei',
-      'opillia|bilyi kelykh',
-      'opillia|khmelevar',
-      'opillia|kvas bilyi',
-      'opillia|kvas chornyi',
-      'opillia|kvas domashnii',
+      'опілля opillia|корифей koryfei',
+      'опілля opillia|білий келих bilyi kelykh',
+      'опілля opillia|хмелевар khmelevar',
+      'опілля opillia|квас білий kvas bilyi',
+      'опілля opillia|квас чорний kvas chornyi',
+      'опілля opillia|квас домашній kvas domashnii',
     ]);
     expect(new Set(opilliaKeys).size).toBe(6);
 
@@ -637,9 +637,9 @@ describe('extramagazin adapter', () => {
     `);
     const genericKeys = genericCyrillicCards.map((c) => normalizeKey(c.brewery, c.name));
     expect(genericKeys).toEqual([
-      'opillia|koryfei',
-      'opillia|bilyi kelykh',
-      'opillia|svitle 0 0',
+      'опілля opillia|корифей koryfei',
+      'опілля opillia|білий келих bilyi kelykh',
+      'опілля opillia|світле svitle 0 0',
     ]);
   });
 
@@ -651,8 +651,8 @@ describe('extramagazin adapter', () => {
 
     expect(cards.map(({ name }) => name)).toEqual(['Білий IPA (Bilyi)', 'Чорний IPA (Chornyi)']);
     expect(cards.map(({ brewery, name }) => normalizeKey(brewery, name))).toEqual([
-      'opillia|ipa bilyi',
-      'opillia|ipa chornyi',
+      'опілля opillia|білий ipa bilyi',
+      'опілля opillia|чорний ipa chornyi',
     ]);
   });
 
@@ -663,8 +663,8 @@ describe('extramagazin adapter', () => {
     `);
 
     expect(cards.map(({ brewery, name }) => normalizeKey(brewery, name))).toEqual([
-      'opillia|ipa dry hop bilyi',
-      'opillia|ipa dry hop chornyi',
+      'опілля opillia|білий ipa dry hop bilyi',
+      'опілля opillia|чорний ipa dry hop chornyi',
     ]);
   });
 
