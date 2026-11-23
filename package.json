@@ -34,11 +34,11 @@
     "node": ">=24"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.6.0",
+    "@anthropic-ai/sdk": "^1.8.0",
     "@hono/node-server": "^2.1.8",
     "@hono/zod-validator": "^0.9.1",
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^13.2.0",
     "cheerio": "^1.2.0",
     "csv-parse": "^7.0.3",
     "dotenv": "^18.0.10",
@@ -47,7 +47,7 @@
     "node-cron": "^4.6.0",
     "p-queue": "^10.0.0",
     "pino": "^10.4.0",
-    "stream-json": "^3.8.0",
+    "stream-json": "^3.9.0",
     "telegraf": "^4.16.3",
     "tsx": "^4.23.15",
     "undici": "^8.12.4",
