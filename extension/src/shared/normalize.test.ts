@@ -51,4 +51,8 @@ describe('normalizeKey', () => {
   it('treats a Cyrillic combining mark as a separator', () => {
     expect(normalizeKey('', 'ми҃р')).toBe('|ми р');
   });
+
+  it('treats a Cyrillic-script symbol as a separator, keeping only letters', () => {
+    expect(normalizeKey('', 'мир҂')).toBe('|мир');
+  });
 });

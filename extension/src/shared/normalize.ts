@@ -13,8 +13,9 @@ function norm(s: string): string {
     // The same range as before; on Cyrillic it drops a stress accent (за́мок → замок).
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
-    // Any other mark stays a separator, as it always was.
-    .replace(/(?:[^a-z0-9\p{Script=Cyrillic}]|\p{M})+/gu, ' ')
+    // Only Cyrillic letters are kept: a Cyrillic-script mark or symbol (҂, ҃) is a separator,
+    // as is everything else outside a-z0-9, as it always was.
+    .replace(/(?:[^a-z0-9\p{Script=Cyrillic}]|(?!\p{L})\p{Script=Cyrillic})+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
