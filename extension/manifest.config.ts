@@ -17,6 +17,8 @@ const ICONS = {
 const SHOP_MATCHES = [
   'https://beerrepublic.eu/*',
   'https://*.beerrepublic.eu/*',
+  'https://bubblesbeers.com/*',
+  'https://*.bubblesbeers.com/*',
   'https://onemorebeer.pl/*',
   'https://*.onemorebeer.pl/*',
   'https://beerfreak.org/*',

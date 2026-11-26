@@ -10,6 +10,7 @@ import { piwnemosty } from './piwnemosty';
 import { funkyshop } from './funkyshop';
 import { beershop } from './beershop';
 import { extramagazin } from './extramagazin';
+import { bubblesbeers } from './bubblesbeers';
 
 export const ADAPTERS: SiteAdapter[] = [
   beerrepublic,
@@ -23,6 +24,7 @@ export const ADAPTERS: SiteAdapter[] = [
   funkyshop,
   beershop,
   extramagazin,
+  bubblesbeers,
 ];
 
 export function pickAdapter(url: URL): SiteAdapter | null {

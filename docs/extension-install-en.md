@@ -16,7 +16,8 @@ shop pages. The supported shops, grouped by where they ship from, are:
   style label is not mistaken for part of the name
 - **Spain:** [Extra Magazin](https://extramagazin.es/) — localized storefronts for
   Spanish (`/`), Ukrainian (`/uk/`), Polish (`/pl/`), Catalan (`/ca/`), Russian (`/ru/`),
-  and Romanian (`/ro/`) (beer, cider, and kvass sections)
+  and Romanian (`/ro/`) (beer, cider, and kvass sections);
+  [Bubbles Beers](https://bubblesbeers.com/shop/)
 
 To get everything working you need three things: (1) upload your beer
 history to the bot, (2) get an access token, (3) install and configure the

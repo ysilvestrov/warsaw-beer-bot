@@ -22,7 +22,7 @@ describe('supportedShopGroups', () => {
       ['Poland', ['OneMoreBeer', 'Piwne Mosty', 'Funkyshop']],
       ['The Netherlands', ['Beer Republic', 'Bierloods22', 'Hoptimaal']],
       ['Czechia', ['Beershop']],
-      ['Spain', ['Extra Magazin']],
+      ['Spain', ['Extra Magazin', 'Bubbles Beers']],
     ]);
     expect(groups.flatMap(({ shops }) => shops.map(({ id }) => id)).sort())
       .toEqual(ADAPTERS.map(({ id }) => id).sort());

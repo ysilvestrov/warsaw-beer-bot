@@ -4129,7 +4129,20 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `isNonAlcoholicSoftDrinkFamily`), `bebida fermentada` вимагає `kvas` (і не зачіпає
   комбучу/кефір), медовуха й радлер вважаються eligible-напоями, а некласифіковані
   картки без пивної ідентичності на змішаних сторінках тихо пропускаються,
-  домен `extramagazin.es`).
+  домен `extramagazin.es`),
+  `bubblesbeers` (Bubbles Beers WooCommerce SSR — `li.product`, назва з
+  `data-success_message` або видимого `.woocommerce-loop-product__title`
+  (для товарів не в наявності чи змінних товарів без кнопки швидкого додавання),
+  трикомпонентний поділ `Brewery – Name – Style` із канонізацією броварень (collabs split по `x`),
+  префіксний пошук відомих броварень для односегментних назв із обов'язковою межею слова,
+  очищення кінцевого об'єму (`33cl`, `44cl` тощо) як із назви, так і зі стилю;
+  навігаційні категорії магазину (`Maltosas`, `Colaboraciones`, `Novedades`) не
+  підміняють пивний стиль; SLUG_OVERRIDES для специфічних колаборацій і релізів;
+  не-пиво визначається за класами WooCommerce (`product_tag-soda`, `product_cat-packs`
+  тощо), не-пивним брендом на початку назви (`Caja Sorpresa`, `Pack`, `Luno Soda`,
+  `Bubbles Beer Club`), а `isNonBeerPage(url)` фільтрує не-пивні сторінки
+  (`/catas-de-cerveza`, `/blog-de-cerveza`, `/carrito`, `/finalizar-compra`,
+  `/mi-cuenta*`), домен `bubblesbeers.com`).
   `registry.pickAdapter(url)`.
   Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати

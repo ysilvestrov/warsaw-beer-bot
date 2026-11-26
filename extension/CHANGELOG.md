@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Added Bubbles Beers (`bubblesbeers.com`) support across catalog and collection pages, badging craft beers with Untappd check-in history and community ratings while skipping merchandise, tasting packs, and artisan sodas.
 - On winetime and flasker, and for Ukrainian beers on Extra Magazin, a beer with a Cyrillic name could show another beer's rating, typically another beer from the same brewery seen earlier that day. Each beer now keeps its own badge.
 - Added Extra Magazin (`extramagazin.es`) support across its Spanish, Ukrainian, Polish, Catalan, Russian, and Romanian pages, including its beer, cider, and kvass sections, while skipping the supermarket's food, soft-drink, wine, and spirits sections.
 - Added a small refresh button next to “✓ Fully synced” in the popup so you can check for new check-ins on demand, with a brief result (“No new check-ins.” or “Check-ins updated.”) once the check finishes.

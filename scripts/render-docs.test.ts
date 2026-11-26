@@ -86,6 +86,7 @@ describe('renderDocs (real repo files)', () => {
     'Funkyshop',
     'Beershop',
     'Extra Magazin',
+    'Bubbles Beers',
   ];
 
   it('renders all four targets without throwing', () => {

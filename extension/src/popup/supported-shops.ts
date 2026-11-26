@@ -57,6 +57,7 @@ const SHOPS: ShopDefinition[] = [
       en: 'https://extramagazin.es/',
     },
   },
+  { id: 'bubblesbeers', name: 'Bubbles Beers', country: 'Spain', url: 'https://bubblesbeers.com/shop/' },
 ];
 
 function preferredSupportedLanguage(languages: readonly string[]): SupportedLanguage {
